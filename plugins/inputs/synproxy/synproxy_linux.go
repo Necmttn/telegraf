@@ -43,7 +43,7 @@ func (k *Synproxy) getSynproxyStat() (map[string]interface{}, error) {
 	}
 	defer file.Close()
 
-	// Initialise expected fields
+	// Initialize expected fields
 	for _, val := range counters {
 		fields[val] = uint32(0)
 	}

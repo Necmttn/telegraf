@@ -101,7 +101,7 @@ Use `paths` to refine which fields to collect.
   paths = ["HeapMemoryUsage", "NonHeapMemoryUsage", "ObjectPendingFinalizationCount"]
 ```
 
-The preceeding `jvm_memory` `metric` declaration produces the following output:
+The preceding `jvm_memory` `metric` declaration produces the following output:
 
 ```
 jvm_memory HeapMemoryUsage.committed=4294967296,HeapMemoryUsage.init=4294967296,HeapMemoryUsage.max=4294967296,HeapMemoryUsage.used=1750658992,NonHeapMemoryUsage.committed=67350528,NonHeapMemoryUsage.init=2555904,NonHeapMemoryUsage.max=-1,NonHeapMemoryUsage.used=65821352,ObjectPendingFinalizationCount=0 1503762436000000000
@@ -117,7 +117,7 @@ Use `*` wildcards against `mbean` property-key values to create distinct series 
   tag_keys = ["name"]
 ```
 
-Since `name=*` matches both `G1 Old Generation` and `G1 Young Generation`, and `name` is used as a tag, the preceeding `jvm_garbage_collector` `metric` declaration produces two metrics.
+Since `name=*` matches both `G1 Old Generation` and `G1 Young Generation`, and `name` is used as a tag, the preceding `jvm_garbage_collector` `metric` declaration produces two metrics.
 
 ```
 jvm_garbage_collector,name=G1\ Old\ Generation CollectionCount=0,CollectionTime=0 1503762520000000000
@@ -135,7 +135,7 @@ Use `tag_prefix` along with `tag_keys` to add detail to tag names.
   tag_prefix = "pool_"
 ```
 
-The preceeding `jvm_memory_pool` `metric` declaration produces six metrics, each with a distinct `pool_name` tag.
+The preceding `jvm_memory_pool` `metric` declaration produces six metrics, each with a distinct `pool_name` tag.
 
 ```
 jvm_memory_pool,pool_name=Compressed\ Class\ Space PeakUsage.max=1073741824,PeakUsage.committed=3145728,PeakUsage.init=0,Usage.committed=3145728,Usage.init=0,PeakUsage.used=3017976,Usage.max=1073741824,Usage.used=3017976 1503764025000000000
@@ -156,7 +156,7 @@ Use substitutions to create fields and field prefixes with MBean property-keys c
   tag_keys     = ["topic"]
 ```
 
-The preceeding `kafka_topic` `metric` declaration produces a metric per Kafka topic. The `name` Mbean property-key is used as a field prefix to aid in gathering fields together into the single metric.
+The preceding `kafka_topic` `metric` declaration produces a metric per Kafka topic. The `name` Mbean property-key is used as a field prefix to aid in gathering fields together into the single metric.
 
 ```
 kafka_topic,topic=my-topic BytesOutPerSec.MeanRate=0,FailedProduceRequestsPerSec.MeanRate=0,BytesOutPerSec.EventType="bytes",BytesRejectedPerSec.Count=0,FailedProduceRequestsPerSec.RateUnit="SECONDS",FailedProduceRequestsPerSec.EventType="requests",MessagesInPerSec.RateUnit="SECONDS",BytesInPerSec.EventType="bytes",BytesOutPerSec.RateUnit="SECONDS",BytesInPerSec.OneMinuteRate=0,FailedFetchRequestsPerSec.EventType="requests",TotalFetchRequestsPerSec.MeanRate=146.301533938701,BytesOutPerSec.FifteenMinuteRate=0,TotalProduceRequestsPerSec.MeanRate=0,BytesRejectedPerSec.FifteenMinuteRate=0,MessagesInPerSec.FiveMinuteRate=0,BytesInPerSec.Count=0,BytesRejectedPerSec.MeanRate=0,FailedFetchRequestsPerSec.MeanRate=0,FailedFetchRequestsPerSec.FiveMinuteRate=0,FailedFetchRequestsPerSec.FifteenMinuteRate=0,FailedProduceRequestsPerSec.Count=0,TotalFetchRequestsPerSec.FifteenMinuteRate=128.59314292334466,TotalFetchRequestsPerSec.OneMinuteRate=126.71551273850747,TotalFetchRequestsPerSec.Count=1353483,TotalProduceRequestsPerSec.FifteenMinuteRate=0,FailedFetchRequestsPerSec.OneMinuteRate=0,FailedFetchRequestsPerSec.Count=0,FailedProduceRequestsPerSec.FifteenMinuteRate=0,TotalFetchRequestsPerSec.FiveMinuteRate=130.8516148751592,TotalFetchRequestsPerSec.RateUnit="SECONDS",BytesRejectedPerSec.RateUnit="SECONDS",BytesInPerSec.MeanRate=0,FailedFetchRequestsPerSec.RateUnit="SECONDS",BytesRejectedPerSec.OneMinuteRate=0,BytesOutPerSec.Count=0,BytesOutPerSec.OneMinuteRate=0,MessagesInPerSec.FifteenMinuteRate=0,MessagesInPerSec.MeanRate=0,BytesInPerSec.FiveMinuteRate=0,TotalProduceRequestsPerSec.RateUnit="SECONDS",FailedProduceRequestsPerSec.OneMinuteRate=0,TotalProduceRequestsPerSec.EventType="requests",BytesRejectedPerSec.FiveMinuteRate=0,BytesRejectedPerSec.EventType="bytes",BytesOutPerSec.FiveMinuteRate=0,FailedProduceRequestsPerSec.FiveMinuteRate=0,MessagesInPerSec.Count=0,TotalProduceRequestsPerSec.FiveMinuteRate=0,TotalProduceRequestsPerSec.OneMinuteRate=0,MessagesInPerSec.EventType="messages",MessagesInPerSec.OneMinuteRate=0,TotalFetchRequestsPerSec.EventType="requests",BytesInPerSec.RateUnit="SECONDS",BytesInPerSec.FifteenMinuteRate=0,TotalProduceRequestsPerSec.Count=0 1503767532000000000

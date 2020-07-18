@@ -77,7 +77,7 @@ func TestRabbitMQGeneratesMetrics(t *testing.T) {
 
 	queuesMetrics := map[string]interface{}{
 		"consumers":                 3,
-		"consumer_utilisation":      1.0,
+		"consumer_utilization":      1.0,
 		"memory":                    143776,
 		"message_bytes":             3,
 		"message_bytes_ready":       4,
@@ -99,7 +99,7 @@ func TestRabbitMQGeneratesMetrics(t *testing.T) {
 		"messages_redeliver_rate":   2.5,
 		"idle_since":                "2015-11-01 8:22:14",
 		"slave_nodes":               1,
-		"synchronised_slave_nodes":  1,
+		"synchronized_slave_nodes":  1,
 	}
 	compareMetrics(t, queuesMetrics, acc, "rabbitmq_queue")
 

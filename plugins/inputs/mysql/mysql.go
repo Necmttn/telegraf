@@ -166,7 +166,7 @@ func (m *Mysql) Gather(acc telegraf.Accumulator) error {
 		// default to localhost if nothing specified.
 		return m.gatherServer(localhost, acc)
 	}
-	// Initialise additional query intervals
+	// Initialize additional query intervals
 	if !m.initDone {
 		m.InitMysql()
 	}

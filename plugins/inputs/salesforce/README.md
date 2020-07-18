@@ -36,7 +36,7 @@ Each entry is converted to snake\_case and 2 fields are created.
 
 - All measurements have the following tags:
     - host
-    - organization_id (t18 char organisation ID)
+    - organization_id (t18 char organization ID)
 
 
 ### Example Output:

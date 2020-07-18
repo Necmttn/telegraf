@@ -7,7 +7,7 @@ command when running `ntpq -p`.
 
 - remote – The remote peer or server being synced to. “LOCAL” is this local host
 (included in case there are no remote peers or servers available);
-- refid – Where or what the remote peer or server is itself synchronised to;
+- refid – Where or what the remote peer or server is itself synchronized to;
 - st (stratum) – The remote peer or server Stratum
 - t (type) – Type (u: unicast or manycast client, b: broadcast or multicast client,
 l: local reference clock, s: symmetric peer, A: manycast server,

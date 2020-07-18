@@ -52,7 +52,7 @@ func (e *Ethtool) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-// Initialise the Command Tool
+// Initialize the Command Tool
 func (e *Ethtool) Init() error {
 	return e.command.Init()
 }

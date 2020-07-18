@@ -125,7 +125,7 @@ type Queue struct {
 	MessageStats           `json:"message_stats"`
 	Memory                 int64
 	Consumers              int64
-	ConsumerUtilisation    float64 `json:"consumer_utilisation"`
+	ConsumerUtilisation    float64 `json:"consumer_utilization"`
 	Name                   string
 	Node                   string
 	Vhost                  string
@@ -133,7 +133,7 @@ type Queue struct {
 	AutoDelete             bool     `json:"auto_delete"`
 	IdleSince              string   `json:"idle_since"`
 	SlaveNodes             []string `json:"slave_nodes"`
-	SynchronisedSlaveNodes []string `json:"synchronised_slave_nodes"`
+	SynchronisedSlaveNodes []string `json:"synchronized_slave_nodes"`
 }
 
 // Node ...
@@ -588,10 +588,10 @@ func gatherQueues(r *RabbitMQ, acc telegraf.Accumulator) {
 			map[string]interface{}{
 				// common information
 				"consumers":                queue.Consumers,
-				"consumer_utilisation":     queue.ConsumerUtilisation,
+				"consumer_utilization":     queue.ConsumerUtilisation,
 				"idle_since":               queue.IdleSince,
 				"slave_nodes":              len(queue.SlaveNodes),
-				"synchronised_slave_nodes": len(queue.SynchronisedSlaveNodes),
+				"synchronized_slave_nodes": len(queue.SynchronisedSlaveNodes),
 				"memory":                   queue.Memory,
 				// messages information
 				"message_bytes":             queue.MessageBytes,

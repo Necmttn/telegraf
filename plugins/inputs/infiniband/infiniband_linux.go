@@ -53,7 +53,7 @@ func addStats(dev string, port string, stats []rdmamap.RdmaStatEntry, acc telegr
 	acc.AddFields("infiniband", fields, tags)
 }
 
-// Initialise plugin
+// Initialize plugin
 func init() {
 	inputs.Add("infiniband", func() telegraf.Input { return &Infiniband{} })
 }

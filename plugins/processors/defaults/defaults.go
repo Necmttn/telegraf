@@ -33,7 +33,7 @@ func (def *Defaults) SampleConfig() string {
 	return sampleConfig
 }
 
-// Description is a brief description of this processor plugin's behaviour.
+// Description is a brief description of this processor plugin's behavior.
 func (def *Defaults) Description() string {
 	return "Defaults sets default value(s) for specified fields that are not set on incoming metrics."
 }

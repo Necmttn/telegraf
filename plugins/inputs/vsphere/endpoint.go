@@ -920,7 +920,7 @@ func (e *Endpoint) chunkify(ctx context.Context, res *resourceKind, now time.Tim
 				e.log.Debugf("Submitting partial query: %d metrics (%d remaining) of type %s for %s. Total objects %d",
 					len(bucket.MetricId), len(res.metrics)-metricIdx, res.name, e.URL.Host, len(res.objects))
 
-				// Don't send work items if the context has been cancelled.
+				// Don't send work items if the context has been canceled.
 				if ctx.Err() == context.Canceled {
 					return
 				}

@@ -204,7 +204,7 @@ Parameters that can be used with any input plugin:
   Overrides the `precision` setting of the [agent][Agent] for the plugin.
   Collected metrics are rounded to the precision specified as an [interval][].
 
-  When this value is set on a service input, multiple events occuring at the
+  When this value is set on a service input, multiple events occurring at the
   same timestamp may be merged by the output database.
 
 - **collection_jitter**:

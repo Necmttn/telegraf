@@ -104,7 +104,7 @@
     "state": "running",
     "recoverable_slaves": null,
     "memory": 143776,
-    "consumer_utilisation": 1.0,
+    "consumer_utilization": 1.0,
     "consumers": 3,
     "exclusive_consumer_tag": null,
     "effective_policy_definition": [],
@@ -113,7 +113,7 @@
     "slave_nodes":[
       "rabbit@ip-10-1-2-118"
     ],
-    "synchronised_slave_nodes":[
+    "synchronized_slave_nodes":[
       "rabbit@ip-10-1-2-118"
     ]
   }

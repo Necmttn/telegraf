@@ -79,7 +79,7 @@ func (s *Salesforce) SampleConfig() string {
 }
 
 func (s *Salesforce) Description() string {
-	return "Read API usage and limits for a Salesforce organisation"
+	return "Read API usage and limits for a Salesforce organization"
 }
 
 // Reads limits values from Salesforce API

@@ -2058,7 +2058,7 @@ var cephODSPoolStatsDump = `
       "pool_id": 3,
       "recovery": { "degraded_objects": 18446744073709551562,
           "degraded_total": 412,
-          "degrated_ratio": "-13.107"},
+          "degrade_ratio": "-13.107"},
       "recovery_rate": { "recovering_objects_per_sec": 279,
           "recovering_bytes_per_sec": 176401059,
           "recovering_keys_per_sec": 0},

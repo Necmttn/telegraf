@@ -73,7 +73,7 @@ services:
     ports:
       - "1883:1883"
   riemann:
-    image: stealthly/docker-riemann
+    image: stealthy/docker-riemann
     ports:
       - "5555:5555"
   nats:

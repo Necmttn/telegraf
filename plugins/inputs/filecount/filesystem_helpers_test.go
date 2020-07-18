@@ -36,7 +36,7 @@ func TestIsDir(t *testing.T) {
 }
 
 func TestRealFS(t *testing.T) {
-	//test that the default (non-test) empty FS causes expected behaviour
+	//test that the default (non-test) empty FS causes expected behavior
 	var fs fileSystem = osFS{}
 	//the following file exists on disk - and not in our fake fs
 	fileInfo, err := fs.Stat(getTestdataDir() + "/qux")

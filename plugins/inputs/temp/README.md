@@ -18,7 +18,7 @@ Currently supports Linux and Windows.
   - tags:
     - sensor
   - fields:
-    - temp (float, celcius)
+    - temp (float, celsius)
 
 
 ### Troubleshooting

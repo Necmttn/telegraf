@@ -1259,7 +1259,7 @@ func TestParse_TimingsMultipleFieldsWithTemplate(t *testing.T) {
 
 // Tests low-level functionality of timings when multiple fields is enabled
 // but a measurement template hasn't been defined so we can't parse field names
-// In this case the behaviour should be the same as normal behaviour
+// In this case the behavior should be the same as normal behavior
 func TestParse_TimingsMultipleFieldsWithoutTemplate(t *testing.T) {
 	s := NewTestStatsd()
 	s.Templates = []string{}
