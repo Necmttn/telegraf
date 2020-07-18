@@ -1,32 +1,32 @@
-# Lustre Input Plugin
+# Luster Input Plugin
 
-The [Lustre][]® file system is an open-source, parallel file system that supports
+The [Luster][]® file system is an open-source, parallel file system that supports
 many requirements of leadership class HPC simulation environments.
 
-This plugin monitors the Lustre file system using its entries in the proc filesystem.
+This plugin monitors the Luster file system using its entries in the proc filesystem.
 
 ### Configuration
 
 ```toml
-# Read metrics from local Lustre service on OST, MDS
+# Read metrics from local Luster service on OST, MDS
 [[inputs.lustre2]]
-  ## An array of /proc globs to search for Lustre stats
-  ## If not specified, the default will work on Lustre 2.5.x
+  ## An array of /proc globs to search for Luster stats
+  ## If not specified, the default will work on Luster 2.5.x
   ##
   # ost_procfiles = [
-  #   "/proc/fs/lustre/obdfilter/*/stats",
-  #   "/proc/fs/lustre/osd-ldiskfs/*/stats",
-  #   "/proc/fs/lustre/obdfilter/*/job_stats",
+  #   "/proc/fs/luster/obdfilter/*/stats",
+  #   "/proc/fs/luster/osd-ldiskfs/*/stats",
+  #   "/proc/fs/luster/obdfilter/*/job_stats",
   # ]
   # mds_procfiles = [
-  #   "/proc/fs/lustre/mdt/*/md_stats",
-  #   "/proc/fs/lustre/mdt/*/job_stats",
+  #   "/proc/fs/luster/mdt/*/md_stats",
+  #   "/proc/fs/luster/mdt/*/job_stats",
   # ]
 ```
 
 ### Metrics
 
-From `/proc/fs/lustre/obdfilter/*/stats` and `/proc/fs/lustre/osd-ldiskfs/*/stats`:
+From `/proc/fs/luster/obdfilter/*/stats` and `/proc/fs/luster/osd-ldiskfs/*/stats`:
 
 - lustre2
   - tags:
@@ -40,7 +40,7 @@ From `/proc/fs/lustre/obdfilter/*/stats` and `/proc/fs/lustre/osd-ldiskfs/*/stat
     - cache_miss
     - cache_access
 
-From `/proc/fs/lustre/obdfilter/*/job_stats`:
+From `/proc/fs/luster/obdfilter/*/job_stats`:
 
 - lustre2
   - tags:
@@ -66,7 +66,7 @@ From `/proc/fs/lustre/obdfilter/*/job_stats`:
     - jobstats_write_max_size
     - jobstats_write_min_size
 
-From `/proc/fs/lustre/mdt/*/md_stats`:
+From `/proc/fs/luster/mdt/*/md_stats`:
 
 - lustre2
   - tags:
@@ -89,7 +89,7 @@ From `/proc/fs/lustre/mdt/*/md_stats`:
     - samedir_rename
     - crossdir_rename
 
-From `/proc/fs/lustre/mdt/*/job_stats`:
+From `/proc/fs/luster/mdt/*/job_stats`:
 
 - lustre2
   - tags:
@@ -117,7 +117,7 @@ From `/proc/fs/lustre/mdt/*/job_stats`:
 ### Troubleshooting
 
 Check for the default or custom procfiles in the proc filesystem, and reference
-the [Lustre Monitoring and Statistics Guide][guide].  This plugin does not
+the [Luster Monitoring and Statistics Guide][guide].  This plugin does not
 report all information from these files, only a limited set of items
 corresponding to the above metric fields.
 
@@ -129,5 +129,5 @@ lustre2,host=mds1,jobid=42992017,name=wrk-MDT0000 jobstats_close=31798i,jobstats
 
 ```
 
-[lustre]: http://lustre.org/
+[luster]: http://lustre.org/
 [guide]: http://wiki.lustre.org/Lustre_Monitoring_and_Statistics_Guide

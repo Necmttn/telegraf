@@ -84,7 +84,7 @@ preferred authentication methods are different from the *order* in which each
 authentication is checked. Here are the preferred authentication methods:
 
 1. Managed Service Identity (MSI) token
-    - This is the prefered authentication method. Telegraf will automatically
+    - This is the preferred authentication method. Telegraf will automatically
       authenticate using this method when running on Azure VMs.
 2. AAD Application Tokens (Service Principals)
     - Primarily useful if Telegraf is writing metrics for other resources.
