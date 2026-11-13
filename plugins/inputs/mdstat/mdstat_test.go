@@ -14,14 +14,14 @@ import (
 func TestFullMdstatProcFile(t *testing.T) {
 	filename := makeFakeMDStatFile([]byte(mdStatFileFull))
 	defer os.Remove(filename)
-	k := MdstatConf{
+	k := Mdstat{
 		FileName: filename,
 	}
 	acc := testutil.Accumulator{}
 	err := k.Gather(&acc)
 	require.NoError(t, err)
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"BlocksSynced":           int64(10620027200),
 		"BlocksSyncedFinishTime": float64(101.6),
 		"BlocksSyncedPct":        float64(94.3),
@@ -39,14 +39,14 @@ func TestFullMdstatProcFile(t *testing.T) {
 func TestMdstatSyncStart(t *testing.T) {
 	filename := makeFakeMDStatFile([]byte(mdStatSyncStart))
 	defer os.Remove(filename)
-	k := MdstatConf{
+	k := Mdstat{
 		FileName: filename,
 	}
 	acc := testutil.Accumulator{}
 	err := k.Gather(&acc)
 	require.NoError(t, err)
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"BlocksSynced":           int64(10620027200),
 		"BlocksSyncedFinishTime": float64(101.6),
 		"BlocksSyncedPct":        float64(1.5),
@@ -65,7 +65,7 @@ func TestFailedDiskMdStatProcFile1(t *testing.T) {
 	filename := makeFakeMDStatFile([]byte(mdStatFileFailedDisk))
 	defer os.Remove(filename)
 
-	k := MdstatConf{
+	k := Mdstat{
 		FileName: filename,
 	}
 
@@ -73,7 +73,7 @@ func TestFailedDiskMdStatProcFile1(t *testing.T) {
 	err := k.Gather(&acc)
 	require.NoError(t, err)
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"BlocksSynced":           int64(5860144128),
 		"BlocksSyncedFinishTime": float64(0),
 		"BlocksSyncedPct":        float64(0),
@@ -92,7 +92,7 @@ func TestEmptyMdStatProcFile1(t *testing.T) {
 	filename := makeFakeMDStatFile([]byte(mdStatFileEmpty))
 	defer os.Remove(filename)
 
-	k := MdstatConf{
+	k := Mdstat{
 		FileName: filename,
 	}
 
@@ -105,7 +105,7 @@ func TestInvalidMdStatProcFile1(t *testing.T) {
 	filename := makeFakeMDStatFile([]byte(mdStatFileInvalid))
 	defer os.Remove(filename)
 
-	k := MdstatConf{
+	k := Mdstat{
 		FileName: filename,
 	}
 

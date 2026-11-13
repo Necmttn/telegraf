@@ -1,12 +1,19 @@
 # Google Cloud PubSub Input Plugin
 
-The GCP PubSub plugin ingests metrics from [Google Cloud PubSub][pubsub]
-and creates metrics using one of the supported [input data formats][].
+This plugin consumes messages from the [Google Cloud PubSub][pubsub] service
+and creates metrics using one of the supported [data formats][data_formats].
+
+⭐ Telegraf v1.10.0
+🏷️ cloud, messaging
+💻 all
+
+[pubsub]: https://cloud.google.com/pubsub
+[data_formats]: /docs/DATA_FORMATS_INPUT.md
 
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -14,12 +21,19 @@ normal plugins:
 2. The CLI options of `--test`, `--test-wait`, and `--once` may not produce
    output for this plugin
 
+## Tracking metric support <!-- @/docs/includes/plugin_tracking_metrics.md -->
+
+This plugin supports [tracking metrics][METRICS.md], which allows the plugin
+to be notified when metrics have been delivered to all outputs, enabling proper
+acknowledgment back to the source.
+
+[METRICS.md]: ../../../docs/METRICS.md#tracking-metrics
+
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -71,7 +85,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
   ## The following are optional Subscription ReceiveSettings in PubSub.
   ## Read more about these values:
-  ## https://godoc.org/cloud.google.com/go/pubsub#ReceiveSettings
+  ## https://godoc.org/cloud.google.com/go/pubsub/v2#ReceiveSettings
 
   ## Optional. Maximum number of seconds for which a PubSub subscription
   ## should auto-extend the PubSub ACK deadline for each message. If less than
@@ -123,9 +137,7 @@ Each plugin agent can listen to one subscription at a time, so you will
 need to run multiple instances of the plugin to pull messages from multiple
 subscriptions/topics.
 
-[pubsub]: https://cloud.google.com/pubsub
 [pubsub create sub]: https://cloud.google.com/pubsub/docs/admin#create_a_pull_subscription
-[input data formats]: /docs/DATA_FORMATS_INPUT.md
 
 ## Metrics
 

@@ -4,23 +4,29 @@ package stackdriver
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/api/distribution"
 	metricpb "google.golang.org/genproto/googleapis/api/metric"
 	monitoredrespb "google.golang.org/genproto/googleapis/api/monitoredres"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/filter"
 	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/plugins/outputs"
@@ -31,7 +37,9 @@ var sampleConfig string
 
 // Stackdriver is the Google Stackdriver config info.
 type Stackdriver struct {
+	Token                config.Secret     `toml:"token"`
 	Project              string            `toml:"project"`
+	QuotaProject         string            `toml:"quota_project"`
 	Namespace            string            `toml:"namespace"`
 	ResourceType         string            `toml:"resource_type"`
 	ResourceLabels       map[string]string `toml:"resource_labels"`
@@ -48,7 +56,7 @@ type Stackdriver struct {
 	counterCache    *counterCache
 	filterCounter   filter.Filter
 	filterGauge     filter.Filter
-	fitlerHistogram filter.Filter
+	filterHistogram filter.Filter
 }
 
 const (
@@ -99,7 +107,7 @@ func (s *Stackdriver) Init() error {
 	if err != nil {
 		return fmt.Errorf("creating gauge filter failed: %w", err)
 	}
-	s.fitlerHistogram, err = filter.Compile(s.MetricHistogram)
+	s.filterHistogram, err = filter.Compile(s.MetricHistogram)
 	if err != nil {
 		return fmt.Errorf("creating histogram filter failed: %w", err)
 	}
@@ -114,7 +122,7 @@ func (*Stackdriver) SampleConfig() string {
 // Connect initiates the primary connection to the GCP project.
 func (s *Stackdriver) Connect() error {
 	if s.Project == "" {
-		return fmt.Errorf("project is a required field for stackdriver output")
+		return errors.New("project is a required field for stackdriver output")
 	}
 
 	if s.Namespace == "" {
@@ -137,7 +145,18 @@ func (s *Stackdriver) Connect() error {
 
 	if s.client == nil {
 		ctx := context.Background()
-		client, err := monitoring.NewMetricClient(ctx, option.WithUserAgent(internal.ProductToken()))
+
+		options := []option.ClientOption{
+			option.WithUserAgent(internal.ProductToken()),
+			option.WithQuotaProject(s.QuotaProject),
+		}
+
+		if !s.Token.Empty() {
+			ts := &secretTokenSource{secret: &s.Token}
+			options = append(options, option.WithTokenSource(ts))
+		}
+
+		client, err := monitoring.NewMetricClient(ctx, options...)
 		if err != nil {
 			return err
 		}
@@ -151,10 +170,8 @@ func (s *Stackdriver) Connect() error {
 // made to avoid modifying the input metric slice since doing so is not
 // allowed.
 func sorted(metrics []telegraf.Metric) []telegraf.Metric {
-	batch := make([]telegraf.Metric, 0, len(metrics))
-	for i := len(metrics) - 1; i >= 0; i-- {
-		batch = append(batch, metrics[i])
-	}
+	batch := slices.Clone(metrics)
+	slices.Reverse(batch)
 	sort.Slice(batch, func(i, j int) bool {
 		return batch[i].Time().Before(batch[j].Time())
 	})
@@ -184,10 +201,9 @@ func (tsb timeSeriesBuckets) Add(m telegraf.Metric, f []*telegraf.Field, ts *mon
 	tsb[k] = s
 }
 
-// Split metrics up by timestamp and send to Google Cloud Stackdriver
 func (s *Stackdriver) Write(metrics []telegraf.Metric) error {
 	metricBatch := make(map[int64][]telegraf.Metric)
-	timestamps := []int64{}
+	timestamps := make([]int64, 0, len(metrics))
 	for _, metric := range sorted(metrics) {
 		timestamp := metric.Time().UnixNano()
 		if existingSlice, ok := metricBatch[timestamp]; ok {
@@ -199,10 +215,10 @@ func (s *Stackdriver) Write(metrics []telegraf.Metric) error {
 	}
 
 	// sort the timestamps we collected
-	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+	slices.Sort(timestamps)
 
-	s.Log.Debugf("received %d metrics\n", len(metrics))
-	s.Log.Debugf("split into %d groups by timestamp\n", len(metricBatch))
+	s.Log.Debugf("received %d metrics", len(metrics))
+	s.Log.Debugf("split into %d groups by timestamp", len(metricBatch))
 	for _, timestamp := range timestamps {
 		if err := s.sendBatch(metricBatch[timestamp]); err != nil {
 			return err
@@ -212,7 +228,9 @@ func (s *Stackdriver) Write(metrics []telegraf.Metric) error {
 	return nil
 }
 
-// Write the metrics to Google Cloud Stackdriver.
+// sendBatch writes one timestamp group in chunks of at most 200 time series.
+// Permanently rejected chunks are dropped so the following chunks are still
+// sent; a retryable failure is returned so Telegraf replays the batch.
 func (s *Stackdriver) sendBatch(batch []telegraf.Metric) error {
 	ctx := context.Background()
 
@@ -226,7 +244,7 @@ func (s *Stackdriver) sendBatch(batch []telegraf.Metric) error {
 		if s.filterGauge != nil && s.filterGauge.Match(m.Name()) {
 			metricType = telegraf.Gauge
 		}
-		if s.fitlerHistogram != nil && s.fitlerHistogram.Match(m.Name()) {
+		if s.filterHistogram != nil && s.filterHistogram.Match(m.Name()) {
 			metricType = telegraf.Histogram
 		}
 
@@ -236,21 +254,18 @@ func (s *Stackdriver) sendBatch(batch []telegraf.Metric) error {
 			continue
 		}
 
-		// Convert any declared tag to a resource label and remove it from
-		// the metric
+		// Convert any declared tag to a resource label without mutating the
+		// metric so replayed batches retain their original tags.
 		resourceLabels := make(map[string]string, len(s.ResourceLabels)+len(s.TagsAsResourceLabels))
-		for k, v := range s.ResourceLabels {
-			resourceLabels[k] = v
-		}
+		maps.Copy(resourceLabels, s.ResourceLabels)
 		for _, tag := range s.TagsAsResourceLabels {
 			if val, ok := m.GetTag(tag); ok {
 				resourceLabels[tag] = val
-				m.RemoveTag(tag)
 			}
 		}
 
 		if m.Type() == telegraf.Histogram {
-			value, err := s.buildHistogram(m)
+			value, err := buildHistogram(m)
 			if err != nil {
 				s.Log.Errorf("Unable to build distribution from metric %s: %s", m, err)
 				continue
@@ -371,7 +386,7 @@ func (s *Stackdriver) sendBatch(batch []telegraf.Metric) error {
 	for k := range buckets {
 		keys = append(keys, k)
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 
 	for len(buckets) != 0 {
 		// can send up to 200 time series to stackdriver
@@ -393,22 +408,21 @@ func (s *Stackdriver) sendBatch(batch []telegraf.Metric) error {
 
 		// Prepare time series request.
 		timeSeriesRequest := &monitoringpb.CreateTimeSeriesRequest{
-			Name:       fmt.Sprintf("projects/%s", s.Project),
+			Name:       "projects/" + s.Project,
 			TimeSeries: timeSeries,
 		}
 
 		// Create the time series in Stackdriver.
-		err := s.client.CreateTimeSeries(ctx, timeSeriesRequest)
-		if err != nil {
-			if errStatus, ok := status.FromError(err); ok {
-				if errStatus.Code().String() == "InvalidArgument" {
-					s.Log.Warnf("Unable to write to Stackdriver - dropping metrics: %s", err)
-					return nil
-				}
+		if err := s.client.CreateTimeSeries(ctx, timeSeriesRequest); err != nil {
+			// status.Code also handles non-gRPC errors, unlike status.FromError
+			if isRetryable(status.Code(err)) {
+				s.Log.Errorf("Unable to write to Stackdriver: %s", err)
+				return err
 			}
 
-			s.Log.Errorf("Unable to write to Stackdriver: %s", err)
-			return err
+			// Nothing will replay a permanent rejection, so drop this chunk and
+			// continue; the remaining chunks are separate requests.
+			s.Log.Warnf("Unable to write to Stackdriver - dropping metrics: %s", err)
 		}
 	}
 
@@ -461,7 +475,7 @@ func getStackdriverIntervalEndpoints(
 	m telegraf.Metric,
 	f *telegraf.Field,
 	cc *counterCache,
-) (*timestamppb.Timestamp, *timestamppb.Timestamp) {
+) (start, end *timestamppb.Timestamp) {
 	endTime := timestamppb.New(m.Time())
 	var startTime *timestamppb.Timestamp
 	if kind == metricpb.MetricDescriptor_CUMULATIVE {
@@ -473,11 +487,7 @@ func getStackdriverIntervalEndpoints(
 	return startTime, endTime
 }
 
-func getStackdriverTimeInterval(
-	m metricpb.MetricDescriptor_MetricKind,
-	startTime *timestamppb.Timestamp,
-	endTime *timestamppb.Timestamp,
-) (*monitoringpb.TimeInterval, error) {
+func getStackdriverTimeInterval(m metricpb.MetricDescriptor_MetricKind, startTime, endTime *timestamppb.Timestamp) (*monitoringpb.TimeInterval, error) {
 	switch m {
 	case metricpb.MetricDescriptor_GAUGE:
 		return &monitoringpb.TimeInterval{
@@ -512,7 +522,7 @@ func getStackdriverMetricKind(vt telegraf.ValueType) (metricpb.MetricDescriptor_
 	}
 }
 
-func (s *Stackdriver) getStackdriverTypedValue(value interface{}) (*monitoringpb.TypedValue, error) {
+func (s *Stackdriver) getStackdriverTypedValue(value any) (*monitoringpb.TypedValue, error) {
 	if s.MetricDataType == "double" {
 		v, err := internal.ToFloat64(value)
 		if err != nil {
@@ -566,31 +576,35 @@ func (s *Stackdriver) getStackdriverTypedValue(value interface{}) (*monitoringpb
 	}
 }
 
-func (s *Stackdriver) buildHistogram(m telegraf.Metric) (*monitoringpb.TypedValue, error) {
+func buildHistogram(m telegraf.Metric) (*monitoringpb.TypedValue, error) {
 	sumInter, ok := m.GetField("sum")
 	if !ok {
-		return nil, fmt.Errorf("no sum field present")
+		return nil, errors.New("no sum field present")
 	}
 	sum, err := internal.ToFloat64(sumInter)
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert sum value to float64: %w", err)
 	}
-	m.RemoveField("sum")
 
 	countInter, ok := m.GetField("count")
 	if !ok {
-		return nil, fmt.Errorf("no count field present")
+		return nil, errors.New("no count field present")
 	}
 	count, err := internal.ToFloat64(countInter)
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert count value to float64: %w", err)
 	}
-	m.RemoveField("count")
 
 	// Build map of the buckets and their values
-	buckets := make([]float64, 0)
-	bucketCounts := make([]int64, 0)
-	for _, field := range m.FieldList() {
+	fields := m.FieldList()
+	buckets := make([]float64, 0, len(fields))
+	bucketCounts := make([]int64, 0, len(fields))
+	for _, field := range fields {
+		switch field.Key {
+		case "count", "sum":
+			continue
+		}
+
 		// Add the +inf value to bucket counts, no need to define a bound
 		if strings.Contains(strings.ToLower(field.Key), "+inf") {
 			count, err := internal.ToInt64(field.Value)
@@ -615,12 +629,8 @@ func (s *Stackdriver) buildHistogram(m telegraf.Metric) (*monitoringpb.TypedValu
 		bucketCounts = append(bucketCounts, count)
 	}
 
-	sort.Slice(buckets, func(i, j int) bool {
-		return buckets[i] < buckets[j]
-	})
-	sort.Slice(bucketCounts, func(i, j int) bool {
-		return bucketCounts[i] < bucketCounts[j]
-	})
+	slices.Sort(buckets)
+	slices.Sort(bucketCounts)
 
 	// Bucket counts contain the count for a specific bucket, not the running
 	// total like Prometheus histograms use. Loop backwards to determine the
@@ -650,9 +660,12 @@ func (s *Stackdriver) buildHistogram(m telegraf.Metric) (*monitoringpb.TypedValu
 }
 
 func (s *Stackdriver) getStackdriverLabels(tags []*telegraf.Tag) map[string]string {
-	labels := make(map[string]string)
+	labels := make(map[string]string, len(tags))
 	for _, t := range tags {
 		labels[t.Key] = t.Value
+	}
+	for _, key := range s.TagsAsResourceLabels {
+		delete(labels, key)
 	}
 	for k, v := range labels {
 		if len(k) > QuotaStringLengthForLabelKey {
@@ -681,13 +694,56 @@ func (s *Stackdriver) getStackdriverLabels(tags []*telegraf.Tag) map[string]stri
 	return labels
 }
 
+// secretTokenSource bridges a config.Secret to an oauth2.TokenSource,
+// allowing the Google client to fetch fresh tokens from a secret store.
+type secretTokenSource struct {
+	secret *config.Secret
+}
+
+func (s *secretTokenSource) Token() (*oauth2.Token, error) {
+	buf, err := s.secret.Get()
+	if err != nil {
+		return nil, fmt.Errorf("getting credentials token failed: %w", err)
+	}
+	defer buf.Destroy()
+	return &oauth2.Token{
+		AccessToken: buf.String(),
+		TokenType:   "Bearer",
+	}, nil
+}
+
 // Close will terminate the session to the backend, returning error if an issue arises.
 func (s *Stackdriver) Close() error {
+	if s.client == nil {
+		return nil
+	}
 	return s.client.Close()
 }
 
 func newStackdriver() *Stackdriver {
 	return &Stackdriver{}
+}
+
+// isRetryable reports whether replaying a CreateTimeSeries call can plausibly
+// succeed. This is an allowlist of transient conditions rather than a denylist
+// of rejection reasons, so an unrecognised code is dropped as a permanent
+// rejection instead of becoming an infinite retry.
+func isRetryable(code codes.Code) bool {
+	switch code {
+	case codes.Unavailable, // transient backend or connection failure
+		codes.Canceled,          // peer reset the stream; the call context is never cancelled here
+		codes.DeadlineExceeded,  // exceeded the client's call timeout
+		codes.ResourceExhausted, // quota exhausted; succeeds once refilled
+		codes.Aborted,           // concurrency conflict
+		codes.Internal,          // server-side fault
+		codes.Unknown,           // unclassified, including non-gRPC errors
+		codes.Unauthenticated,   // credential refresh or key rotation in flight
+		codes.PermissionDenied,  // IAM grant not yet propagated
+		codes.NotFound:          // project missing or not yet visible
+		return true
+	default:
+		return false
+	}
 }
 
 func init() {

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/influxdata/telegraf"
 )
@@ -25,9 +26,9 @@ type statistics struct {
 	roundTripTimeStats
 }
 
-func (p *Ping) pingToURL(host string, acc telegraf.Accumulator) {
+func (p *Ping) pingToURL(acc telegraf.Accumulator, host string) {
 	tags := map[string]string{"url": host}
-	fields := map[string]interface{}{"result_code": 0}
+	fields := map[string]any{"result_code": 0}
 
 	args := p.args(host)
 	totalTimeout := 60.0
@@ -86,7 +87,12 @@ func (p *Ping) args(url string) []string {
 	args := []string{"-n", strconv.Itoa(p.Count)}
 
 	if p.Timeout > 0 {
-		args = append(args, "-w", strconv.FormatFloat(p.Timeout*1000, 'f', 0, 64))
+		timeout := time.Duration(p.Timeout).Seconds()
+		args = append(args, "-w", strconv.FormatFloat(timeout*1000, 'f', 0, 64))
+	}
+
+	if p.Interface != "" {
+		args = append(args, "-S", p.Interface)
 	}
 
 	args = append(args, url)
@@ -99,10 +105,10 @@ func (p *Ping) args(url string) []string {
 // It returns (<transmitted packets>, <received reply>, <received packet>, <average response>, <min response>, <max response>)
 func processPingOutput(out string) (statistics, error) {
 	// So find a line contain 3 numbers except reply lines
-	var statsLine, aproxs []string = nil, nil
+	var statsLine, approxs []string = nil, nil
 	err := errors.New("fatal error processing ping output")
 	stat := regexp.MustCompile(`=\W*(\d+)\D*=\W*(\d+)\D*=\W*(\d+)`)
-	aprox := regexp.MustCompile(`=\W*(\d+)\D*ms\D*=\W*(\d+)\D*ms\D*=\W*(\d+)\D*ms`)
+	approx := regexp.MustCompile(`=\W*(\d+)\D*ms\D*=\W*(\d+)\D*ms\D*=\W*(\d+)\D*ms`)
 	tttLine := regexp.MustCompile(`TTL=\d+`)
 	lines := strings.Split(out, "\n")
 	var replyReceived = 0
@@ -113,8 +119,8 @@ func processPingOutput(out string) (statistics, error) {
 			if statsLine == nil {
 				statsLine = stat.FindStringSubmatch(line)
 			}
-			if statsLine != nil && aproxs == nil {
-				aproxs = aprox.FindStringSubmatch(line)
+			if statsLine != nil && approxs == nil {
+				approxs = approx.FindStringSubmatch(line)
 			}
 		}
 	}
@@ -123,11 +129,9 @@ func processPingOutput(out string) (statistics, error) {
 		packetsTransmitted: 0,
 		replyReceived:      0,
 		packetsReceived:    0,
-		roundTripTimeStats: roundTripTimeStats{
-			min: -1,
-			avg: -1,
-			max: -1,
-		},
+		min:                -1,
+		avg:                -1,
+		max:                -1,
 	}
 
 	// statsLine data should contain 4 members: entireExpression + ( Send, Receive, Lost )
@@ -147,26 +151,26 @@ func processPingOutput(out string) (statistics, error) {
 	stats.replyReceived = replyReceived
 	stats.packetsReceived = packetsReceived
 
-	// aproxs data should contain 4 members: entireExpression + ( min, max, avg )
-	if len(aproxs) != 4 {
+	// approxs data should contain 4 members: entireExpression + ( min, max, avg )
+	if len(approxs) != 4 {
 		return stats, err
 	}
-	min, err := strconv.Atoi(aproxs[1])
+	low, err := strconv.Atoi(approxs[1])
 	if err != nil {
 		return stats, err
 	}
-	max, err := strconv.Atoi(aproxs[2])
+	high, err := strconv.Atoi(approxs[2])
 	if err != nil {
 		return stats, err
 	}
-	avg, err := strconv.Atoi(aproxs[3])
+	avg, err := strconv.Atoi(approxs[3])
 	if err != nil {
 		return statistics{}, err
 	}
 
 	stats.avg = avg
-	stats.min = min
-	stats.max = max
+	stats.min = low
+	stats.max = high
 
 	return stats, err
 }
@@ -176,7 +180,7 @@ func (p *Ping) timeout() float64 {
 	// Add also one second interval
 
 	if p.Timeout > 0 {
-		return p.Timeout + 1
+		return time.Duration(p.Timeout).Seconds() + 1
 	}
 	return 4 + 1
 }

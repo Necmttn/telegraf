@@ -30,10 +30,13 @@ Scoreboard: WW_____W_RW_R_W__RRR____WR_W___WW________W_WW_W_____R__R_WR__WRWR_RR
 `
 
 func TestHTTPApache(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, err := fmt.Fprintln(w, apacheStatus)
-		require.NoError(t, err)
+		if _, err := fmt.Fprintln(w, apacheStatus); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 	}))
 	defer ts.Close()
 
@@ -46,7 +49,7 @@ func TestHTTPApache(t *testing.T) {
 	err := acc.GatherError(a.Gather)
 	require.NoError(t, err)
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"TotalAccesses":        float64(1.29811861e+08),
 		"TotalkBytes":          float64(5.213701865e+09),
 		"CPULoad":              float64(6.51929),

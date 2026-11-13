@@ -1,21 +1,19 @@
 # OpenTSDB Output Plugin
 
-This plugin writes to an OpenTSDB instance using either the "telnet" or Http
-mode.
+This plugin writes metrics to an [OpenTSDB][opentsdb] instance using either
+the telnet or HTTP mode. Using the HTTP API is recommended since OpenTSDB 2.0.
 
-Using the Http API is the recommended way of writing metrics since OpenTSDB 2.0
-To use Http mode, set useHttp to true in config. You can also control how many
-metrics is sent in each http request by setting batchSize in config.
+⭐ Telegraf v0.1.9
+🏷️ datastore
+💻 all
 
-See [the docs](http://opentsdb.net/docs/build/html/api_http/put.html) for
-details.
+[opentsdb]: http://opentsdb.net/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

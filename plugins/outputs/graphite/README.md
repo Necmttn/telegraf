@@ -1,19 +1,21 @@
 # Graphite Output Plugin
 
-This plugin writes to [Graphite][1] via raw TCP.
+This plugin writes metrics to [Graphite][graphite] via TCP. For details on the
+translation between Telegraf Metrics and Graphite output see the
+[Graphite data format][serializer].
 
-For details on the translation between Telegraf Metrics and Graphite output,
-see the [Graphite Data Format][2].
+⭐ Telegraf v0.10.1
+🏷️ datastore
+💻 all
 
-[1]: http://graphite.readthedocs.org/en/latest/index.html
-[2]: ../../../docs/DATA_FORMATS_OUTPUT.md
+[graphite]: http://graphite.readthedocs.org/en/latest/index.html
+[serializer]: /plugins/serializers/graphite/README.md
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -26,8 +28,14 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## If multiple endpoints are configured, the output will be load balanced.
   ## Only one of the endpoints will be written to with each iteration.
   servers = ["localhost:2003"]
+
+  ## Local address to bind when connecting to the server
+  ## If empty or not set, the local address is automatically chosen.
+  # local_address = ""
+
   ## Prefix metrics name
   prefix = ""
+
   ## Graphite output template
   ## see https://github.com/influxdata/telegraf/blob/master/docs/DATA_FORMATS_OUTPUT.md
   template = "host.tags.measurement.field"

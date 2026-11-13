@@ -16,12 +16,13 @@ var sampleConfig string
 const defaultAddress = "127.0.0.1:7634"
 
 type HDDTemp struct {
-	Address string
-	Devices []string
-	fetcher Fetcher
+	Address string   `toml:"address"`
+	Devices []string `toml:"devices"`
+
+	fetcher fetcher
 }
 
-type Fetcher interface {
+type fetcher interface {
 	Fetch(address string) ([]gohddtemp.Disk, error)
 }
 
@@ -54,7 +55,7 @@ func (h *HDDTemp) Gather(acc telegraf.Accumulator) error {
 					"source": source,
 				}
 
-				fields := map[string]interface{}{
+				fields := map[string]any{
 					"temperature": disk.Temperature,
 				}
 

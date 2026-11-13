@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -12,7 +13,7 @@ name = InfluxData Repository - Stable
 baseurl = https://repos.influxdata.com/stable/x86_64/main
 enabled = 1
 gpgcheck = 1
-gpgkey = https://repos.influxdata.com/influxdata-archive_compat.key
+gpgkey = https://repos.influxdata.com/influxdata-archive.key
 `
 
 type Container struct {
@@ -22,10 +23,10 @@ type Container struct {
 	packageManager string
 }
 
-// create container with given name and image
+// Create a container with given name and image
 func (c *Container) Create(image string) error {
 	if c.Name == "" {
-		return fmt.Errorf("unable to create container: no name given")
+		return errors.New("unable to create container: no name given")
 	}
 
 	c.client = IncusClient{}
@@ -65,13 +66,15 @@ func (c *Container) Create(image string) error {
 	return nil
 }
 
-// delete the container
+// Delete the container
 func (c *Container) Delete() {
-	_ = c.client.Stop(c.Name)
-	_ = c.client.Delete(c.Name)
+	//nolint:errcheck // cleaning up state so no need to check for error
+	c.client.Stop(c.Name)
+	//nolint:errcheck // cleaning up state so no need to check for error
+	c.client.Delete(c.Name)
 }
 
-// installs the package from configured repos
+// Install the package from configured repos
 func (c *Container) Install(packageName ...string) error {
 	var cmd []string
 	switch c.packageManager {
@@ -82,7 +85,7 @@ func (c *Container) Install(packageName ...string) error {
 	case "dnf":
 		cmd = append([]string{"dnf", "install", "-y"}, packageName...)
 	case "zypper":
-		cmd = append([]string{"zypper", "install", "-y"}, packageName...)
+		cmd = append([]string{"zypper", "--gpg-auto-import-keys", "install", "-y"}, packageName...)
 	}
 
 	err := c.client.Exec(c.Name, cmd...)
@@ -120,14 +123,17 @@ func (c *Container) CheckStatus(serviceName string) error {
 
 	err = c.client.Exec(c.Name, "systemctl", "start", serviceName)
 	if err != nil {
-		_ = c.client.Exec(c.Name, "systemctl", "status", serviceName)
-		_ = c.client.Exec(c.Name, "journalctl", "--no-pager", "--unit", serviceName)
+		//nolint:errcheck // cleaning up state so no need to check for error
+		c.client.Exec(c.Name, "systemctl", "status", serviceName)
+		//nolint:errcheck // cleaning up state so no need to check for error
+		c.client.Exec(c.Name, "journalctl", "--no-pager", "--unit", serviceName)
 		return err
 	}
 
 	err = c.client.Exec(c.Name, "systemctl", "status", serviceName)
 	if err != nil {
-		_ = c.client.Exec(c.Name, "journalctl", "--no-pager", "--unit", serviceName)
+		//nolint:errcheck // cleaning up state so no need to check for error
+		c.client.Exec(c.Name, "journalctl", "--no-pager", "--unit", serviceName)
 		return err
 	}
 
@@ -136,7 +142,7 @@ func (c *Container) CheckStatus(serviceName string) error {
 
 func (c *Container) UploadAndInstall(filename string) error {
 	basename := filepath.Base(filename)
-	destination := fmt.Sprintf("/root/%s", basename)
+	destination := "/root/" + basename
 
 	if err := c.client.Push(c.Name, filename, destination); err != nil {
 		return err
@@ -157,7 +163,7 @@ func (c *Container) configureApt() error {
 		return err
 	}
 
-	err = c.client.Exec(c.Name, "wget", "https://repos.influxdata.com/influxdata-archive_compat.key")
+	err = c.client.Exec(c.Name, "wget", "https://repos.influxdata.com/influxdata-archive.key")
 	if err != nil {
 		return err
 	}
@@ -167,9 +173,10 @@ func (c *Container) configureApt() error {
 		"bash",
 		"-c",
 		"--",
-		"echo '393e8779c89ac8d958f81f942f9ad7fb82a25e133faddaf92e15b16e6ac9ce4c influxdata-archive_compat.key' | "+
-			"sha256sum -c && cat influxdata-archive_compat.key | gpg --dearmor | "+
-			"sudo tee /etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg > /dev/null",
+		"gpg --show-keys --with-fingerprint --with-colons ./influxdata-archive.key 2>&1 | "+
+			"grep -q '^fpr:\\+24C975CBA61A024EE1B631787C3D57159FC2F927:$' "+
+			"&& cat influxdata-archive.key | gpg --dearmor | "+
+			"sudo tee /etc/apt/trusted.gpg.d/influxdata-archive.gpg > /dev/null",
 	)
 	if err != nil {
 		return err
@@ -180,18 +187,21 @@ func (c *Container) configureApt() error {
 		"bash",
 		"-c",
 		"--",
-		"echo 'deb [signed-by=/etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg] https://repos.influxdata.com/debian stable main' | "+
+		"echo 'deb [signed-by=/etc/apt/trusted.gpg.d/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main' | "+
 			"tee /etc/apt/sources.list.d/influxdata.list",
 	)
 	if err != nil {
 		return err
 	}
 
-	_ = c.client.Exec(
+	err = c.client.Exec(
 		c.Name,
 		"bash", "-c", "--",
 		"cat /etc/apt/sources.list.d/influxdata.list",
 	)
+	if err != nil {
+		return err
+	}
 
 	err = c.client.Exec(c.Name, "apt-get", "update")
 	if err != nil {
@@ -212,11 +222,14 @@ func (c *Container) configureYum() error {
 		return err
 	}
 
-	_ = c.client.Exec(
+	err = c.client.Exec(
 		c.Name,
 		"bash", "-c", "--",
 		"cat /etc/yum.repos.d/influxdata.repo",
 	)
+	if err != nil {
+		return err
+	}
 
 	// will return a non-zero return code if there are packages to update
 	return c.client.Exec(c.Name, "bash", "-c", "yum check-update || true")
@@ -233,11 +246,14 @@ func (c *Container) configureDnf() error {
 		return err
 	}
 
-	_ = c.client.Exec(
+	err = c.client.Exec(
 		c.Name,
 		"bash", "-c", "--",
 		"cat /etc/yum.repos.d/influxdata.repo",
 	)
+	if err != nil {
+		return err
+	}
 
 	// will return a non-zero return code if there are packages to update
 	return c.client.Exec(c.Name, "bash", "-c", "dnf check-update || true")
@@ -247,19 +263,23 @@ func (c *Container) configureDnf() error {
 func (c *Container) configureZypper() error {
 	err := c.client.Exec(
 		c.Name,
-		"echo", fmt.Sprintf("%q", influxDataRPMRepo), ">", "/etc/zypp/repos.d/influxdata.repo",
+		"bash", "-c", "--",
+		fmt.Sprintf("echo -e %q > /etc/zypp/repos.d/influxdata.repo", influxDataRPMRepo),
 	)
 	if err != nil {
 		return err
 	}
 
-	_ = c.client.Exec(
+	err = c.client.Exec(
 		c.Name,
 		"bash", "-c", "--",
 		"cat /etc/zypp/repos.d/influxdata.repo",
 	)
+	if err != nil {
+		return err
+	}
 
-	return c.client.Exec(c.Name, "zypper", "refresh")
+	return c.client.Exec(c.Name, "zypper", "--no-gpg-checks", "refresh")
 }
 
 // Determine if the system uses yum or apt for software
@@ -273,7 +293,7 @@ func (c *Container) detectPackageManager() error {
 		return nil
 	}
 
-	err = c.client.Exec(c.Name, "dnf")
+	err = c.client.Exec(c.Name, "dnf", "--version")
 	if err == nil {
 		c.packageManager = "dnf"
 		return nil
@@ -285,30 +305,29 @@ func (c *Container) detectPackageManager() error {
 		return nil
 	}
 
-	return fmt.Errorf("unable to determine package manager")
+	err = c.client.Exec(c.Name, "which", "zypper")
+	if err == nil {
+		c.packageManager = "zypper"
+		return nil
+	}
+
+	return errors.New("unable to determine package manager")
 }
 
 // Configure the system with InfluxData repo
 func (c *Container) setupRepo() error {
-	if c.packageManager == "apt" {
-		if err := c.configureApt(); err != nil {
-			return err
-		}
-	} else if c.packageManager == "yum" {
-		if err := c.configureYum(); err != nil {
-			return err
-		}
-	} else if c.packageManager == "zypper" {
-		if err := c.configureZypper(); err != nil {
-			return err
-		}
-	} else if c.packageManager == "dnf" {
-		if err := c.configureDnf(); err != nil {
-			return err
-		}
+	switch c.packageManager {
+	case "apt":
+		return c.configureApt()
+	case "yum":
+		return c.configureYum()
+	case "zypper":
+		return c.configureZypper()
+	case "dnf":
+		return c.configureDnf()
 	}
 
-	return nil
+	return fmt.Errorf("unknown package manager %q", c.packageManager)
 }
 
 // Wait for the network to come up on a container
@@ -332,5 +351,5 @@ func (c *Container) waitForNetwork() error {
 		attempts++
 	}
 
-	return fmt.Errorf("timeout reached waiting for network on container")
+	return errors.New("timeout reached waiting for network on container")
 }

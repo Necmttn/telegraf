@@ -3,6 +3,7 @@ package graylog
 import (
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ var validTags = map[string]map[string]string{
 	},
 }
 
-var expectedFields = map[string]map[string]interface{}{
+var expectedFields = map[string]map[string]any{
 	"jvm.cl.loaded": {
 		"value": float64(18910),
 	},
@@ -97,21 +98,13 @@ type mockHTTPClient struct {
 // Mock implementation of MakeRequest. Usually returns an http.Response with
 // hard-coded responseBody and statusCode. However, if the request uses a
 // nonstandard method, it uses status code 405 (method not allowed)
-func (c *mockHTTPClient) MakeRequest(req *http.Request) (*http.Response, error) {
+func (c *mockHTTPClient) makeRequest(req *http.Request) (*http.Response, error) {
 	resp := http.Response{}
 	resp.StatusCode = c.statusCode
 
 	// basic error checking on request method
 	allowedMethods := []string{"GET", "HEAD", "POST", "PUT", "DELETE", "TRACE", "CONNECT"}
-	methodValid := false
-	for _, method := range allowedMethods {
-		if req.Method == method {
-			methodValid = true
-			break
-		}
-	}
-
-	if !methodValid {
+	if !slices.Contains(allowedMethods, req.Method) {
 		resp.StatusCode = 405 // Method not allowed
 	}
 
@@ -119,10 +112,10 @@ func (c *mockHTTPClient) MakeRequest(req *http.Request) (*http.Response, error) 
 	return &resp, nil
 }
 
-func (c *mockHTTPClient) SetHTTPClient(_ *http.Client) {
+func (*mockHTTPClient) setHTTPClient(*http.Client) {
 }
 
-func (c *mockHTTPClient) HTTPClient() *http.Client {
+func (*mockHTTPClient) httpClient() *http.Client {
 	return nil
 }
 

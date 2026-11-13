@@ -42,8 +42,8 @@ func TestParsePackageMetrics(t *testing.T) {
 		},
 		{
 			name:    "EmptySlice",
-			metrics: []packageMetricType{},
-			parsed:  []packageMetricType{},
+			metrics: make([]packageMetricType, 0),
+			parsed:  make([]packageMetricType, 0),
 		},
 		{
 			name: "HasDuplicates",
@@ -84,8 +84,8 @@ func TestParseCPUMetrics(t *testing.T) {
 		},
 		{
 			name:    "EmptySlice",
-			metrics: []cpuMetricType{},
-			parsed:  []cpuMetricType{},
+			metrics: make([]cpuMetricType, 0),
+			parsed:  make([]cpuMetricType, 0),
 		},
 		{
 			name: "HasDuplicates",
@@ -121,8 +121,8 @@ func TestParseCPUTimeRelatedMsrMetrics(t *testing.T) {
 	testCases := []parseCPUMetricTestCase{
 		{
 			name:    "EmptySlice",
-			metrics: []cpuMetricType{},
-			parsed:  []cpuMetricType{},
+			metrics: make([]cpuMetricType, 0),
+			parsed:  make([]cpuMetricType, 0),
 		},
 		{
 			name: "NotFound",
@@ -138,7 +138,7 @@ func TestParseCPUTimeRelatedMsrMetrics(t *testing.T) {
 				cpuC0SubstateC02Percent,
 				cpuC0SubstateC0WaitPercent,
 			},
-			parsed: []cpuMetricType{},
+			parsed: make([]cpuMetricType, 0),
 		},
 		{
 			name: "Found",
@@ -155,7 +155,6 @@ func TestParseCPUTimeRelatedMsrMetrics(t *testing.T) {
 				cpuC3StateResidency,
 				cpuC6StateResidency,
 				cpuC7StateResidency,
-				cpuBusyCycles,
 				cpuBusyFrequency,
 
 				// Metrics relying on perf events.
@@ -168,7 +167,6 @@ func TestParseCPUTimeRelatedMsrMetrics(t *testing.T) {
 				cpuC3StateResidency,
 				cpuC6StateResidency,
 				cpuC7StateResidency,
-				cpuBusyCycles,
 				cpuBusyFrequency,
 			},
 		},
@@ -190,8 +188,8 @@ func TestParseCPUPerfMetrics(t *testing.T) {
 	testCases := []parseCPUMetricTestCase{
 		{
 			name:    "EmptySlice",
-			metrics: []cpuMetricType{},
-			parsed:  []cpuMetricType{},
+			metrics: make([]cpuMetricType, 0),
+			parsed:  make([]cpuMetricType, 0),
 		},
 		{
 			name: "NotFound",
@@ -207,7 +205,7 @@ func TestParseCPUPerfMetrics(t *testing.T) {
 				cpuC6StateResidency,
 				cpuBusyFrequency,
 			},
-			parsed: []cpuMetricType{},
+			parsed: make([]cpuMetricType, 0),
 		},
 		{
 			name: "Found",
@@ -252,8 +250,8 @@ func TestParsePackageRaplMetrics(t *testing.T) {
 	testCases := []parsePackageMetricTestCase{
 		{
 			name:    "EmptySlice",
-			metrics: []packageMetricType{},
-			parsed:  []packageMetricType{},
+			metrics: make([]packageMetricType, 0),
+			parsed:  make([]packageMetricType, 0),
 		},
 		{
 			name: "NotFound",
@@ -263,7 +261,7 @@ func TestParsePackageRaplMetrics(t *testing.T) {
 				packageCPUBaseFrequency,
 				packageUncoreFrequency,
 			},
-			parsed: []packageMetricType{},
+			parsed: make([]packageMetricType, 0),
 		},
 		{
 			name: "Found",
@@ -302,8 +300,8 @@ func TestParsePackageMsrMetrics(t *testing.T) {
 	testCases := []parsePackageMetricTestCase{
 		{
 			name:    "EmptySlice",
-			metrics: []packageMetricType{},
-			parsed:  []packageMetricType{},
+			metrics: make([]packageMetricType, 0),
+			parsed:  make([]packageMetricType, 0),
 		},
 		{
 			name: "NotFound",
@@ -313,7 +311,7 @@ func TestParsePackageMsrMetrics(t *testing.T) {
 				packageCurrentDramPowerConsumption,
 				packageThermalDesignPower,
 			},
-			parsed: []packageMetricType{},
+			parsed: make([]packageMetricType, 0),
 		},
 		{
 			name: "Found",
@@ -503,12 +501,12 @@ func TestParseCores(t *testing.T) {
 		{
 			name:       "CoresIsNil",
 			coreGroups: nil,
-			cores:      []int{},
+			cores:      make([]int, 0),
 		},
 		{
 			name:       "CoresIsEmpty",
-			coreGroups: []string{},
-			cores:      []int{},
+			coreGroups: make([]string, 0),
+			cores:      make([]int, 0),
 		},
 		{
 			name:       "Ok",
@@ -598,7 +596,7 @@ func TestParseConfig(t *testing.T) {
 	t.Run("NoMetricsProvided", func(t *testing.T) {
 		p := &PowerStat{
 			// Disable default package metrics.
-			PackageMetrics: []packageMetricType{},
+			PackageMetrics: make([]packageMetricType, 0),
 		}
 
 		require.ErrorContains(t, p.parseConfig(), "no metrics were found in the configuration file")
@@ -610,7 +608,7 @@ func TestParseConfig(t *testing.T) {
 				cpuBusyFrequency,
 			},
 			// Disable default package metrics.
-			PackageMetrics: []packageMetricType{},
+			PackageMetrics: make([]packageMetricType, 0),
 		}
 
 		require.NoError(t, p.parseConfig())
@@ -689,7 +687,7 @@ func (m *mockOptGenerator) generate(cfg optConfig) []ptel.Option {
 
 func TestSampleConfig(t *testing.T) {
 	p := &PowerStat{}
-	require.NotZero(t, p.SampleConfig())
+	require.NotEmpty(t, p.SampleConfig())
 }
 
 func TestInit(t *testing.T) {
@@ -798,7 +796,7 @@ func TestGather(t *testing.T) {
 		acc := &testutil.Accumulator{}
 
 		p := &PowerStat{
-			PackageMetrics: []packageMetricType{},
+			PackageMetrics: make([]packageMetricType, 0),
 		}
 
 		require.NoError(t, p.Gather(acc))
@@ -918,7 +916,7 @@ func TestGather(t *testing.T) {
 
 		p := &PowerStat{
 			// Disables package metrics
-			PackageMetrics: []packageMetricType{},
+			PackageMetrics: make([]packageMetricType, 0),
 			CPUMetrics: []cpuMetricType{
 				cpuFrequency,
 				cpuTemperature,
@@ -974,7 +972,7 @@ func TestGather(t *testing.T) {
 
 		p := &PowerStat{
 			// Disables package metrics
-			PackageMetrics: []packageMetricType{},
+			PackageMetrics: make([]packageMetricType, 0),
 			CPUMetrics: []cpuMetricType{
 				cpuC0SubstateC01Percent,
 				cpuC0SubstateC02Percent,
@@ -1042,7 +1040,7 @@ func TestGather(t *testing.T) {
 
 		p := &PowerStat{
 			// Disables package metrics
-			PackageMetrics: []packageMetricType{},
+			PackageMetrics: make([]packageMetricType, 0),
 			CPUMetrics: []cpuMetricType{
 				cpuC0SubstateC01Percent,
 				cpuC0SubstateC02Percent,
@@ -1232,7 +1230,6 @@ func TestDisableUnsupportedMetrics(t *testing.T) {
 				cpuC1StateResidency,
 				cpuC6StateResidency,
 				cpuBusyFrequency,
-				cpuBusyCycles,
 				cpuTemperature,
 			},
 			PackageMetrics: []packageMetricType{
@@ -1248,14 +1245,12 @@ func TestDisableUnsupportedMetrics(t *testing.T) {
 			Log: logger,
 		}
 
-		err := p.disableUnsupportedMetrics()
-
-		require.NoError(t, err)
+		require.NoError(t, p.disableUnsupportedMetrics())
 		require.Empty(t, p.CPUMetrics)
 		require.Len(t, p.PackageMetrics, 2)
 		require.Contains(t, p.PackageMetrics, packageCurrentPowerConsumption)
 		require.Contains(t, p.PackageMetrics, packageThermalDesignPower)
-		require.Len(t, logger.Warnings(), 8)
+		require.Len(t, logger.Warnings(), 7)
 	})
 
 	t.Run("AperfMperfFlagNotFound", func(t *testing.T) {
@@ -1269,7 +1264,6 @@ func TestDisableUnsupportedMetrics(t *testing.T) {
 				cpuC0StateResidency,
 				cpuC1StateResidency,
 				cpuBusyFrequency,
-				cpuBusyCycles,
 
 				// Metrics not relying on aperfmperf flag
 				cpuTemperature,
@@ -1278,12 +1272,10 @@ func TestDisableUnsupportedMetrics(t *testing.T) {
 			Log: logger,
 		}
 
-		err := p.disableUnsupportedMetrics()
-
-		require.NoError(t, err)
+		require.NoError(t, p.disableUnsupportedMetrics())
 		require.Len(t, p.CPUMetrics, 1)
 		require.Contains(t, p.CPUMetrics, cpuTemperature)
-		require.Len(t, logger.Warnings(), 4)
+		require.Len(t, logger.Warnings(), 3)
 	})
 
 	t.Run("DtsFlagNotFound", func(t *testing.T) {
@@ -1299,7 +1291,7 @@ func TestDisableUnsupportedMetrics(t *testing.T) {
 				// Metrics not relying on dts flag
 				cpuBusyFrequency,
 			},
-			PackageMetrics: []packageMetricType{},
+			PackageMetrics: make([]packageMetricType, 0),
 
 			Log: logger,
 		}
@@ -1592,7 +1584,7 @@ func (m *fetcherMock) GetMaxTurboFreqList(packageID int) ([]ptel.MaxTurboFreq, e
 
 func TestAddCPUMetrics(t *testing.T) {
 	// Disable package metrics when parseConfig method is called.
-	packageMetrics := []packageMetricType{}
+	packageMetrics := make([]packageMetricType, 0)
 
 	t.Run("NoAvailableCPUs", func(t *testing.T) {
 		acc := &testutil.Accumulator{}
@@ -1691,7 +1683,7 @@ func TestAddCPUMetrics(t *testing.T) {
 				// measurement
 				"powerstat_core",
 				// fields
-				map[string]interface{}{
+				map[string]any{
 					"cpu_frequency_mhz": cpuFreq,
 				},
 				// tags
@@ -1754,7 +1746,7 @@ func TestAddCPUMetrics(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_frequency_mhz": cpuFreq,
 			},
 			// tags
@@ -1817,7 +1809,7 @@ func TestAddCPUMetrics(t *testing.T) {
 				// measurement
 				"powerstat_core",
 				// fields
-				map[string]interface{}{
+				map[string]any{
 					"cpu_temperature_celsius": cpuTemp,
 				},
 				// tags
@@ -1883,7 +1875,7 @@ func TestAddCPUMetrics(t *testing.T) {
 				// measurement
 				"powerstat_core",
 				// fields
-				map[string]interface{}{
+				map[string]any{
 					"cpu_busy_frequency_mhz": cpuBusyFreq,
 				},
 				// tags
@@ -1900,7 +1892,7 @@ func TestAddCPUMetrics(t *testing.T) {
 
 func TestAddPerCPUMsrMetrics(t *testing.T) {
 	// Disable package metrics when parseConfig method is called.
-	packageMetrics := []packageMetricType{}
+	packageMetrics := make([]packageMetricType, 0)
 
 	t.Run("WithoutMsrMetrics", func(t *testing.T) {
 		cpuID := 0
@@ -2031,7 +2023,7 @@ func TestAddPerCPUMsrMetrics(t *testing.T) {
 				// measurement
 				"powerstat_core",
 				// fields
-				map[string]interface{}{
+				map[string]any{
 					"cpu_temperature_celsius": cpuTemp,
 				},
 				// tags
@@ -2159,7 +2151,7 @@ func TestAddPerCPUMsrMetrics(t *testing.T) {
 				// measurement
 				"powerstat_core",
 				// fields
-				map[string]interface{}{
+				map[string]any{
 					"cpu_c1_state_residency_percent": c1State,
 				},
 				// flags
@@ -2174,7 +2166,7 @@ func TestAddPerCPUMsrMetrics(t *testing.T) {
 				// measurement
 				"powerstat_core",
 				// fields
-				map[string]interface{}{
+				map[string]any{
 					"cpu_c6_state_residency_percent": c6State,
 				},
 				// flags
@@ -2198,7 +2190,6 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 	c1State := 2.0
 	c3State := 1.5
 	c6State := 1.0
-	busyCycles := 0.5
 
 	acc := &testutil.Accumulator{}
 
@@ -2216,9 +2207,6 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 	// mock getting CPU C6 state residency value.
 	mFetcher.On("GetCPUC6StateResidency", cpuID).Return(c6State, nil).Once()
 
-	// mock getting CPU C0 state residency value, triggered when calling add CPU busy cycle metric.
-	mFetcher.On("GetCPUC0StateResidency", cpuID).Return(busyCycles, nil).Once()
-
 	p := &PowerStat{
 		CPUMetrics: []cpuMetricType{
 			// Metrics which are not time-related MSR.
@@ -2231,9 +2219,8 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 			cpuC1StateResidency,
 			cpuC3StateResidency,
 			cpuC6StateResidency,
-			cpuBusyCycles,
 		},
-		PackageMetrics:   []packageMetricType{},
+		PackageMetrics:   make([]packageMetricType, 0),
 		EventDefinitions: "./testdata/sapphirerapids_core.json",
 
 		fetcher: mFetcher,
@@ -2245,13 +2232,13 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 	p.addCPUTimeRelatedMsrMetrics(acc, cpuID, coreID, packageID)
 
 	require.Empty(t, acc.Errors)
-	require.Len(t, acc.GetTelegrafMetrics(), 5)
+	require.Len(t, acc.GetTelegrafMetrics(), 4)
 	acc.AssertContainsTaggedFields(
 		t,
 		// measurement
 		"powerstat_core",
 		// fields
-		map[string]interface{}{
+		map[string]any{
 			"cpu_c0_state_residency_percent": c0State,
 		},
 		// tags
@@ -2266,7 +2253,7 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 		// measurement
 		"powerstat_core",
 		// fields
-		map[string]interface{}{
+		map[string]any{
 			"cpu_c1_state_residency_percent": c1State,
 		},
 		// tags
@@ -2281,7 +2268,7 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 		// measurement
 		"powerstat_core",
 		// fields
-		map[string]interface{}{
+		map[string]any{
 			"cpu_c6_state_residency_percent": c6State,
 		},
 		// tags
@@ -2296,23 +2283,8 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 		// measurement
 		"powerstat_core",
 		// fields
-		map[string]interface{}{
+		map[string]any{
 			"cpu_c3_state_residency_percent": c3State,
-		},
-		// tags
-		map[string]string{
-			"cpu_id":     strconv.Itoa(cpuID),
-			"core_id":    strconv.Itoa(coreID),
-			"package_id": strconv.Itoa(packageID),
-		},
-	)
-	acc.AssertContainsTaggedFields(
-		t,
-		// measurement
-		"powerstat_core",
-		// fields
-		map[string]interface{}{
-			"cpu_busy_cycles_percent": busyCycles,
 		},
 		// tags
 		map[string]string{
@@ -2326,7 +2298,7 @@ func TestAddCPUTimeRelatedMsrMetrics(t *testing.T) {
 
 func TestAddCPUPerfMetrics(t *testing.T) {
 	// Disable package metrics when parseConfig method is called.
-	packageMetrics := []packageMetricType{}
+	packageMetrics := make([]packageMetricType, 0)
 
 	t.Run("FailedToReadPerfEvents", func(t *testing.T) {
 		acc := &testutil.Accumulator{}
@@ -2395,14 +2367,13 @@ func TestAddCPUPerfMetrics(t *testing.T) {
 				// Metrics which do not rely on perf.
 				cpuFrequency,
 				cpuTemperature,
-				cpuBusyCycles,
 
 				// Metrics which rely on perf.
 				cpuC0SubstateC01Percent,
 				cpuC0SubstateC02Percent,
 				cpuC0SubstateC0WaitPercent,
 			},
-			PackageMetrics:   []packageMetricType{},
+			PackageMetrics:   make([]packageMetricType, 0),
 			EventDefinitions: "./testdata/sapphirerapids_core.json",
 
 			fetcher: mFetcher,
@@ -2442,14 +2413,12 @@ func TestAddCPUPerfMetrics(t *testing.T) {
 					// Metrics which do not rely on perf.
 					cpuFrequency,
 					cpuTemperature,
-					cpuBusyCycles,
 
 					// Metrics which rely on perf.
 					cpuC0SubstateC01Percent,
 					cpuC0SubstateC02Percent,
 					cpuC0SubstateC0WaitPercent,
 				},
-				PackageMetrics:   []packageMetricType{},
 				EventDefinitions: "./testdata/sapphirerapids_core.json",
 
 				fetcher: mFetcher,
@@ -2525,7 +2494,7 @@ func TestAddCPUPerfMetrics(t *testing.T) {
 				// measurement
 				"powerstat_core",
 				// fields
-				map[string]interface{}{
+				map[string]any{
 					"cpu_c0_substate_c01_percent": c01Percent,
 				},
 				// tags
@@ -2602,7 +2571,7 @@ func TestAddCPUPerfMetrics(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c0_substate_c01_percent": c01Percent,
 			},
 			// tags
@@ -2617,7 +2586,7 @@ func TestAddCPUPerfMetrics(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c0_substate_c0_wait_percent": c0Wait,
 			},
 			// tags
@@ -2659,7 +2628,7 @@ func TestAddPerCPUPerfMetrics(t *testing.T) {
 			cpuC0SubstateC01Percent,
 			cpuC0SubstateC02Percent,
 		},
-		PackageMetrics:   []packageMetricType{},
+		PackageMetrics:   make([]packageMetricType, 0),
 		EventDefinitions: "./testdata/sapphirerapids_core.json",
 
 		fetcher: mFetcher,
@@ -2676,7 +2645,7 @@ func TestAddPerCPUPerfMetrics(t *testing.T) {
 		// measurement
 		"powerstat_core",
 		// fields
-		map[string]interface{}{
+		map[string]any{
 			"cpu_c0_substate_c01_percent": c01Percent,
 		},
 		// tags
@@ -2691,7 +2660,7 @@ func TestAddPerCPUPerfMetrics(t *testing.T) {
 		// measurement
 		"powerstat_core",
 		// fields
-		map[string]interface{}{
+		map[string]any{
 			"cpu_c0_substate_c02_percent": c02Percent,
 		},
 		// tags
@@ -2816,7 +2785,7 @@ func TestAddPackageMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"thermal_design_power_watts": tdp,
 			},
 			// tags
@@ -2864,7 +2833,7 @@ func TestAddPackageMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_base_frequency_mhz": baseFreq,
 			},
 			// tags
@@ -2924,7 +2893,7 @@ func TestAddPackageMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": initMin,
 				"uncore_frequency_limit_mhz_max": initMax,
 			},
@@ -2940,7 +2909,7 @@ func TestAddPackageMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": initMin,
 				"uncore_frequency_limit_mhz_max": initMax,
 			},
@@ -3073,7 +3042,7 @@ func TestAddPerPackageRaplMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"current_power_consumption_watts": currPower,
 			},
 			// tags
@@ -3086,7 +3055,7 @@ func TestAddPerPackageRaplMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"thermal_design_power_watts": tdp,
 			},
 			// tags
@@ -3133,7 +3102,7 @@ func TestAddPerPackageRaplMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"current_dram_power_consumption_watts": currPower,
 			},
 			// tags
@@ -3258,7 +3227,7 @@ func TestAddPerPackageMsrMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_base_frequency_mhz": baseFreq,
 			},
 			// tags
@@ -3315,7 +3284,7 @@ func TestAddPerPackageMsrMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_base_frequency_mhz": baseFreq,
 			},
 			// tags
@@ -3328,7 +3297,7 @@ func TestAddPerPackageMsrMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_base_frequency_mhz": baseFreq,
 			},
 			// tags
@@ -3341,7 +3310,7 @@ func TestAddPerPackageMsrMetrics(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"max_turbo_frequency_mhz": maxTurboFreqList[0].Value,
 			},
 			// tags
@@ -3410,7 +3379,7 @@ func TestAddCPUFrequency(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_frequency_mhz": cpuFreqExp,
 			},
 			// tags
@@ -3479,7 +3448,7 @@ func TestAddCPUTemperature(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_temperature_celsius": cpuTemp,
 			},
 			// tags
@@ -3549,7 +3518,7 @@ func TestAddCPUC0StateResidency(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c0_state_residency_percent": c0StateExp,
 			},
 			// tags
@@ -3619,7 +3588,7 @@ func TestAddCPUC1StateResidency(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c1_state_residency_percent": c1StateExp,
 			},
 			// tags
@@ -3689,7 +3658,7 @@ func TestAddCPUC3StateResidency(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c3_state_residency_percent": c3StateExp,
 			},
 			// tags
@@ -3759,7 +3728,7 @@ func TestAddCPUC6StateResidency(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c6_state_residency_percent": c6StateExp,
 			},
 			// tags
@@ -3829,7 +3798,7 @@ func TestAddCPUC7StateResidency(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c7_state_residency_percent": c7StateExp,
 			},
 			// tags
@@ -3899,78 +3868,8 @@ func TestAddCPUBusyFrequency(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_busy_frequency_mhz": cpuBusyFreqExp,
-			},
-			// tags
-			map[string]string{
-				"cpu_id":     strconv.Itoa(cpuID),
-				"core_id":    strconv.Itoa(coreID),
-				"package_id": strconv.Itoa(packageID),
-			},
-		)
-		mFetcher.AssertExpectations(t)
-	})
-}
-
-func TestAddCPUBusyCycles(t *testing.T) {
-	t.Run("FailedToGetMetric", func(t *testing.T) {
-		acc := &testutil.Accumulator{}
-
-		cpuID := 0
-		coreID := 1
-		packageID := 0
-
-		mFetcher := &fetcherMock{}
-
-		// mock getting CPU busy cycles metric.
-		mFetcher.On("GetCPUC0StateResidency", cpuID).Return(0.0, errors.New("mock error")).Once()
-
-		p := &PowerStat{
-			fetcher: mFetcher,
-		}
-
-		require.Empty(t, acc.GetTelegrafMetrics())
-
-		p.addCPUBusyCycles(acc, cpuID, coreID, packageID)
-
-		require.Empty(t, acc.GetTelegrafMetrics())
-		require.Len(t, acc.Errors, 1)
-		require.ErrorContains(t, acc.FirstError(), fmt.Sprintf("failed to get %q for CPU ID %v", cpuBusyCycles, cpuID))
-		mFetcher.AssertExpectations(t)
-	})
-
-	t.Run("Rounded", func(t *testing.T) {
-		acc := &testutil.Accumulator{}
-
-		cpuID := 0
-		coreID := 1
-		packageID := 0
-		cpuBusyCycles := 10.1149
-		cpuBusyCyclesExp := 10.11
-
-		mFetcher := &fetcherMock{}
-
-		// mock getting CPU C0 state residency metric.
-		mFetcher.On("GetCPUC0StateResidency", cpuID).Return(cpuBusyCycles, nil).Once()
-
-		p := &PowerStat{
-			fetcher: mFetcher,
-		}
-
-		require.Empty(t, acc.GetTelegrafMetrics())
-
-		p.addCPUBusyCycles(acc, cpuID, coreID, packageID)
-
-		require.Len(t, acc.GetTelegrafMetrics(), 1)
-		require.True(t, acc.HasFloatField("powerstat_core", "cpu_busy_cycles_percent"))
-		acc.AssertContainsTaggedFields(
-			t,
-			// measurement
-			"powerstat_core",
-			// fields
-			map[string]interface{}{
-				"cpu_busy_cycles_percent": cpuBusyCyclesExp,
 			},
 			// tags
 			map[string]string{
@@ -4039,7 +3938,7 @@ func TestAddCPUC0SubstateC01Percent(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c0_substate_c01_percent": c01PercentExp,
 			},
 			// tags
@@ -4109,7 +4008,7 @@ func TestAddCPUC0SubstateC02Percent(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c0_substate_c02_percent": c02PercentExp,
 			},
 			// tags
@@ -4179,7 +4078,7 @@ func TestAddCPUC0SubstateC0WaitPercent(t *testing.T) {
 			// measurement
 			"powerstat_core",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_c0_substate_c0_wait_percent": c0WaitPercentExp,
 			},
 			// tags
@@ -4245,7 +4144,7 @@ func TestAddCurrentPackagePowerConsumption(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"current_power_consumption_watts": currPowerRounded,
 			},
 			// tags
@@ -4309,7 +4208,7 @@ func TestAddCurrentDramPowerConsumption(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"current_dram_power_consumption_watts": currPowerRounded,
 			},
 			// tags
@@ -4373,7 +4272,7 @@ func TestAddThermalDesignPower(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"thermal_design_power_watts": tdpRounded,
 			},
 			// tags
@@ -4436,7 +4335,7 @@ func TestAddCPUBaseFrequency(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"cpu_base_frequency_mhz": baseFreq,
 			},
 			// tags
@@ -4523,7 +4422,7 @@ func TestAddUncoreFrequency(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": currMin,
 				"uncore_frequency_limit_mhz_max": currMax,
 				"uncore_frequency_mhz_cur":       uint64(curr),
@@ -4584,7 +4483,7 @@ func TestAddUncoreFrequency(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": initMin,
 				"uncore_frequency_limit_mhz_max": initMax,
 			},
@@ -4642,7 +4541,7 @@ func TestAddUncoreFrequency(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": initMin,
 				"uncore_frequency_limit_mhz_max": initMax,
 			},
@@ -4658,7 +4557,7 @@ func TestAddUncoreFrequency(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": currMin,
 				"uncore_frequency_limit_mhz_max": currMax,
 				"uncore_frequency_mhz_cur":       uint64(curr),
@@ -4769,7 +4668,7 @@ func TestAddUncoreFrequencyInitialLimits(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": initMin,
 				"uncore_frequency_limit_mhz_max": initMax,
 			},
@@ -4883,7 +4782,7 @@ func TestAddUncoreFrequencyCurrentValues(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": currMin,
 				"uncore_frequency_limit_mhz_max": currMax,
 				"uncore_frequency_mhz_cur":       uint64(curr),
@@ -4948,8 +4847,8 @@ func TestGetUncoreFreqInitialLimits(t *testing.T) {
 		initMin, initMax, err := getUncoreFreqInitialLimits(mFetcher, packageID, dieID)
 
 		require.NoError(t, err)
-		require.Equal(t, initMinExp, initMin)
-		require.Equal(t, initMaxExp, initMax)
+		require.InDelta(t, initMinExp, initMin, testutil.DefaultDelta)
+		require.InDelta(t, initMaxExp, initMax, testutil.DefaultDelta)
 		mFetcher.AssertExpectations(t)
 	})
 }
@@ -5132,7 +5031,7 @@ func TestAddMaxTurboFreqLimits(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"max_turbo_frequency_mhz": maxTurboFreqList[0].Value,
 			},
 			// tags
@@ -5147,7 +5046,7 @@ func TestAddMaxTurboFreqLimits(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"max_turbo_frequency_mhz": maxTurboFreqList[1].Value,
 			},
 			// tags
@@ -5196,7 +5095,7 @@ func TestAddMaxTurboFreqLimits(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"max_turbo_frequency_mhz": maxTurboFreqList[0].Value,
 			},
 			// tags
@@ -5210,7 +5109,7 @@ func TestAddMaxTurboFreqLimits(t *testing.T) {
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"max_turbo_frequency_mhz": maxTurboFreqList[1].Value,
 			},
 			// tags

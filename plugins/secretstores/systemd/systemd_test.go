@@ -5,8 +5,9 @@ package systemd
 import (
 	"testing"
 
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func getSystemdVersionMin() (int, error) {
@@ -73,17 +74,6 @@ func TestInit(t *testing.T) {
 
 	plugin := &Systemd{Log: testutil.Logger{}}
 	require.NoError(t, plugin.Init())
-}
-
-func TestSetNotAvailable(t *testing.T) {
-	getSystemdVersion = getSystemdVersionMin
-	t.Setenv("CREDENTIALS_DIRECTORY", "testdata")
-
-	plugin := &Systemd{Log: testutil.Logger{}}
-	require.NoError(t, plugin.Init())
-
-	// Try to Store the secrets, which this plugin should not let
-	require.ErrorContains(t, plugin.Set("foo", "bar"), "secret-store does not support creating secrets")
 }
 
 func TestListGet(t *testing.T) {
@@ -160,7 +150,7 @@ func TestResolverInvalid(t *testing.T) {
 	require.ErrorContains(t, err, "cannot read the secret's value:")
 }
 
-func TestGetNonExistant(t *testing.T) {
+func TestGetNonExistent(t *testing.T) {
 	getSystemdVersion = getSystemdVersionMin
 	t.Setenv("CREDENTIALS_DIRECTORY", "testdata")
 

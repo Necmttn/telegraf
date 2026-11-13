@@ -3,6 +3,7 @@ package bind
 import (
 	"encoding/xml"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -71,14 +72,12 @@ func addXMLv2Counter(acc telegraf.Accumulator, commonTags map[string]string, sta
 		tags := make(map[string]string)
 
 		// Create local copy of tags since maps are reference types
-		for k, v := range commonTags {
-			tags[k] = v
-		}
+		maps.Copy(tags, commonTags)
 
 		grouper.Add("bind_counter", tags, ts, c.Name, c.Value)
 	}
 
-	//Add grouped metrics
+	// Add grouped metrics
 	for _, groupedMetric := range grouper.Metrics() {
 		acc.AddMetric(groupedMetric)
 	}
@@ -105,7 +104,10 @@ func (b *Bind) readStatsXMLv2(addr *url.URL, acc telegraf.Accumulator) error {
 	}
 
 	tags := map[string]string{"url": addr.Host}
-	host, port, _ := net.SplitHostPort(addr.Host)
+	host, port, err := net.SplitHostPort(addr.Host)
+	if err != nil {
+		return fmt.Errorf("unable to parse address host %q: %w", addr.Host, err)
+	}
 	tags["source"] = host
 	tags["port"] = port
 
@@ -130,7 +132,7 @@ func (b *Bind) readStatsXMLv2(addr *url.URL, acc telegraf.Accumulator) error {
 	addXMLv2Counter(acc, tags, stats.Statistics.Server.SockStats)
 
 	// Memory stats
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"total_use":    stats.Statistics.Memory.Summary.TotalUse,
 		"in_use":       stats.Statistics.Memory.Summary.InUse,
 		"block_size":   stats.Statistics.Memory.Summary.BlockSize,
@@ -143,7 +145,7 @@ func (b *Bind) readStatsXMLv2(addr *url.URL, acc telegraf.Accumulator) error {
 	if b.GatherMemoryContexts {
 		for _, c := range stats.Statistics.Memory.Contexts {
 			tags := map[string]string{"url": addr.Host, "id": c.ID, "name": c.Name, "source": host, "port": port}
-			fields := map[string]interface{}{"total": c.Total, "in_use": c.InUse}
+			fields := map[string]any{"total": c.Total, "in_use": c.InUse}
 
 			acc.AddGauge("bind_memory_context", fields, tags)
 		}

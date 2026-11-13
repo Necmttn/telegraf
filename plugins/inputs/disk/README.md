@@ -1,17 +1,23 @@
 # Disk Input Plugin
 
-The disk input plugin gathers metrics about disk usage.
+This plugin gathers metrics about disk usage.
 
-Note that `used_percent` is calculated by doing `used / (used + free)`, _not_
-`used / total`, which is how the unix `df` command does it. See
-[wikipedia - df](https://en.wikipedia.org/wiki/Df_(Unix)) for more details.
+> [!NOTE]
+> The `used_percent` field is calculated by `used / (used + free)` and _not_
+> `used / total` as the unix `df` command does it. See [wikipedia - df][wiki_df]
+> for more details.
+
+⭐ Telegraf v0.1.1
+🏷️ system
+💻 all
+
+[wiki_df]: https://en.wikipedia.org/wiki/Df_(Unix)
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

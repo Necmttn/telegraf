@@ -5,10 +5,12 @@ exposition format.  When used with the `prometheus` input, the input should be
 use the `metric_version = 2` option in order to properly round trip metrics.
 
 **Warning**: When generating histogram and summary types, output may
-not be correct if the metric spans multiple batches.  This issue can be
-somewhat, but not fully, mitigated by using outputs that support writing in
-"batch format".  When using histogram and summary types, it is recommended to
-use only the `prometheus_client` output. Histogram and Summary types
+not be complete if the metric spans multiple batches. A histogram or summary
+whose count and sum are not part of the batch is left out of that batch, as
+the exposition format cannot represent it without inventing values. This
+issue can be somewhat, but not fully, mitigated by using outputs that support
+writing in "batch format".  When using histogram and summary types, it is
+recommended to use only the `prometheus_client` output. Histogram and Summary types
 also update their expiration time based on the most recently received data.
 If incoming metrics stop updating specific buckets or quantiles but continue
 reporting others every bucket/quantile will continue to exist.
@@ -34,6 +36,12 @@ reporting others every bucket/quantile will continue to exist.
   ## Encode metrics without HELP metadata. This helps reduce the payload
   ## size.
   prometheus_compact_encoding = false
+
+  ## Control how metric names and label names are sanitized.
+  ## The default "legacy" keeps ASCII-only Prometheus name rules.
+  ## Set to "utf8" to allow UTF-8 metric and label names.
+  ## Valid options: "legacy", "utf8"
+  prometheus_name_sanitization = "legacy"
 
   ## Data format to output.
   ## Each data format has its own unique set of configuration options, read

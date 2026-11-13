@@ -1,14 +1,18 @@
 # Yandex Cloud Monitoring Output Plugin
 
-This plugin will send custom metrics to [Yandex Cloud
-Monitoring](https://cloud.yandex.com/services/monitoring).
+This plugin writes metrics to the [Yandex Cloud Monitoring][yandex] service.
+
+⭐ Telegraf v1.17.0
+🏷️ cloud
+💻 all
+
+[yandex]: https://cloud.yandex.com/services/monitoring
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

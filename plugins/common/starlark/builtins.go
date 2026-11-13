@@ -34,11 +34,11 @@ func newMetric(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwa
 	return &Metric{metric: m}, nil
 }
 
-func toString(value starlark.Value, errorMsg string) (string, error) {
-	if value, ok := value.(starlark.String); ok {
-		return string(value), nil
+func toString(value starlark.Value) string {
+	if v, ok := value.(starlark.String); ok {
+		return v.GoString()
 	}
-	return "", fmt.Errorf(errorMsg, value)
+	return value.String()
 }
 
 func items(value starlark.Value, errorMsg string) ([]starlark.Tuple, error) {
@@ -89,7 +89,7 @@ func builtinAttr(recv starlark.Value, name string, methods map[string]builtinMet
 	}
 
 	// Allocate a closure over 'method'.
-	impl := func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	impl := func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		return method(b, args, kwargs)
 	}
 	return starlark.NewBuiltin(name, impl).BindReceiver(recv), nil

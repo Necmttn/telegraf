@@ -1,17 +1,20 @@
 # Exec Input Plugin
 
-The `exec` plugin executes all the `commands` in parallel on every interval and
-parses metrics from their output in any one of the accepted [Input Data
-Formats](../../../docs/DATA_FORMATS_INPUT.md).
-
+This plugin executes the given `commands` on every interval and parses metrics
+from their output in any one of the supported [data formats][data_formats].
 This plugin can be used to poll for custom metrics from any source.
+
+⭐ Telegraf v0.1.5
+🏷️ system
+💻 all
+
+[data_formats]: /docs/DATA_FORMATS_INPUT.md
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -20,12 +23,12 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 ```toml @sample.conf
 # Read metrics from one or more commands that can output to stdout
 [[inputs.exec]]
-  ## Commands array
-  commands = [
-    "/tmp/test.sh",
-    "/usr/bin/mycollector --foo=bar",
-    "/tmp/collect_*.sh"
-  ]
+  ## Commands array with each command being an array of the command and its
+  ## flags, e.g.
+  ##   commands = [['C:\Windows\System32\w32tm.exe', "/stripchart", "/computer:SERVER1", "/dataonly", "/samples:3"]]
+  ## or
+  ##   commands = [["echo", "value 1"], ["echo", "value 2"]]
+  commands = []
 
   ## Environment variables
   ## Array of "key=value" pairs to pass as environment variables
@@ -34,22 +37,41 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   # environment = []
 
   ## Timeout for each command to complete.
-  timeout = "5s"
+  # timeout = "5s"
 
-  ## measurement name suffix (for separating different commands)
-  name_suffix = "_mycollector"
+  ## Measurement name suffix
+  ## Used for separating different commands
+  # name_suffix = ""
 
-  ## Data format to consume.
-  ## Each data format has its own unique set of configuration options, read
-  ## more about them here:
+  ## Ignore Error Code
+  ## If set to true, a non-zero error code in not considered an error and the
+  ## plugin will continue to parse the output.
+  # ignore_error = false
+
+  ## Log all messages sent to stderr
+  # log_stderr = false
+
+  ## Data format
+  ## By default, exec expects JSON. This was done for historical reasons and is
+  ## different than other inputs that use the influx line protocol. Each data
+  ## format has its own unique set of configuration options, read more about
+  ## them here:
   ## https://github.com/influxdata/telegraf/blob/master/docs/DATA_FORMATS_INPUT.md
-  data_format = "influx"
+  # data_format = "json"
 ```
 
 Glob patterns in the `command` option are matched on every run, so adding new
 scripts that match the pattern will cause them to be picked up immediately.
 
-## Example
+### Logging
+
+When setting `log_stderr` to `true`, the called command may write log messages
+to `stderr`, which Telegraf will log line-wise using the configured logging
+facility. By default, the _error_ level will be used. Use the known prefixes
+`E!`, `W!`, `I!`, `D!` or `T!` to log with the _error_, _warning_, _info_,
+_debug_ or _trace_ log-level, respectively.
+
+### Example
 
 This script produces static values, since no timestamp is specified the values
 are at the current time. Ensure that int values are followed with `i` for proper
@@ -70,7 +92,7 @@ It can be paired with the following configuration and will be run at the
   data_format = "influx"
 ```
 
-## Common Issues
+## Troubleshooting
 
 ### My script works when I run it by hand, but not when Telegraf is running as a service
 

@@ -1,12 +1,19 @@
 # NSQ Consumer Input Plugin
 
-The [NSQ][nsq] consumer plugin reads from NSQD and creates metrics using one
-of the supported [input data formats][].
+This service plugin consumes messages from [NSQ][nsq] realtime distributed
+messaging platform brokers in one of the supported [data formats][data_formats].
+
+⭐ Telegraf v0.10.1
+🏷️ messaging
+💻 all
+
+[nsq]: https://nsq.io/
+[data_formats]: /docs/DATA_FORMATS_INPUT.md
 
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -14,12 +21,19 @@ normal plugins:
 2. The CLI options of `--test`, `--test-wait`, and `--once` may not produce
    output for this plugin
 
+## Tracking metric support <!-- @/docs/includes/plugin_tracking_metrics.md -->
+
+This plugin supports [tracking metrics][METRICS.md], which allows the plugin
+to be notified when metrics have been delivered to all outputs, enabling proper
+acknowledgment back to the source.
+
+[METRICS.md]: ../../../docs/METRICS.md#tracking-metrics
+
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -28,9 +42,6 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 ```toml @sample.conf
 # Read metrics from NSQD topic(s)
 [[inputs.nsq_consumer]]
-  ## Server option still works but is deprecated, we just prepend it to the nsqd array.
-  # server = "localhost:4150"
-
   ## An array representing the NSQD TCP HTTP Endpoints
   nsqd = ["localhost:4150"]
 
@@ -59,9 +70,11 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   data_format = "influx"
 ```
 
-[nsq]: https://nsq.io
-[input data formats]: /docs/DATA_FORMATS_INPUT.md
-
 ## Metrics
 
+The plugin accepts arbitrary input and parses it according to the `data_format`
+setting. There is no predefined metric format.
+
 ## Example Output
+
+There is no predefined metric format, so output depends on plugin input.

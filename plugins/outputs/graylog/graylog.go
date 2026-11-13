@@ -14,13 +14,14 @@ import (
 	"math"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	tlsint "github.com/influxdata/telegraf/plugins/common/tls"
+	common_tls "github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/outputs"
 )
 
@@ -155,7 +156,7 @@ func (g *gelfUDP) Close() (err error) {
 	return err
 }
 
-func (g *gelfUDP) createChunkedMessage(index int, chunkCountInt int, id []byte, compressed *bytes.Buffer) (bytes.Buffer, error) {
+func (g *gelfUDP) createChunkedMessage(index, chunkCountInt int, id []byte, compressed *bytes.Buffer) (bytes.Buffer, error) {
 	var packet bytes.Buffer
 
 	chunksize := g.getChunksize()
@@ -203,7 +204,7 @@ func (g *gelfUDP) getChunksize() int {
 	return g.gelfConfig.MaxChunkSizeWan
 }
 
-func (g *gelfUDP) intToBytes(i int) ([]byte, error) {
+func (*gelfUDP) intToBytes(i int) ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	err := binary.Write(buf, binary.LittleEndian, int8(i))
@@ -214,7 +215,7 @@ func (g *gelfUDP) intToBytes(i int) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-func (g *gelfUDP) compress(b []byte) (bytes.Buffer, error) {
+func (*gelfUDP) compress(b []byte) (bytes.Buffer, error) {
 	var buf bytes.Buffer
 	comp := zlib.NewWriter(&buf)
 
@@ -292,25 +293,37 @@ func (g *gelfTCP) Connect() error {
 
 func (g *gelfTCP) send(b []byte) error {
 	if g.conn == nil {
-		err := g.Connect()
-		if err != nil {
+		if err := g.Connect(); err != nil {
 			return err
 		}
 	}
 
-	_, err := g.conn.Write(b)
-	if err != nil {
-		_ = g.conn.Close()
-		g.conn = nil
-	} else {
-		_, err = g.conn.Write([]byte{0}) // message delimiter
-		if err != nil {
-			_ = g.conn.Close()
-			g.conn = nil
-		}
+	if err := g.writeFrame(b); err == nil {
+		return nil
 	}
 
-	return err
+	// The peer may have closed the connection without us noticing because we
+	// only ever write to it. Reconnect and retry the write once before
+	// reporting the error to avoid noisy logs on every graceful close.
+	if err := g.Connect(); err != nil {
+		g.conn = nil
+		return err
+	}
+	return g.writeFrame(b)
+}
+
+func (g *gelfTCP) writeFrame(b []byte) error {
+	if _, err := g.conn.Write(b); err != nil {
+		_ = g.conn.Close()
+		g.conn = nil
+		return err
+	}
+	if _, err := g.conn.Write([]byte{0}); err != nil { // message delimiter
+		_ = g.conn.Close()
+		g.conn = nil
+		return err
+	}
+	return nil
 }
 
 type Graylog struct {
@@ -321,7 +334,7 @@ type Graylog struct {
 	Reconnection      bool            `toml:"connection_retry"`
 	ReconnectionTime  config.Duration `toml:"connection_retry_wait_time"`
 	Log               telegraf.Logger `toml:"-"`
-	tlsint.ClientConfig
+	common_tls.ClientConfig
 
 	writer      io.Writer
 	closers     []io.WriteCloser
@@ -347,6 +360,7 @@ func (g *Graylog) Connect() error {
 	}
 
 	if g.Reconnection {
+		g.wg.Add(1)
 		go g.connectRetry(tlsCfg)
 		return nil
 	}
@@ -371,15 +385,16 @@ func (g *Graylog) Connect() error {
 }
 
 func (g *Graylog) connectRetry(tlsCfg *tls.Config) {
+	defer g.wg.Done()
+
 	var writers []io.Writer
 	var closers []io.WriteCloser
 	var attempt int64
 
-	g.wg.Add(1)
-
-	unconnected := append([]string{}, g.Servers...)
+	servers := make([]string, 0, len(g.Servers))
+	servers = append(servers, g.Servers...)
 	for {
-		unconnected, gelfs := g.connectEndpoints(unconnected, tlsCfg)
+		unconnected, gelfs := g.connectEndpoints(servers, tlsCfg)
 		for _, w := range gelfs {
 			writers = append(writers, w)
 			closers = append(closers, w)
@@ -406,8 +421,6 @@ func (g *Graylog) connectRetry(tlsCfg *tls.Config) {
 	g.writer = io.MultiWriter(writers...)
 	g.closers = closers
 	g.Unlock()
-
-	g.wg.Done()
 }
 
 func (g *Graylog) connectEndpoints(servers []string, tlsCfg *tls.Config) ([]string, []gelf) {
@@ -467,9 +480,7 @@ func (g *Graylog) Write(metrics []telegraf.Metric) error {
 }
 
 func (g *Graylog) serialize(metric telegraf.Metric) ([]string, error) {
-	out := []string{}
-
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	m["version"] = "1.1"
 	m["timestamp"] = float64(metric.Time().UnixNano()) / 1_000_000_000
 	m["short_message"] = "telegraf"
@@ -484,7 +495,7 @@ func (g *Graylog) serialize(metric telegraf.Metric) ([]string, error) {
 	} else {
 		host, err := os.Hostname()
 		if err != nil {
-			return []string{}, err
+			return nil, err
 		}
 		m["host"] = host
 	}
@@ -494,7 +505,7 @@ func (g *Graylog) serialize(metric telegraf.Metric) ([]string, error) {
 			continue
 		}
 
-		if fieldInSpec(tag.Key) {
+		if slices.Contains(defaultSpecFields, tag.Key) {
 			m[tag.Key] = tag.Value
 		} else {
 			m["_"+tag.Key] = tag.Value
@@ -504,7 +515,7 @@ func (g *Graylog) serialize(metric telegraf.Metric) ([]string, error) {
 	for _, field := range metric.FieldList() {
 		if field.Key == g.ShortMessageField {
 			m["short_message"] = field.Value
-		} else if fieldInSpec(field.Key) {
+		} else if slices.Contains(defaultSpecFields, field.Key) {
 			m[field.Key] = field.Value
 		} else {
 			m["_"+field.Key] = field.Value
@@ -513,21 +524,10 @@ func (g *Graylog) serialize(metric telegraf.Metric) ([]string, error) {
 
 	serialized, err := ejson.Marshal(m)
 	if err != nil {
-		return []string{}, err
-	}
-	out = append(out, string(serialized))
-
-	return out, nil
-}
-
-func fieldInSpec(field string) bool {
-	for _, specField := range defaultSpecFields {
-		if specField == field {
-			return true
-		}
+		return nil, err
 	}
 
-	return false
+	return []string{string(serialized)}, nil
 }
 
 func init() {

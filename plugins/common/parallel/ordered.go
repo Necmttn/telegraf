@@ -17,23 +17,16 @@ type Ordered struct {
 	queue chan futureMetric
 }
 
-func NewOrdered(
-	acc telegraf.Accumulator,
-	fn func(telegraf.Metric) []telegraf.Metric,
-	orderedQueueSize int,
-	workerCount int,
-) *Ordered {
+func NewOrdered(acc telegraf.Accumulator, fn func(telegraf.Metric) []telegraf.Metric, orderedQueueSize, workerCount int) *Ordered {
 	p := &Ordered{
 		fn:          fn,
 		workerQueue: make(chan job, workerCount),
 		queue:       make(chan futureMetric, orderedQueueSize),
 	}
 	p.startWorkers(workerCount)
-	p.wg.Add(1)
-	go func() {
+	p.wg.Go(func() {
 		p.readQueue(acc)
-		p.wg.Done()
-	}()
+	})
 	return p
 }
 
@@ -64,7 +57,7 @@ func (p *Ordered) readQueue(acc telegraf.Accumulator) {
 
 func (p *Ordered) startWorkers(count int) {
 	p.wg.Add(count)
-	for i := 0; i < count; i++ {
+	for range count {
 		go func() {
 			for job := range p.workerQueue {
 				job.future <- p.fn(job.metric)

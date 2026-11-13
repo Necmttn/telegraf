@@ -13,9 +13,9 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal/process"
+	"github.com/influxdata/telegraf/models"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
 	"github.com/influxdata/telegraf/plugins/processors"
-	"github.com/influxdata/telegraf/plugins/serializers"
 )
 
 //go:embed sample.conf
@@ -25,18 +25,23 @@ type Execd struct {
 	Command      []string        `toml:"command"`
 	Environment  []string        `toml:"environment"`
 	RestartDelay config.Duration `toml:"restart_delay"`
-	Log          telegraf.Logger
+	Log          telegraf.Logger `toml:"-"`
 
 	parser     telegraf.Parser
-	serializer serializers.Serializer
+	serializer telegraf.Serializer
 	acc        telegraf.Accumulator
 	process    *process.Process
 }
 
-func New() *Execd {
-	return &Execd{
-		RestartDelay: config.Duration(10 * time.Second),
+func (*Execd) SampleConfig() string {
+	return sampleConfig
+}
+
+func (e *Execd) Init() error {
+	if len(e.Command) == 0 {
+		return errors.New("no command specified")
 	}
+	return nil
 }
 
 func (e *Execd) SetParser(p telegraf.Parser) {
@@ -45,10 +50,6 @@ func (e *Execd) SetParser(p telegraf.Parser) {
 
 func (e *Execd) SetSerializer(s telegraf.Serializer) {
 	e.serializer = s
-}
-
-func (*Execd) SampleConfig() string {
-	return sampleConfig
 }
 
 func (e *Execd) Start(acc telegraf.Accumulator) error {
@@ -92,7 +93,7 @@ func (e *Execd) Add(m telegraf.Metric, _ telegraf.Accumulator) error {
 	// We cannot maintain tracking metrics at the moment because input/output
 	// is done asynchronously and we don't have any metric metadata to tie the
 	// output metric back to the original input metric.
-	m.Drop()
+	m.Accept()
 	return nil
 }
 
@@ -102,7 +103,14 @@ func (e *Execd) Stop() {
 
 func (e *Execd) cmdReadOut(out io.Reader) {
 	// Prefer using the StreamParser when parsing influx format.
-	if _, isInfluxParser := e.parser.(*influx.Parser); isInfluxParser {
+	var parser telegraf.Parser
+	if rp, ok := e.parser.(*models.RunningParser); ok {
+		parser = rp.Parser
+	} else {
+		parser = e.parser
+	}
+
+	if _, isInfluxParser := parser.(*influx.Parser); isInfluxParser {
 		e.cmdReadOutStream(out)
 		return
 	}
@@ -139,8 +147,7 @@ func (e *Execd) cmdReadOutStream(out io.Reader) {
 				break
 			}
 
-			var parseErr *influx.ParseError
-			if errors.As(err, &parseErr) {
+			if parseErr, ok := errors.AsType[*influx.ParseError](err); ok {
 				// Continue past parse errors.
 				e.acc.AddError(parseErr)
 				continue
@@ -159,7 +166,21 @@ func (e *Execd) cmdReadErr(out io.Reader) {
 	scanner := bufio.NewScanner(out)
 
 	for scanner.Scan() {
-		e.Log.Errorf("stderr: %q", scanner.Text())
+		msg := scanner.Text()
+		switch {
+		case strings.HasPrefix(msg, "E! "):
+			e.Log.Error(msg[3:])
+		case strings.HasPrefix(msg, "W! "):
+			e.Log.Warn(msg[3:])
+		case strings.HasPrefix(msg, "I! "):
+			e.Log.Info(msg[3:])
+		case strings.HasPrefix(msg, "D! "):
+			e.Log.Debug(msg[3:])
+		case strings.HasPrefix(msg, "T! "):
+			e.Log.Trace(msg[3:])
+		default:
+			e.Log.Errorf("stderr: %q", msg)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -167,15 +188,10 @@ func (e *Execd) cmdReadErr(out io.Reader) {
 	}
 }
 
-func (e *Execd) Init() error {
-	if len(e.Command) == 0 {
-		return errors.New("no command specified")
-	}
-	return nil
-}
-
 func init() {
 	processors.AddStreaming("execd", func() telegraf.StreamingProcessor {
-		return New()
+		return &Execd{
+			RestartDelay: config.Duration(10 * time.Second),
+		}
 	})
 }

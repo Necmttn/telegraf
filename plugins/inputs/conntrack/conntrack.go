@@ -5,6 +5,7 @@ package conntrack
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,45 +14,36 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/internal/choice"
+	"github.com/influxdata/telegraf/plugins/common/psutil"
 	"github.com/influxdata/telegraf/plugins/inputs"
-	"github.com/influxdata/telegraf/plugins/inputs/system"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-type Conntrack struct {
-	ps      system.PS
-	Path    string
-	Dirs    []string
-	Files   []string
-	Collect []string
-}
+var (
+	dfltDirs = []string{
+		"/proc/sys/net/ipv4/netfilter",
+		"/proc/sys/net/netfilter",
+	}
+
+	dfltFiles = []string{
+		"ip_conntrack_count",
+		"ip_conntrack_max",
+		"nf_conntrack_count",
+		"nf_conntrack_max",
+	}
+)
 
 const (
 	inputName = "conntrack"
 )
 
-var dfltDirs = []string{
-	"/proc/sys/net/ipv4/netfilter",
-	"/proc/sys/net/netfilter",
-}
-
-var dfltFiles = []string{
-	"ip_conntrack_count",
-	"ip_conntrack_max",
-	"nf_conntrack_count",
-	"nf_conntrack_max",
-}
-
-func (c *Conntrack) setDefaults() {
-	if len(c.Dirs) == 0 {
-		c.Dirs = dfltDirs
-	}
-
-	if len(c.Files) == 0 {
-		c.Files = dfltFiles
-	}
+type Conntrack struct {
+	Collect []string `toml:"collect"`
+	Dirs    []string `toml:"dirs"`
+	Files   []string `toml:"files"`
+	ps      psutil.PS
 }
 
 func (*Conntrack) SampleConfig() string {
@@ -70,7 +62,7 @@ func (c *Conntrack) Init() error {
 
 func (c *Conntrack) Gather(acc telegraf.Accumulator) error {
 	var metricKey string
-	fields := make(map[string]interface{})
+	fields := make(map[string]any)
 
 	for _, dir := range c.Dirs {
 		for _, file := range c.Files {
@@ -110,7 +102,7 @@ func (c *Conntrack) Gather(acc telegraf.Accumulator) error {
 		}
 
 		if len(stats) == 0 {
-			acc.AddError(fmt.Errorf("conntrack input failed to collect stats"))
+			acc.AddError(errors.New("conntrack input failed to collect stats"))
 		}
 
 		cpuTag := "all"
@@ -122,7 +114,7 @@ func (c *Conntrack) Gather(acc telegraf.Accumulator) error {
 				"cpu": cpuTag,
 			}
 
-			statFields := map[string]interface{}{
+			statFields := map[string]any{
 				"entries":        sts.Entries,       // entries in the conntrack table
 				"searched":       sts.Searched,      // conntrack table lookups performed
 				"found":          sts.Found,         // searched entries which were successful
@@ -146,18 +138,27 @@ func (c *Conntrack) Gather(acc telegraf.Accumulator) error {
 	}
 
 	if len(fields) == 0 {
-		return fmt.Errorf("Conntrack input failed to collect metrics. " +
-			"Is the conntrack kernel module loaded?")
+		return errors.New("conntrack input failed to collect metrics, make sure that the kernel module is loaded")
 	}
 
 	acc.AddFields(inputName, fields, nil)
 	return nil
 }
 
+func (c *Conntrack) setDefaults() {
+	if len(c.Dirs) == 0 {
+		c.Dirs = dfltDirs
+	}
+
+	if len(c.Files) == 0 {
+		c.Files = dfltFiles
+	}
+}
+
 func init() {
 	inputs.Add(inputName, func() telegraf.Input {
 		return &Conntrack{
-			ps: system.NewSystemPS(),
+			ps: psutil.NewSystemPS(),
 		}
 	})
 }

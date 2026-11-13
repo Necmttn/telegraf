@@ -1,6 +1,7 @@
 package binary
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -15,31 +16,33 @@ import (
 
 type Parser struct {
 	AllowNoMatch bool            `toml:"allow_no_match"`
-	Endianess    string          `toml:"endianess" deprecated:"1.27.4;use 'endianness' instead"`
 	Endianness   string          `toml:"endianness"`
 	Configs      []Config        `toml:"binary"`
-	HexEncoding  bool            `toml:"hex_encoding"`
+	Encoding     string          `toml:"binary_encoding"`
 	Log          telegraf.Logger `toml:"-"`
 
 	metricName  string
 	defaultTags map[string]string
 	converter   binary.ByteOrder
+	timeFunc    func() time.Time
 }
 
 func (p *Parser) Init() error {
-	if p.Endianess != "" && p.Endianness == "" {
-		p.Endianness = p.Endianess
-	}
-
 	switch p.Endianness {
-	case "le":
+	case "little", "le":
 		p.converter = binary.LittleEndian
-	case "be":
+	case "big", "be":
 		p.converter = binary.BigEndian
 	case "", "host":
 		p.converter = internal.HostEndianness
 	default:
 		return fmt.Errorf("unknown endianness %q", p.Endianness)
+	}
+
+	switch p.Encoding {
+	case "", "none", "hex", "base64":
+	default:
+		return fmt.Errorf("unknown encoding %q", p.Encoding)
 	}
 
 	// Pre-process the configurations
@@ -53,26 +56,45 @@ func (p *Parser) Init() error {
 		p.Configs[i] = cfg
 	}
 
+	if p.timeFunc == nil {
+		p.timeFunc = time.Now
+	}
+
 	return nil
 }
 
+func (p *Parser) SetTimeFunc(fn func() time.Time) {
+	p.timeFunc = fn
+}
+
 func (p *Parser) Parse(data []byte) ([]telegraf.Metric, error) {
-	t := time.Now()
+	t := p.timeFunc()
 
 	// If the data is encoded in HEX, we need to decode it first
 	buf := data
-	if p.HexEncoding {
-		s := strings.ReplaceAll(string(data), " ", "")
+	switch p.Encoding {
+	case "hex":
+		s := strings.TrimPrefix(string(data), "0x")
+		s = strings.TrimPrefix(s, "x")
+		s = strings.TrimSpace(s)
+		s = strings.ReplaceAll(s, " ", "")
 		s = strings.ReplaceAll(s, "\t", "")
 		var err error
 		buf, err = hex.DecodeString(s)
 		if err != nil {
 			return nil, fmt.Errorf("decoding hex failed: %w", err)
 		}
+	case "base64":
+		decoder := base64.StdEncoding.WithPadding(base64.StdPadding)
+		var err error
+		buf, err = decoder.DecodeString(strings.TrimSpace(string(data)))
+		if err != nil {
+			return nil, fmt.Errorf("decoding base64 failed: %w", err)
+		}
 	}
 
 	matches := 0
-	metrics := make([]telegraf.Metric, 0)
+	metrics := make([]telegraf.Metric, 0, len(p.Configs))
 	for i, cfg := range p.Configs {
 		// Apply the filter and see if we should match this
 		if !cfg.matches(buf) {
@@ -138,7 +160,7 @@ func extractPart(in []byte, offset, bits uint64) ([]byte, error) {
 		return nil, fmt.Errorf("out-of-bounds @%d with %d bits", offset, bits)
 	}
 
-	var out []byte
+	out := make([]byte, 0, length)
 	out = append(out, in[start:start+length]...)
 
 	if offset%8 != 0 {

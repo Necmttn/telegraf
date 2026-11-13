@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
@@ -14,20 +16,23 @@ import (
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
 	"github.com/influxdata/telegraf/plugins/parsers/json"
 	"github.com/influxdata/telegraf/plugins/parsers/logfmt"
+	"github.com/influxdata/telegraf/plugins/parsers/opentsdb"
 	"github.com/influxdata/telegraf/plugins/parsers/value"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestApply(t *testing.T) {
 	tests := []struct {
-		name         string
-		parseFields  []string
-		parseTags    []string
-		parser       telegraf.Parser
-		dropOriginal bool
-		merge        string
-		input        telegraf.Metric
-		expected     []telegraf.Metric
+		name               string
+		parseFields        []string
+		parseTags          []string
+		parseBase64        []string
+		parser             telegraf.Parser
+		dropOriginal       bool
+		merge              string
+		input              telegraf.Metric
+		expected           []telegraf.Metric
+		undefinedTimestamp bool
 	}{
 		{
 			name:         "parse one field drop original",
@@ -46,10 +51,10 @@ func TestApply(t *testing.T) {
 				map[string]string{
 					"some": "tag",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"sample": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"singleField",
@@ -59,9 +64,10 @@ func TestApply(t *testing.T) {
 						"msg":    "http request",
 						"method": "POST",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:         "parse one field with merge",
@@ -81,10 +87,10 @@ func TestApply(t *testing.T) {
 				map[string]string{
 					"some": "tag",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"sample": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"singleField",
@@ -95,10 +101,10 @@ func TestApply(t *testing.T) {
 						"msg":    "http request",
 						"method": "POST",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"sample": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 					},
-					time.Unix(0, 0)),
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
@@ -118,17 +124,17 @@ func TestApply(t *testing.T) {
 				map[string]string{
 					"some": "tag",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"sample": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"singleField",
 					map[string]string{
 						"some": "tag",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"sample": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 					},
 					time.Unix(0, 0)),
@@ -140,9 +146,10 @@ func TestApply(t *testing.T) {
 						"msg":    "http request",
 						"method": "POST",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:         "parse one field keep with measurement name",
@@ -152,15 +159,15 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"influxField",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"message": "deal,computer_name=hosta message=\"stuff\" 1530654676316265790",
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"influxField",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"message": "deal,computer_name=hosta message=\"stuff\" 1530654676316265790",
 					},
 					time.Unix(0, 0)),
@@ -169,11 +176,12 @@ func TestApply(t *testing.T) {
 					map[string]string{
 						"computer_name": "hosta",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"message": "stuff",
 					},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:         "parse one field override replaces name",
@@ -186,10 +194,10 @@ func TestApply(t *testing.T) {
 				map[string]string{
 					"some": "tag",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"message": "deal,computer_name=hosta message=\"stuff\" 1530654676316265790",
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"deal",
@@ -197,10 +205,10 @@ func TestApply(t *testing.T) {
 						"computer_name": "hosta",
 						"some":          "tag",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"message": "stuff",
 					},
-					time.Unix(0, 0)),
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
@@ -213,12 +221,12 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"success",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"grokSample": "127.0.0.1 - - [11/Dec/2013:00:01:45 -0800] \"" +
 						"GET /xampp/status.php HTTP/1.1\" 200 3891 \"http://cadenza/xampp/navi.php\" \"Mozilla/5.0 (Macintosh; " +
 						"Intel Mac OS X 10.9; rv:25.0) Gecko/20100101 Firefox/25.0\"",
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"success",
@@ -226,7 +234,7 @@ func TestApply(t *testing.T) {
 						"resp_code": "200",
 						"verb":      "GET",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"resp_bytes":   int64(3891),
 						"auth":         "-",
 						"request":      "/xampp/status.php",
@@ -238,6 +246,7 @@ func TestApply(t *testing.T) {
 					},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:         "parse two fields [replace]",
@@ -249,27 +258,28 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"bigMeasure",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"field_1": `{"lvl":"info","msg":"http request"}`,
 					"field_2": `{"err":"fatal","fatal":"security threat"}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"bigMeasure",
 					map[string]string{
 						"lvl": "info",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 				metric.New(
 					"bigMeasure",
 					map[string]string{
 						"err": "fatal",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:         "parse two fields [merge]",
@@ -282,11 +292,11 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"bigMeasure",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"field_1": `{"lvl":"info","msg":"http request"}`,
 					"field_2": `{"err":"fatal","fatal":"security threat"}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"bigMeasure",
@@ -296,11 +306,11 @@ func TestApply(t *testing.T) {
 						"err":   "fatal",
 						"fatal": "security threat",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"field_1": `{"lvl":"info","msg":"http request"}`,
 						"field_2": `{"err":"fatal","fatal":"security threat"}`,
 					},
-					time.Unix(0, 0)),
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
@@ -313,16 +323,16 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"bigMeasure",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"field_1": `{"lvl":"info","msg":"http request"}`,
 					"field_2": `{"err":"fatal","fatal":"security threat"}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"bigMeasure",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"field_1": `{"lvl":"info","msg":"http request"}`,
 						"field_2": `{"err":"fatal","fatal":"security threat"}`,
 					},
@@ -333,7 +343,7 @@ func TestApply(t *testing.T) {
 						"lvl": "info",
 						"msg": "http request",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 				metric.New(
 					"bigMeasure",
@@ -341,9 +351,10 @@ func TestApply(t *testing.T) {
 						"err":   "fatal",
 						"fatal": "security threat",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:         "parse one tag drop original",
@@ -356,17 +367,18 @@ func TestApply(t *testing.T) {
 					"some":   "tag",
 					"sample": `ts=2018-07-24T19:43:40.275Z`,
 				},
-				map[string]interface{}{},
-				time.Unix(0, 0)),
+				map[string]any{},
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"singleTag",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"ts": "2018-07-24T19:43:40.275Z",
 					},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:         "parse one tag with merge",
@@ -380,8 +392,8 @@ func TestApply(t *testing.T) {
 					"some":   "tag",
 					"sample": `ts=2018-07-24T19:43:40.275Z`,
 				},
-				map[string]interface{}{},
-				time.Unix(0, 0)),
+				map[string]any{},
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"singleTag",
@@ -389,10 +401,10 @@ func TestApply(t *testing.T) {
 						"some":   "tag",
 						"sample": `ts=2018-07-24T19:43:40.275Z`,
 					},
-					map[string]interface{}{
+					map[string]any{
 						"ts": "2018-07-24T19:43:40.275Z",
 					},
-					time.Unix(0, 0)),
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
@@ -406,8 +418,8 @@ func TestApply(t *testing.T) {
 					"some":   "tag",
 					"sample": `ts=2018-07-24T19:43:40.275Z`,
 				},
-				map[string]interface{}{},
-				time.Unix(0, 0)),
+				map[string]any{},
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"singleTag",
@@ -415,19 +427,20 @@ func TestApply(t *testing.T) {
 						"some":   "tag",
 						"sample": `ts=2018-07-24T19:43:40.275Z`,
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 				metric.New(
 					"singleTag",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"ts": "2018-07-24T19:43:40.275Z",
 					},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
-			name:         "Fail to parse one field but parses other [keep]",
+			name:         "fail to parse one field but parses other [keep]",
 			parseFields:  []string{"good", "bad"},
 			dropOriginal: false,
 			parser: &json.Parser{
@@ -436,16 +449,16 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"success",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"good": `{"lvl":"info"}`,
 					"bad":  "why",
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"success",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"good": `{"lvl":"info"}`,
 						"bad":  "why",
 					},
@@ -455,12 +468,13 @@ func TestApply(t *testing.T) {
 					map[string]string{
 						"lvl": "info",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
-			name:         "Fail to parse one field but parses other [keep] v2",
+			name:         "fail to parse one field but parses other [keep] v2",
 			parseFields:  []string{"bad", "good", "ok"},
 			dropOriginal: false,
 			parser: &json.Parser{
@@ -469,17 +483,17 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"success",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"bad":  "why",
 					"good": `{"lvl":"info"}`,
 					"ok":   `{"thing":"thang"}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"success",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"bad":  "why",
 						"good": `{"lvl":"info"}`,
 						"ok":   `{"thing":"thang"}`,
@@ -490,19 +504,20 @@ func TestApply(t *testing.T) {
 					map[string]string{
 						"lvl": "info",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 				metric.New(
 					"success",
 					map[string]string{
 						"thing": "thang",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
-			name:         "Fail to parse one field but parses other [merge]",
+			name:         "fail to parse one field but parses other [merge]",
 			parseFields:  []string{"good", "bad"},
 			dropOriginal: false,
 			merge:        "override",
@@ -514,11 +529,11 @@ func TestApply(t *testing.T) {
 				map[string]string{
 					"a": "tag",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"good": `{"lvl":"info"}`,
 					"bad":  "why",
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"success",
@@ -526,15 +541,15 @@ func TestApply(t *testing.T) {
 						"a":   "tag",
 						"lvl": "info",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"good": `{"lvl":"info"}`,
 						"bad":  "why",
 					},
-					time.Unix(0, 0)),
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
-			name:         "Fail to parse one field but parses other [replace]",
+			name:         "fail to parse one field but parses other [replace]",
 			parseFields:  []string{"good", "bad"},
 			dropOriginal: true,
 			parser: &json.Parser{
@@ -545,20 +560,21 @@ func TestApply(t *testing.T) {
 				map[string]string{
 					"thing": "tag",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"good": `{"lvl":"info"}`,
 					"bad":  "why",
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"success",
 					map[string]string{
 						"lvl": "info",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0)),
 			},
+			undefinedTimestamp: true,
 		},
 		{
 			name:        "parser without metric name (issue #12115)",
@@ -575,14 +591,14 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"myname",
 				map[string]string{},
-				map[string]interface{}{"value": "7.2"},
-				time.Unix(0, 0)),
+				map[string]any{"value": "7.2"},
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"myname",
 					map[string]string{},
-					map[string]interface{}{"value": float64(7.2)},
-					time.Unix(0, 0)),
+					map[string]any{"value": float64(7.2)},
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
@@ -594,14 +610,14 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"myname",
 				map[string]string{},
-				map[string]interface{}{"value": "test value=7.2"},
-				time.Unix(0, 0)),
+				map[string]any{"value": "test value=7.2"},
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"test",
 					map[string]string{},
-					map[string]interface{}{"value": float64(7.2)},
-					time.Unix(0, 0)),
+					map[string]any{"value": float64(7.2)},
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
@@ -615,18 +631,93 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"myname",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": `{"timestamp": "2020-06-27 19:43:40", "value": 42.1}`,
 				},
-				time.Unix(0, 0)),
+				time.Unix(1773239679, 0)),
 			expected: []telegraf.Metric{
 				metric.New(
 					"myname",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"value": float64(42.1),
 					},
 					time.Unix(1593287020, 0)),
+			},
+		},
+		{
+			name:        "override with timestamp no inner time",
+			parseFields: []string{"value"},
+			merge:       "override-with-timestamp",
+			parser:      &json.Parser{},
+			input: metric.New(
+				"myname",
+				map[string]string{},
+				map[string]any{
+					"value": `{"value": 42.1}`,
+				},
+				time.Unix(1773239679, 0)),
+			expected: []telegraf.Metric{
+				metric.New(
+					"myname",
+					map[string]string{},
+					map[string]any{
+						"value": float64(42.1),
+					},
+					time.Unix(1773239679, 0)),
+			},
+		},
+		{
+			name:        "parent with timestamp",
+			parseFields: []string{"value"},
+			merge:       "parent-with-timestamp",
+			parser: &json.Parser{
+				TimeKey:    "timestamp",
+				TimeFormat: "2006-01-02 15:04:05",
+			},
+			dropOriginal: true,
+			input: metric.New(
+				"myname",
+				map[string]string{},
+				map[string]any{
+					"value": `{"timestamp": "2020-06-27 19:43:40", "a": 42.1, "b": 23.5}`,
+				},
+				time.Unix(1773239679, 0)),
+			expected: []telegraf.Metric{
+				metric.New(
+					"myname",
+					map[string]string{},
+					map[string]any{
+						"value": `{"timestamp": "2020-06-27 19:43:40", "a": 42.1, "b": 23.5}`,
+						"a":     float64(42.1),
+						"b":     float64(23.5),
+					},
+					time.Unix(1593287020, 0)),
+			},
+		},
+		{
+			name:         "parent with timestamp no inner timestamp",
+			parseFields:  []string{"value"},
+			merge:        "parent-with-timestamp",
+			parser:       &json.Parser{},
+			dropOriginal: true,
+			input: metric.New(
+				"myname",
+				map[string]string{},
+				map[string]any{
+					"value": `{"a": 42.1, "b": 23.5}`,
+				},
+				time.Unix(1773239679, 0)),
+			expected: []telegraf.Metric{
+				metric.New(
+					"myname",
+					map[string]string{},
+					map[string]any{
+						"value": `{"a": 42.1, "b": 23.5}`,
+						"a":     float64(42.1),
+						"b":     float64(23.5),
+					},
+					time.Unix(1773239679, 0)),
 			},
 		},
 		{
@@ -685,7 +776,7 @@ func TestApply(t *testing.T) {
 			input: metric.New(
 				"myname",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": uint8(13),
 				},
 				time.Unix(1593287020, 0)),
@@ -693,7 +784,7 @@ func TestApply(t *testing.T) {
 				metric.New(
 					"myname",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"value":   uint8(13),
 						"alarm_0": false,
 						"alarm_1": false,
@@ -707,6 +798,106 @@ func TestApply(t *testing.T) {
 					time.Unix(1593287020, 0)),
 			},
 		},
+		{
+			name:         "test base 64 field single",
+			parseBase64:  []string{"sample"},
+			dropOriginal: true,
+			parser: &json.Parser{
+				TagKeys: []string{
+					"text",
+				},
+			},
+			input: metric.New(
+				"singleField",
+				map[string]string{
+					"some": "tag",
+				},
+				map[string]any{
+					"sample": `eyJ0ZXh0IjogInRlc3QgYmFzZTY0In0=`,
+				},
+				time.Unix(1773239679, 0)),
+			expected: []telegraf.Metric{
+				metric.New(
+					"singleField",
+					map[string]string{
+						"text": "test base64",
+					},
+					map[string]any{},
+					time.Unix(0, 0)),
+			},
+			undefinedTimestamp: true,
+		},
+		{
+			name:         "parse two base64 fields",
+			parseBase64:  []string{"field_1", "field_2"},
+			dropOriginal: true,
+			parser: &json.Parser{
+				TagKeys: []string{"lvl", "msg", "err", "fatal"},
+			},
+			input: metric.New(
+				"bigMeasure",
+				map[string]string{},
+				map[string]any{
+					"field_1": `eyJsdmwiOiJpbmZvIiwibXNnIjoiaHR0cCByZXF1ZXN0In0=`,
+					"field_2": `eyJlcnIiOiJmYXRhbCIsImZhdGFsIjoic2VjdXJpdHkgdGhyZWF0In0=`,
+				},
+				time.Unix(1773239679, 0)),
+			expected: []telegraf.Metric{
+				metric.New(
+					"bigMeasure",
+					map[string]string{
+						"lvl": "info",
+						"msg": "http request",
+					},
+					map[string]any{},
+					time.Unix(0, 0)),
+				metric.New(
+					"bigMeasure",
+					map[string]string{
+						"err":   "fatal",
+						"fatal": "security threat",
+					},
+					map[string]any{},
+					time.Unix(0, 0)),
+			},
+			undefinedTimestamp: true,
+		},
+		{
+			name:         "parse two fields, one base64",
+			parseFields:  []string{"field_2"},
+			parseBase64:  []string{"field_1"},
+			dropOriginal: true,
+			parser: &json.Parser{
+				TagKeys: []string{"lvl", "msg", "err", "fatal"},
+			},
+			input: metric.New(
+				"bigMeasure",
+				map[string]string{},
+				map[string]any{
+					"field_1": `eyJsdmwiOiJpbmZvIiwibXNnIjoiaHR0cCByZXF1ZXN0In0=`,
+					"field_2": `{"err":"fatal","fatal":"security threat"}`,
+				},
+				time.Unix(1773239679, 0)),
+			expected: []telegraf.Metric{
+				metric.New(
+					"bigMeasure",
+					map[string]string{
+						"lvl": "info",
+						"msg": "http request",
+					},
+					map[string]any{},
+					time.Unix(0, 0)),
+				metric.New(
+					"bigMeasure",
+					map[string]string{
+						"err":   "fatal",
+						"fatal": "security threat",
+					},
+					map[string]any{},
+					time.Unix(0, 0)),
+			},
+			undefinedTimestamp: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -714,30 +905,811 @@ func TestApply(t *testing.T) {
 			if p, ok := tt.parser.(telegraf.Initializer); ok {
 				require.NoError(t, p.Init())
 			}
-			plugin := Parser{
+			plugin := &Parser{
 				ParseFields:  tt.parseFields,
 				ParseTags:    tt.parseTags,
+				Base64Fields: tt.parseBase64,
 				DropOriginal: tt.dropOriginal,
 				Merge:        tt.merge,
 				Log:          testutil.Logger{Name: "processor.parser"},
 			}
 			plugin.SetParser(tt.parser)
+			require.NoError(t, plugin.Init())
 
 			output := plugin.Apply(tt.input)
 			t.Logf("Testing: %s", tt.name)
 
-			// check timestamp when using with-timestamp merge type
-			if tt.merge == "override-with-timestamp" {
-				testutil.RequireMetricsEqual(t, tt.expected, output)
-			} else {
-				testutil.RequireMetricsEqual(t, tt.expected, output, testutil.IgnoreTime())
+			// Check timestamp only if it is defined by the metrics
+			options := []cmp.Option{
+				testutil.SortMetrics(),
 			}
+			if tt.undefinedTimestamp {
+				options = append(options, testutil.IgnoreTime())
+			}
+			testutil.RequireMetricsEqual(t, tt.expected, output, options...)
+		})
+	}
+}
+
+func TestMergeMultipleParsedMetrics(t *testing.T) {
+	tests := []struct {
+		name     string
+		strategy string
+		drop     bool
+		msg      string
+		parser   telegraf.Parser
+		expected []telegraf.Metric
+	}{
+		{
+			name: "no merge",
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"status": "ok",
+					},
+					map[string]any{
+						"value": int64(1),
+					},
+					time.Unix(0, 1773239679000000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"status": "warn",
+					},
+					map[string]any{
+						"value": int64(23),
+					},
+					time.Unix(0, 1773239679100000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"status": "ok",
+					},
+					map[string]any{
+						"value": int64(19),
+					},
+					time.Unix(0, 1773239679200000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"status": "fault",
+					},
+					map[string]any{
+						"value": int64(42),
+					},
+					time.Unix(0, 1773239679300000000),
+				),
+				// Original metric
+				metric.New(
+					"test",
+					map[string]string{"source": "foo"},
+					map[string]any{
+						"message":    "<msg>",
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name:     "override same field",
+			strategy: "override",
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(42),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name:     "override different fields",
+			strategy: "override",
+			msg: `
+metric,status=ok value1=1i 1773239679000000000
+metric,status=warn value2=23i 1773239679100000000
+metric,status=ok value3=19i 1773239679200000000
+metric,status=fault value4=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value1":     int64(1),
+						"value2":     int64(23),
+						"value3":     int64(19),
+						"value4":     int64(42),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name:     "override timestamp same field",
+			strategy: "override-with-timestamp",
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(42),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679300000000),
+				),
+			},
+		},
+		{
+			name:     "override timestamp different fields",
+			strategy: "override-with-timestamp",
+			msg: `
+metric,status=ok value1=1i 1773239679000000000
+metric,status=warn value2=23i 1773239679100000000
+metric,status=ok value3=19i 1773239679200000000
+metric,status=fault value4=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value1":     int64(1),
+						"value2":     int64(23),
+						"value3":     int64(19),
+						"value4":     int64(42),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679300000000),
+				),
+			},
+		},
+		{
+			name:     "parent same field",
+			strategy: "parent",
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(1),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "warn",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(23),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(19),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(42),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				// Original metric
+				metric.New(
+					"test",
+					map[string]string{"source": "foo"},
+					map[string]any{
+						"message":    "<msg>",
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name:     "parent different fields",
+			strategy: "parent",
+			msg: `
+metric,status=ok value1=1i 1773239679000000000
+metric,status=warn value2=23i 1773239679100000000
+metric,status=ok value3=19i 1773239679200000000
+metric,status=fault value4=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value1":     int64(1),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "warn",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value2":     int64(23),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value3":     int64(19),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value4":     int64(42),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				// Original metric
+				metric.New(
+					"test",
+					map[string]string{"source": "foo"},
+					map[string]any{
+						"message":    "<msg>",
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name:     "parent timestamp same field",
+			strategy: "parent-with-timestamp",
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(1),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679000000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "warn",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(23),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679100000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(19),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679200000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(42),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679300000000),
+				),
+				// Original metric
+				metric.New(
+					"test",
+					map[string]string{"source": "foo"},
+					map[string]any{
+						"message":    "<msg>",
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name: "drop no merge",
+			drop: true,
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{"status": "ok"},
+					map[string]any{"value": int64(1)},
+					time.Unix(0, 1773239679000000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{"status": "warn"},
+					map[string]any{"value": int64(23)},
+					time.Unix(0, 1773239679100000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{"status": "ok"},
+					map[string]any{"value": int64(19)},
+					time.Unix(0, 1773239679200000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{"status": "fault"},
+					map[string]any{"value": int64(42)},
+					time.Unix(0, 1773239679300000000),
+				),
+			},
+		},
+		{
+			name:     "drop override same field",
+			strategy: "override",
+			drop:     true,
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{"status": "fault"},
+					map[string]any{"value": int64(42)},
+					time.Unix(0, 1773239679000000000),
+				),
+			},
+		},
+		{
+			name:     "drop override different fields",
+			strategy: "override",
+			drop:     true,
+			msg: `
+metric,status=ok value1=1i 1773239679000000000
+metric,status=warn value2=23i 1773239679100000000
+metric,status=ok value3=19i 1773239679200000000
+metric,status=fault value4=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{"status": "fault"},
+					map[string]any{
+						"value1": int64(1),
+						"value2": int64(23),
+						"value3": int64(19),
+						"value4": int64(42),
+					},
+					time.Unix(0, 1773239679000000000),
+				),
+			},
+		},
+		{
+			name:     "drop override timestamp same field",
+			strategy: "override-with-timestamp",
+			drop:     true,
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{"status": "fault"},
+					map[string]any{"value": int64(42)},
+					time.Unix(0, 1773239679300000000),
+				),
+			},
+		},
+		{
+			name:     "drop override timestamp different fields",
+			strategy: "override-with-timestamp",
+			drop:     true,
+			msg: `
+metric,status=ok value1=1i 1773239679000000000
+metric,status=warn value2=23i 1773239679100000000
+metric,status=ok value3=19i 1773239679200000000
+metric,status=fault value4=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{"status": "fault"},
+					map[string]any{
+						"value1": int64(1),
+						"value2": int64(23),
+						"value3": int64(19),
+						"value4": int64(42),
+					},
+					time.Unix(0, 1773239679300000000),
+				),
+			},
+		},
+		{
+			name:     "drop parent same field",
+			strategy: "parent",
+			drop:     true,
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(1),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "warn",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(23),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(19),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(42),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name:     "drop parent different fields",
+			strategy: "parent",
+			drop:     true,
+			msg: `
+metric,status=ok value1=1i 1773239679000000000
+metric,status=warn value2=23i 1773239679100000000
+metric,status=ok value3=19i 1773239679200000000
+metric,status=fault value4=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value1":     int64(1),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "warn",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value2":     int64(23),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value3":     int64(19),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value4":     int64(42),
+						"additional": true,
+					},
+					time.Unix(1773258782, 0),
+				),
+			},
+		},
+		{
+			name:     "drop parent timestamp same field",
+			strategy: "parent-with-timestamp",
+			drop:     true,
+			msg: `
+metric,status=ok value=1i 1773239679000000000
+metric,status=warn value=23i 1773239679100000000
+metric,status=ok value=19i 1773239679200000000
+metric,status=fault value=42i 1773239679300000000
+`,
+			parser: &influx.Parser{},
+			expected: []telegraf.Metric{
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(1),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679000000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "warn",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(23),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679100000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "ok",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(19),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679200000000),
+				),
+				metric.New(
+					"metric",
+					map[string]string{
+						"source": "foo",
+						"status": "fault",
+					},
+					map[string]any{
+						"message":    "<msg>",
+						"value":      int64(42),
+						"additional": true,
+					},
+					time.Unix(0, 1773239679300000000),
+				),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Add the message to the expected metric if the original metric
+			// will not be dropped
+			expected := tt.expected
+			for i := range expected {
+				if expected[i].HasField("message") {
+					expected[i].AddField("message", tt.msg)
+				}
+			}
+
+			// Setup parser
+			if p, ok := tt.parser.(telegraf.Initializer); ok {
+				require.NoError(t, p.Init())
+			}
+
+			// Setup message
+			input := metric.New(
+				"test",
+				map[string]string{"source": "foo"},
+				map[string]any{
+					"message":    tt.msg,
+					"additional": true,
+				},
+				time.Unix(1773258782, 0),
+			)
+
+			// Setup plugin
+			plugin := &Parser{
+				ParseFields:  []string{"message"},
+				DropOriginal: tt.drop,
+				Merge:        tt.strategy,
+				Log:          testutil.Logger{Name: "processor.parser"},
+			}
+			plugin.SetParser(tt.parser)
+			require.NoError(t, plugin.Init())
+
+			// Parse the metric and check the result
+			output := plugin.Apply(input)
+			testutil.RequireMetricsEqual(t, expected, output, testutil.SortMetrics())
 		})
 	}
 }
 
 func TestInvalidMerge(t *testing.T) {
-	plugin := Parser{Merge: "fake"}
+	plugin := &Parser{Merge: "fake"}
 	require.Error(t, plugin.Init())
 }
 
@@ -756,7 +1728,7 @@ func TestBadApply(t *testing.T) {
 			input: metric.New(
 				"bad",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"some_field": 5,
 				},
 				time.Unix(0, 0)),
@@ -764,7 +1736,7 @@ func TestBadApply(t *testing.T) {
 				metric.New(
 					"bad",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"some_field": 5,
 					},
 					time.Unix(0, 0)),
@@ -777,7 +1749,7 @@ func TestBadApply(t *testing.T) {
 			input: metric.New(
 				"bad",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"some_field": 5,
 				},
 				time.Unix(0, 0)),
@@ -785,7 +1757,7 @@ func TestBadApply(t *testing.T) {
 				metric.New(
 					"bad",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"some_field": 5,
 					},
 					time.Unix(0, 0)),
@@ -799,11 +1771,12 @@ func TestBadApply(t *testing.T) {
 				require.NoError(t, p.Init())
 			}
 
-			plugin := Parser{
+			plugin := &Parser{
 				ParseFields: tt.parseFields,
 				Log:         testutil.Logger{Name: "processor.parser"},
 			}
 			plugin.SetParser(tt.parser)
+			require.NoError(t, plugin.Init())
 
 			output := plugin.Apply(tt.input)
 			testutil.RequireMetricsEqual(t, tt.expected, output, testutil.IgnoreTime())
@@ -811,26 +1784,143 @@ func TestBadApply(t *testing.T) {
 	}
 }
 
+func TestBase64FieldValidation(t *testing.T) {
+	testMetric := metric.New(
+		"test",
+		map[string]string{},
+		map[string]any{
+			"b": `eyJsdmwiOiJpbmZvIiwibXNnIjoiaHR0cCByZXF1ZXN0In0=`,
+		},
+		time.Unix(0, 0))
+
+	testLogger := &testutil.CaptureLogger{}
+
+	parser := &json.Parser{}
+	require.NoError(t, parser.Init())
+	plugin := &Parser{
+		ParseFields:  []string{"a"},
+		Base64Fields: []string{"b"},
+		Log:          testLogger,
+	}
+	plugin.SetParser(parser)
+	require.NoError(t, plugin.Init())
+	plugin.Apply(testMetric)
+	require.Empty(t, testLogger.Errors())
+
+	plugin = &Parser{
+		ParseFields:  []string{"b"},
+		Base64Fields: []string{"b"},
+		Log:          testLogger,
+	}
+	plugin.SetParser(&json.Parser{})
+	require.NoError(t, plugin.Init())
+	plugin.Apply(testMetric)
+	require.NotEmpty(t, testLogger.Errors())
+}
+
+func TestTracking(t *testing.T) {
+	var testCases = []struct {
+		name         string
+		numMetrics   int
+		dropOriginal bool
+		payload      string
+	}{
+		{
+			name:       "keep all",
+			numMetrics: 2,
+			payload:    `{"value": 1}`,
+		},
+		{
+			name:         "drop original",
+			numMetrics:   1,
+			dropOriginal: true,
+			payload:      `{"value": 1}`,
+		},
+	}
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a tracking metric and tap the delivery information
+			var mu sync.Mutex
+			delivered := make([]telegraf.DeliveryInfo, 0, 1)
+			notify := func(di telegraf.DeliveryInfo) {
+				mu.Lock()
+				defer mu.Unlock()
+				delivered = append(delivered, di)
+			}
+
+			// Configure the plugin
+			parser := &json.Parser{}
+			require.NoError(t, parser.Init())
+			plugin := &Parser{
+				DropOriginal: tt.dropOriginal,
+				ParseFields:  []string{"payload"},
+				Log:          testutil.Logger{Name: "processor.parser"},
+			}
+			plugin.SetParser(parser)
+			require.NoError(t, plugin.Init())
+
+			// Process expected metrics and compare with resulting metrics
+			testMetric := metric.New(
+				"test",
+				map[string]string{},
+				map[string]any{
+					"payload": tt.payload,
+				},
+				time.Unix(0, 0),
+			)
+
+			input, _ := metric.WithTracking(testMetric, notify)
+			result := plugin.Apply(input)
+
+			// Ensure we get back the correct number of metrics
+			require.Len(t, result, tt.numMetrics)
+			for _, m := range result {
+				m.Accept()
+			}
+
+			// Simulate output acknowledging delivery of metrics and check delivery
+			require.Eventuallyf(t, func() bool {
+				mu.Lock()
+				defer mu.Unlock()
+				return len(delivered) == 1
+			}, 1*time.Second, 100*time.Millisecond, "original metric not delivered")
+		})
+	}
+}
+
+func TestNoTimeFuncParser(t *testing.T) {
+	tests := []string{
+		"override-with-timestamp",
+		"parent-with-timestamp",
+	}
+
+	for _, strategy := range tests {
+		t.Run(strategy, func(t *testing.T) {
+			// Setup a logger for testing
+			logger := &testutil.CaptureLogger{}
+
+			// Setup a parser which doesn't implement the ParserTimeFuncPlugin interface
+			parser := &opentsdb.Parser{}
+
+			// Configure the plugin
+			plugin := &Parser{
+				DropOriginal: true,
+				ParseFields:  []string{"payload"},
+				Merge:        strategy,
+				Log:          logger,
+			}
+			plugin.SetParser(parser)
+			require.NoError(t, plugin.Init())
+
+			// Check for the warning
+			warnings := logger.Warnings()
+			require.Len(t, warnings, 1)
+			require.Contains(t, warnings[0], "Parser will always create a timestamp")
+		})
+	}
+}
+
 // Benchmarks
-
-func getMetricFields(m telegraf.Metric) interface{} {
-	key := "field3"
-	if v, ok := m.Fields()[key]; ok {
-		return v
-	}
-	return nil
-}
-
-func getMetricFieldList(m telegraf.Metric) interface{} {
-	key := "field3"
-	fields := m.FieldList()
-	for _, field := range fields {
-		if field.Key == key {
-			return field.Value
-		}
-	}
-	return nil
-}
 
 func BenchmarkFieldListing(b *testing.B) {
 	m := metric.New(
@@ -838,7 +1928,7 @@ func BenchmarkFieldListing(b *testing.B) {
 		map[string]string{
 			"some": "tag",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"field0": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 			"field1": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 			"field2": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
@@ -860,7 +1950,7 @@ func BenchmarkFields(b *testing.B) {
 		map[string]string{
 			"some": "tag",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"field0": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 			"field1": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
 			"field2": `{"ts":"2018-07-24T19:43:40.275Z","lvl":"info","msg":"http request","method":"POST"}`,
@@ -874,4 +1964,25 @@ func BenchmarkFields(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		getMetricFields(m)
 	}
+}
+
+// Internal
+
+func getMetricFields(m telegraf.Metric) any {
+	key := "field3"
+	if v, ok := m.Fields()[key]; ok {
+		return v
+	}
+	return nil
+}
+
+func getMetricFieldList(m telegraf.Metric) any {
+	key := "field3"
+	fields := m.FieldList()
+	for _, field := range fields {
+		if field.Key == key {
+			return field.Value
+		}
+	}
+	return nil
 }

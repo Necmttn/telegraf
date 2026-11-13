@@ -6,18 +6,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestPod(t *testing.T) {
 	cli := &client{}
-	selectInclude := []string{}
-	selectExclude := []string{}
 	now := time.Now()
 	started := time.Date(now.Year(), now.Month(), now.Day(), now.Hour()-1, 1, 36, 0, now.Location())
 	created := time.Date(now.Year(), now.Month(), now.Day(), now.Hour()-2, 1, 0, 0, now.Location())
@@ -33,7 +33,7 @@ func TestPod(t *testing.T) {
 		{
 			name: "no pods",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/pods/": &corev1.PodList{},
 				},
 			},
@@ -42,7 +42,7 @@ func TestPod(t *testing.T) {
 		{
 			name: "collect pods",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/pods/": &corev1.PodList{
 						Items: []corev1.Pod{
 							{
@@ -107,11 +107,9 @@ func TestPod(t *testing.T) {
 									Volumes: []corev1.Volume{
 										{
 											Name: "vol1",
-											VolumeSource: corev1.VolumeSource{
-												PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-													ClaimName: "pc1",
-													ReadOnly:  true,
-												},
+											PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+												ClaimName: "pc1",
+												ReadOnly:  true,
 											},
 										},
 										{
@@ -189,31 +187,29 @@ func TestPod(t *testing.T) {
 										},
 									},
 								},
-								ObjectMeta: metav1.ObjectMeta{
-									OwnerReferences: []metav1.OwnerReference{
-										{
-											APIVersion: "apps/v1",
-											Kind:       "DaemonSet",
-											Name:       "forwarder",
-											Controller: toBoolPtr(true),
-										},
+								OwnerReferences: []metav1.OwnerReference{
+									{
+										APIVersion: "apps/v1",
+										Kind:       "DaemonSet",
+										Name:       "forwarder",
+										Controller: new(true),
 									},
-									Generation: 11232,
-									Namespace:  "ns1",
-									Name:       "pod1",
-									Labels: map[string]string{
-										"lab1": "v1",
-										"lab2": "v2",
-									},
-									CreationTimestamp: metav1.Time{Time: created},
 								},
+								Generation: 11232,
+								Namespace:  "ns1",
+								Name:       "pod1",
+								Labels: map[string]string{
+									"lab1": "v1",
+									"lab2": "v2",
+								},
+								CreationTimestamp: metav1.Time{Time: created},
 							},
 						},
 					},
 				},
 			},
 			output: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -224,13 +220,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "running",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -241,13 +237,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "running",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(1),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -258,13 +254,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "running",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"namespace":             "ns1",
@@ -278,7 +274,7 @@ func TestPod(t *testing.T) {
 						"node_selector_select1": "s1",
 						"node_selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"restarts_total":                   int32(3),
 						"state_code":                       0,
 						"resource_requests_millicpu_units": int64(100),
@@ -286,7 +282,7 @@ func TestPod(t *testing.T) {
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -297,13 +293,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "completed",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -314,13 +310,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "completed",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(1),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -331,13 +327,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "completed",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"namespace":             "ns1",
@@ -351,7 +347,7 @@ func TestPod(t *testing.T) {
 						"node_selector_select1": "s1",
 						"node_selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"restarts_total":                   int32(3),
 						"state_code":                       1,
 						"state_reason":                     "Completed",
@@ -361,7 +357,7 @@ func TestPod(t *testing.T) {
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -372,13 +368,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "waiting",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -389,13 +385,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "waiting",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(1),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -406,13 +402,13 @@ func TestPod(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "waiting",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"namespace":             "ns1",
@@ -426,7 +422,7 @@ func TestPod(t *testing.T) {
 						"node_selector_select1": "s1",
 						"node_selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"restarts_total":                   int32(3),
 						"state_code":                       2,
 						"state_reason":                     "PodUninitialized",
@@ -438,18 +434,86 @@ func TestPod(t *testing.T) {
 			},
 			hasError: false,
 		},
+		{
+			name: "init container resources",
+			handler: &mockHandler{
+				responseMap: map[string]any{
+					"/pods/": &corev1.PodList{
+						Items: []corev1.Pod{
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									CreationTimestamp: metav1.Time{Time: created},
+									Name:              "pod1",
+									Namespace:         "ns1",
+								},
+								Spec: corev1.PodSpec{
+									NodeName: "node1",
+									InitContainers: []corev1.Container{
+										{
+											Name:          "sidecar",
+											Image:         "image1:latest",
+											RestartPolicy: new(corev1.ContainerRestartPolicyAlways),
+											Resources: corev1.ResourceRequirements{
+												Limits: corev1.ResourceList{
+													"memory": resource.MustParse("256Mi"),
+												},
+											},
+										},
+										{Name: "init", Image: "image2"},
+									},
+								},
+								Status: corev1.PodStatus{
+									Phase: "Succeeded",
+									InitContainerStatuses: []corev1.ContainerStatus{
+										{
+											Name: "sidecar",
+											State: corev1.ContainerState{
+												Terminated: &corev1.ContainerStateTerminated{Reason: "Completed"},
+											},
+										},
+										{Name: "init"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			output: []telegraf.Metric{
+				metric.New(
+					podContainerMeasurement,
+					map[string]string{
+						"container_name": "sidecar",
+						"image":          "image1",
+						"namespace":      "ns1",
+						"node_name":      "node1",
+						"pod_name":       "pod1",
+						"phase":          "Succeeded",
+						"readiness":      "unready",
+						"state":          "terminated",
+						"version":        "latest",
+					},
+					map[string]any{
+						"restarts_total":               int32(0),
+						"state_code":                   1,
+						"state_reason":                 "Completed",
+						"terminated_reason":            "Completed",
+						"resource_limits_memory_bytes": int64(268435456),
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
 	}
 	for _, v := range tests {
 		ks := &KubernetesInventory{
-			client:          cli,
-			SelectorInclude: selectInclude,
-			SelectorExclude: selectExclude,
+			client: cli,
 		}
 		require.NoError(t, ks.createSelectorFilters())
 		acc := new(testutil.Accumulator)
 		items := ((v.handler.responseMap["/pods/"]).(*corev1.PodList)).Items
 		for i := range items {
-			ks.gatherPod(&items[i], acc)
+			ks.gatherPod(&items[i], nil, acc)
 		}
 
 		err := acc.FirstError()
@@ -474,7 +538,7 @@ func TestPodSelectorFilter(t *testing.T) {
 	cond1 := time.Date(now.Year(), 7, 5, 7, 53, 29, 0, now.Location())
 	cond2 := time.Date(now.Year(), 7, 5, 7, 53, 31, 0, now.Location())
 
-	responseMap := map[string]interface{}{
+	responseMap := map[string]any{
 		"/pods/": &corev1.PodList{
 			Items: []corev1.Pod{
 				{
@@ -503,11 +567,9 @@ func TestPodSelectorFilter(t *testing.T) {
 						Volumes: []corev1.Volume{
 							{
 								Name: "vol1",
-								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "pc1",
-										ReadOnly:  true,
-									},
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: "pc1",
+									ReadOnly:  true,
 								},
 							},
 							{
@@ -557,24 +619,22 @@ func TestPodSelectorFilter(t *testing.T) {
 							},
 						},
 					},
-					ObjectMeta: metav1.ObjectMeta{
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: "apps/v1",
-								Kind:       "DaemonSet",
-								Name:       "forwarder",
-								Controller: toBoolPtr(true),
-							},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "apps/v1",
+							Kind:       "DaemonSet",
+							Name:       "forwarder",
+							Controller: new(true),
 						},
-						Generation: 11232,
-						Namespace:  "ns1",
-						Name:       "pod1",
-						Labels: map[string]string{
-							"lab1": "v1",
-							"lab2": "v2",
-						},
-						CreationTimestamp: metav1.Time{Time: created},
 					},
+					Generation: 11232,
+					Namespace:  "ns1",
+					Name:       "pod1",
+					Labels: map[string]string{
+						"lab1": "v1",
+						"lab2": "v2",
+					},
+					CreationTimestamp: metav1.Time{Time: created},
 				},
 			},
 		},
@@ -607,8 +667,6 @@ func TestPodSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
-			exclude:  []string{},
 			expected: map[string]string{
 				"node_selector_select1": "s1",
 				"node_selector_select2": "s2",
@@ -621,7 +679,6 @@ func TestPodSelectorFilter(t *testing.T) {
 			},
 			hasError: false,
 			include:  []string{"select1"},
-			exclude:  []string{},
 			expected: map[string]string{
 				"node_selector_select1": "s1",
 			},
@@ -632,7 +689,6 @@ func TestPodSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"select2"},
 			expected: map[string]string{
 				"node_selector_select1": "s1",
@@ -645,7 +701,6 @@ func TestPodSelectorFilter(t *testing.T) {
 			},
 			hasError: false,
 			include:  []string{"*1"},
-			exclude:  []string{},
 			expected: map[string]string{
 				"node_selector_select1": "s1",
 			},
@@ -656,7 +711,6 @@ func TestPodSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"*2"},
 			expected: map[string]string{
 				"node_selector_select1": "s1",
@@ -668,7 +722,6 @@ func TestPodSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"*2"},
 			expected: map[string]string{
 				"node_selector_select1": "s1",
@@ -685,13 +738,13 @@ func TestPodSelectorFilter(t *testing.T) {
 		acc := new(testutil.Accumulator)
 		items := ((v.handler.responseMap["/pods/"]).(*corev1.PodList)).Items
 		for i := range items {
-			ks.gatherPod(&items[i], acc)
+			ks.gatherPod(&items[i], nil, acc)
 		}
 
 		// Grab selector tags
 		actual := map[string]string{}
-		for _, metric := range acc.Metrics {
-			for key, val := range metric.Tags {
+		for _, m := range acc.Metrics {
+			for key, val := range m.Tags {
 				if strings.Contains(key, "node_selector_") {
 					actual[key] = val
 				}
@@ -705,8 +758,6 @@ func TestPodSelectorFilter(t *testing.T) {
 
 func TestPodPendingContainers(t *testing.T) {
 	cli := &client{}
-	selectInclude := []string{}
-	selectExclude := []string{}
 	now := time.Now()
 	started := time.Date(now.Year(), now.Month(), now.Day(), now.Hour()-1, 1, 36, 0, now.Location())
 	created := time.Date(now.Year(), now.Month(), now.Day(), now.Hour()-2, 1, 36, 0, now.Location())
@@ -722,7 +773,7 @@ func TestPodPendingContainers(t *testing.T) {
 		{
 			name: "collect pods",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/pods/": &corev1.PodList{
 						Items: []corev1.Pod{
 							{
@@ -769,11 +820,9 @@ func TestPodPendingContainers(t *testing.T) {
 									Volumes: []corev1.Volume{
 										{
 											Name: "vol1",
-											VolumeSource: corev1.VolumeSource{
-												PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-													ClaimName: "pc1",
-													ReadOnly:  true,
-												},
+											PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+												ClaimName: "pc1",
+												ReadOnly:  true,
 											},
 										},
 										{
@@ -808,33 +857,30 @@ func TestPodPendingContainers(t *testing.T) {
 											LastTransitionTime: metav1.Time{Time: cond1},
 										},
 									},
-									ContainerStatuses: []corev1.ContainerStatus{},
 								},
-								ObjectMeta: metav1.ObjectMeta{
-									OwnerReferences: []metav1.OwnerReference{
-										{
-											APIVersion: "apps/v1",
-											Kind:       "DaemonSet",
-											Name:       "forwarder",
-											Controller: toBoolPtr(true),
-										},
+								OwnerReferences: []metav1.OwnerReference{
+									{
+										APIVersion: "apps/v1",
+										Kind:       "DaemonSet",
+										Name:       "forwarder",
+										Controller: new(true),
 									},
-									Generation: 11232,
-									Namespace:  "ns1",
-									Name:       "pod1",
-									Labels: map[string]string{
-										"lab1": "v1",
-										"lab2": "v2",
-									},
-									CreationTimestamp: metav1.Time{Time: created},
 								},
+								Generation: 11232,
+								Namespace:  "ns1",
+								Name:       "pod1",
+								Labels: map[string]string{
+									"lab1": "v1",
+									"lab2": "v2",
+								},
+								CreationTimestamp: metav1.Time{Time: created},
 							},
 						},
 					},
 				},
 			},
 			output: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -845,13 +891,13 @@ func TestPodPendingContainers(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "waiting",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -862,13 +908,13 @@ func TestPodPendingContainers(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "waiting",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(1),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -879,13 +925,13 @@ func TestPodPendingContainers(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "waiting",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"namespace":             "ns1",
@@ -899,7 +945,7 @@ func TestPodPendingContainers(t *testing.T) {
 						"node_selector_select1": "s1",
 						"node_selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"phase_reason":                     "NetworkNotReady",
 						"restarts_total":                   int32(0),
 						"state_code":                       3,
@@ -908,7 +954,7 @@ func TestPodPendingContainers(t *testing.T) {
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -919,13 +965,13 @@ func TestPodPendingContainers(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "terminated",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -936,13 +982,13 @@ func TestPodPendingContainers(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "terminated",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(1),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"pod_name":       "pod1",
@@ -953,13 +999,13 @@ func TestPodPendingContainers(t *testing.T) {
 						"namespace":      "ns1",
 						"container_name": "terminated",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"status_condition": int64(1),
 						"ready":            int64(0),
 					},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					podContainerMeasurement,
 					map[string]string{
 						"namespace":             "ns1",
@@ -973,7 +1019,7 @@ func TestPodPendingContainers(t *testing.T) {
 						"node_selector_select1": "s1",
 						"node_selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"phase_reason":                     "NetworkNotReady",
 						"restarts_total":                   int32(0),
 						"state_code":                       3,
@@ -988,15 +1034,13 @@ func TestPodPendingContainers(t *testing.T) {
 	}
 	for _, v := range tests {
 		ks := &KubernetesInventory{
-			client:          cli,
-			SelectorInclude: selectInclude,
-			SelectorExclude: selectExclude,
+			client: cli,
 		}
 		require.NoError(t, ks.createSelectorFilters())
 		acc := new(testutil.Accumulator)
 		items := ((v.handler.responseMap["/pods/"]).(*corev1.PodList)).Items
 		for i := range items {
-			ks.gatherPod(&items[i], acc)
+			ks.gatherPod(&items[i], nil, acc)
 		}
 
 		err := acc.FirstError()
@@ -1010,5 +1054,107 @@ func TestPodPendingContainers(t *testing.T) {
 
 		require.Len(t, acc.Metrics, len(v.output))
 		testutil.RequireMetricsEqual(t, acc.GetTelegrafMetrics(), v.output, testutil.IgnoreTime())
+	}
+}
+
+func TestPodWorkloadTags(t *testing.T) {
+	controller := true
+	owner := func(kind, name string) []metav1.OwnerReference {
+		return []metav1.OwnerReference{{Kind: kind, Name: name, Controller: &controller}}
+	}
+	deployments := replicaSetDeployments(&appsv1.ReplicaSetList{
+		Items: []appsv1.ReplicaSet{
+			{ObjectMeta: metav1.ObjectMeta{Name: "web-5d8f7c9b4", Namespace: "ns1", OwnerReferences: owner("Deployment", "web")}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "canary-6c7d8e9f0", Namespace: "ns1", OwnerReferences: owner("Rollout", "canary")}},
+		},
+	})
+
+	tests := []struct {
+		name           string
+		optionDisabled bool
+		namespace      string
+		owners         []metav1.OwnerReference
+		deployments    map[string]string
+		expectedKey    string
+		expectedValue  string
+	}{
+		{
+			name:          "replicaset owned by a deployment",
+			namespace:     "ns1",
+			owners:        owner("ReplicaSet", "web-5d8f7c9b4"),
+			deployments:   deployments,
+			expectedKey:   "deployment_name",
+			expectedValue: "web",
+		},
+		{
+			name:          "statefulset",
+			namespace:     "ns1",
+			owners:        owner("StatefulSet", "db"),
+			deployments:   deployments,
+			expectedKey:   "statefulset_name",
+			expectedValue: "db",
+		},
+		{
+			name:          "daemonset",
+			namespace:     "ns1",
+			owners:        owner("DaemonSet", "fluentd"),
+			deployments:   deployments,
+			expectedKey:   "daemonset_name",
+			expectedValue: "fluentd",
+		},
+		{
+			name:        "replicaset owned by another controller",
+			namespace:   "ns1",
+			owners:      owner("ReplicaSet", "canary-6c7d8e9f0"),
+			deployments: deployments,
+		},
+		{
+			name:        "no owner",
+			namespace:   "ns1",
+			deployments: deployments,
+		},
+		{
+			name:           "option disabled",
+			optionDisabled: true,
+			namespace:      "ns1",
+			owners:         owner("ReplicaSet", "web-5d8f7c9b4"),
+			deployments:    deployments,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "pod1",
+					Namespace:         tt.namespace,
+					OwnerReferences:   tt.owners,
+					CreationTimestamp: metav1.Now(),
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "app", Image: "image1"}},
+				},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{{Type: "Ready", Status: "True"}},
+				},
+			}
+
+			ks := &KubernetesInventory{PodWorkloadTags: !tt.optionDisabled}
+			require.NoError(t, ks.createSelectorFilters())
+			acc := &testutil.Accumulator{}
+			ks.gatherPod(pod, tt.deployments, acc)
+
+			require.Len(t, acc.Metrics, 2)
+			for _, m := range acc.GetTelegrafMetrics() {
+				for _, key := range []string{"deployment_name", "statefulset_name", "daemonset_name"} {
+					value, found := m.GetTag(key)
+					if key == tt.expectedKey {
+						require.True(t, found)
+						require.Equal(t, tt.expectedValue, value)
+					} else {
+						require.False(t, found)
+					}
+				}
+			}
+		})
 	}
 }

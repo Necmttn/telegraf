@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
+
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
 )
@@ -78,11 +79,7 @@ func (l *LDAP) new389dsConfig() []request {
 }
 
 func (l *LDAP) convert389ds(result *ldap.SearchResult, ts time.Time) []telegraf.Metric {
-	tags := map[string]string{
-		"server": l.host,
-		"port":   l.port,
-	}
-	fields := make(map[string]interface{})
+	fields := make(map[string]any)
 	for _, entry := range result.Entries {
 		for _, attr := range entry.Attributes {
 			if len(attr.Values[0]) == 0 {
@@ -109,6 +106,6 @@ func (l *LDAP) convert389ds(result *ldap.SearchResult, ts time.Time) []telegraf.
 		}
 	}
 
-	m := metric.New("389ds", tags, fields, ts)
+	m := metric.New("389ds", l.tags, fields, ts)
 	return []telegraf.Metric{m}
 }

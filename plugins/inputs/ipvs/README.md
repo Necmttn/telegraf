@@ -1,16 +1,23 @@
 # IPVS Input Plugin
 
-The IPVS input plugin uses the linux kernel netlink socket interface to gather
-metrics about ipvs virtual and real servers.
+This plugin gathers metrics about the [IPVS virtual and real servers][ipvs]
+using the netlink socket interface of the Linux kernel.
 
-**Supported Platforms:** Linux
+> [!IMPORTANT]
+> The plugin requires `CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities.
+> Check the [permissions section](#permissions) for ways to grant them.
+
+⭐ Telegraf v1.9.0
+🏷️ network, system
+💻 linux
+
+[ipvs]: http://www.linuxvirtualserver.org/software/ipvs.html
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -25,11 +32,21 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 ### Permissions
 
-Assuming you installed the telegraf package via one of the published packages,
+Assuming you installed the Telegraf package via one of the published packages,
 the process will be running as the `telegraf` user. However, in order for this
-plugin to communicate over netlink sockets it needs the telegraf process to be
-running as `root` (or some user with `CAP_NET_ADMIN` and `CAP_NET_RAW`). Be sure
-to ensure these permissions before running telegraf with this plugin included.
+plugin to communicate over netlink sockets it needs the telegraf process to have
+`CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities.
+
+This is the case when running Telegraf as `root` or some user with
+`CAP_NET_ADMIN` and `CAP_NET_RAW`. Alternatively, you can add the capabilities
+when starting Telegraf via systemd by running `systemctl edit telegraf.service`
+and add the following:
+
+```shell
+[Service]
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+```
 
 ## Metrics
 

@@ -2,12 +2,15 @@ package port_name
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 var fakeServices = `
@@ -17,7 +20,7 @@ tftp		69/udp`
 
 func TestReadServicesFile(t *testing.T) {
 	readServicesFile()
-	require.NotZero(t, len(services))
+	require.NotEmpty(t, services)
 }
 
 func TestFakeServices(t *testing.T) {
@@ -44,23 +47,23 @@ func TestTable(t *testing.T) {
 			dest: "service",
 			prot: "tcp",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "443",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port":    "443",
 						"service": "https",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -71,23 +74,23 @@ func TestTable(t *testing.T) {
 			dest: "service",
 			prot: "udp",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "69",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port":    "69",
 						"service": "tftp",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -98,23 +101,23 @@ func TestTable(t *testing.T) {
 			dest: "service",
 			prot: "foobar",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "80/tcp",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port":    "80/tcp",
 						"service": "http",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -125,40 +128,40 @@ func TestTable(t *testing.T) {
 			dest: "service",
 			prot: "tcp",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "80",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "69/udp",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port":    "80",
 						"service": "http",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port":    "69/udp",
 						"service": "tftp",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -169,23 +172,23 @@ func TestTable(t *testing.T) {
 			dest: "bar",
 			prot: "tcp",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"foo": "80",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"foo": "80",
 						"bar": "http",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -196,22 +199,22 @@ func TestTable(t *testing.T) {
 			dest: "service",
 			prot: "tcp",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "9999",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "9999",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -222,22 +225,22 @@ func TestTable(t *testing.T) {
 			dest: "service",
 			prot: "udp",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "80",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"port": "80",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -248,20 +251,20 @@ func TestTable(t *testing.T) {
 			dest:  "bar",
 			prot:  "tcp",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"foo": "80",
 					},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"foo": "80",
 						"bar": "http",
 					},
@@ -276,10 +279,10 @@ func TestTable(t *testing.T) {
 			prot:      "udp",
 			protField: "proto",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"foo":   "80",
 						"proto": "tcp",
 					},
@@ -287,10 +290,10 @@ func TestTable(t *testing.T) {
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"foo":   "80",
 						"bar":   "http",
 						"proto": "tcp",
@@ -306,25 +309,25 @@ func TestTable(t *testing.T) {
 			prot:    "udp",
 			protTag: "proto",
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"foo":   "80",
 						"proto": "tcp",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"meas",
 					map[string]string{
 						"foo":   "80",
 						"bar":   "http",
 						"proto": "tcp",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -351,4 +354,104 @@ func TestTable(t *testing.T) {
 			testutil.RequireMetricsEqual(t, tt.expected, actual)
 		})
 	}
+}
+
+func TestTracking(t *testing.T) {
+	// Setup raw input and expected output
+	inputRaw := []telegraf.Metric{
+		metric.New(
+			"test",
+			map[string]string{
+				"port": "80/tcp",
+			},
+			map[string]any{"value": uint64(3)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"test",
+			map[string]string{
+				"port": "69/udp",
+			},
+			map[string]any{"value": int64(4)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"test",
+			map[string]string{
+				"port": "443",
+			},
+			map[string]any{"value": float64(5.5)},
+			time.Unix(0, 0),
+		),
+	}
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"test",
+			map[string]string{
+				"port":    "80/tcp",
+				"service": "http",
+			},
+			map[string]any{"value": uint64(3)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"test",
+			map[string]string{
+				"port":    "69/udp",
+				"service": "tftp",
+			},
+			map[string]any{"value": int64(4)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"test",
+			map[string]string{
+				"port":    "443",
+				"service": "https",
+			},
+			map[string]any{"value": float64(5.5)},
+			time.Unix(0, 0),
+		),
+	}
+
+	// Create fake notification for testing
+	var mu sync.Mutex
+	delivered := make([]telegraf.DeliveryInfo, 0, len(inputRaw))
+	notify := func(di telegraf.DeliveryInfo) {
+		mu.Lock()
+		defer mu.Unlock()
+		delivered = append(delivered, di)
+	}
+
+	// Convert raw input to tracking metric
+	input := make([]telegraf.Metric, 0, len(inputRaw))
+	for _, m := range inputRaw {
+		tm, _ := metric.WithTracking(m, notify)
+		input = append(input, tm)
+	}
+
+	// Prepare and start the plugin
+	plugin := &PortName{
+		SourceTag:       "port",
+		Dest:            "service",
+		DefaultProtocol: "tcp",
+		Log:             testutil.Logger{},
+	}
+
+	// Process expected metrics and compare with resulting metrics
+	actual := plugin.Apply(input...)
+	testutil.RequireMetricsEqual(t, expected, actual)
+
+	// Simulate output acknowledging delivery
+	for _, m := range actual {
+		m.Accept()
+	}
+
+	// Check delivery
+	require.Eventuallyf(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(input) == len(delivered)
+	}, time.Second, 100*time.Millisecond, "%d delivered but %d expected", len(delivered), len(expected))
 }

@@ -9,21 +9,22 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+// Images from https://images.linuxcontainers.org/
 var imagesRPM = []string{
-	"fedora/39",
-	"fedora/38",
-	"centos/7",
-	"centos/9-Stream",
-	"amazonlinux/2",
-	//"opensuse/15.3", 			// shadow-utils dependency bug see #3833
-	//"opensuse/tumbleweed", 	// shadow-utils dependency bug see #3833
+	"fedora/43",
+	"fedora/42",
+	"centos/10-Stream",
 }
 
 var imagesDEB = []string{
+	// LTS
 	"debian/bullseye",
-	"debian/bookworm",
-	"ubuntu/focal",
-	"ubuntu/jammy",
+	// Latest
+	"debian/trixie",
+	// LTS
+	"ubuntu/noble",
+	// Latest
+	"ubuntu/resolute",
 }
 
 func main() {
@@ -44,7 +45,7 @@ func main() {
 				Destination: &image,
 			},
 		},
-		Action: func(c *cli.Context) error {
+		Action: func(*cli.Context) error {
 			if _, err := os.Stat(packageFile); err != nil {
 				return fmt.Errorf("unknown package file: %w", err)
 			}
@@ -82,7 +83,7 @@ func launchTests(packageFile string, images []string) error {
 		fmt.Printf("starting test with %s\n", image)
 
 		uuidWithHyphen := uuid.New()
-		name := fmt.Sprintf("telegraf-test-%s", uuidWithHyphen.String()[0:8])
+		name := "telegraf-test-" + uuidWithHyphen.String()[0:8]
 
 		err := runTest(image, name, packageFile)
 		if err != nil {
@@ -97,7 +98,7 @@ func launchTests(packageFile string, images []string) error {
 	return nil
 }
 
-func runTest(image string, name string, packageFile string) error {
+func runTest(image, name, packageFile string) error {
 	c := Container{Name: name}
 	if err := c.Create(image); err != nil {
 		return err

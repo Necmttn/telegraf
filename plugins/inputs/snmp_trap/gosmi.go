@@ -2,13 +2,13 @@ package snmp_trap
 
 import (
 	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/internal/snmp"
+	"github.com/influxdata/telegraf/plugins/common/snmp"
 )
 
 type gosmiTranslator struct {
 }
 
-func (t *gosmiTranslator) lookup(oid string) (snmp.MibEntry, error) {
+func (*gosmiTranslator) lookup(oid string) (snmp.MibEntry, error) {
 	return snmp.TrapLookup(oid)
 }
 

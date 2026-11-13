@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
+
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/parsers"
-	dto "github.com/prometheus/client_model/go"
-	"github.com/prometheus/common/expfmt"
 )
+
+func AcceptsContent(header http.Header) bool {
+	return expfmt.ResponseFormat(header).FormatType() != expfmt.TypeUnknown
+}
 
 type Parser struct {
 	IgnoreTimestamp bool              `toml:"prometheus_ignore_timestamp"`
@@ -19,25 +25,47 @@ type Parser struct {
 	Header          http.Header       `toml:"-"` // set by the prometheus input
 	DefaultTags     map[string]string `toml:"-"`
 	Log             telegraf.Logger   `toml:"-"`
+
+	timeFunc func() time.Time
 }
 
 func (p *Parser) SetDefaultTags(tags map[string]string) {
 	p.DefaultTags = tags
 }
 
+func (p *Parser) SetTimeFunc(f func() time.Time) {
+	p.timeFunc = f
+}
+
+func (p *Parser) Init() error {
+	if p.timeFunc == nil {
+		p.timeFunc = time.Now
+	}
+
+	return nil
+}
+
 func (p *Parser) Parse(data []byte) ([]telegraf.Metric, error) {
 	// Determine the metric transport-type derived from the response header and
 	// create a matching decoder.
-	format := expfmt.ResponseFormat(p.Header)
-	switch format {
-	case expfmt.FmtProtoText:
-		// Make sure we have a finishing newline but no trailing one
-		data = bytes.TrimPrefix(data, []byte("\n"))
-		if !bytes.HasSuffix(data, []byte("\n")) {
-			data = append(data, []byte("\n")...)
+	format := expfmt.NewFormat(expfmt.TypeTextPlain)
+	if len(p.Header) > 0 {
+		format = expfmt.ResponseFormat(p.Header)
+		switch format.FormatType() {
+		case expfmt.TypeProtoText:
+			// Make sure we have a finishing newline but no trailing one
+			data = bytes.TrimPrefix(data, []byte("\n"))
+			if !bytes.HasSuffix(data, []byte("\n")) {
+				data = append(data, []byte("\n")...)
+			}
+			fallthrough
+		case expfmt.TypeProtoCompact:
+			// As of prometheus common 0.66.0, ProtoText and ProtoCompact are disallowed from the decoder. Before this
+			// version, it used to fall back to TextPlain, so we do that here instead to mimic the old behavior.
+			format = expfmt.NewFormat(expfmt.TypeTextPlain)
+		case expfmt.TypeUnknown:
+			p.Log.Debugf("Unknown format %q... Trying to continue...", p.Header.Get("Content-Type"))
 		}
-	case expfmt.FmtUnknown:
-		p.Log.Warnf("Unknown format %q... Trying to continue...", p.Header.Get("Content-Type"))
 	}
 	buf := bytes.NewBuffer(data)
 	decoder := expfmt.NewDecoder(buf, format)
@@ -72,11 +100,11 @@ func (p *Parser) ParseLine(line string) (telegraf.Metric, error) {
 	}
 
 	if len(metrics) < 1 {
-		return nil, fmt.Errorf("no metrics in line")
+		return nil, errors.New("no metrics in line")
 	}
 
 	if len(metrics) > 1 {
-		return nil, fmt.Errorf("more than one metric in line")
+		return nil, errors.New("more than one metric in line")
 	}
 
 	return metrics[0], nil
@@ -84,7 +112,7 @@ func (p *Parser) ParseLine(line string) (telegraf.Metric, error) {
 
 func init() {
 	parsers.Add("prometheus",
-		func(defaultMetricName string) telegraf.Parser {
+		func(string) telegraf.Parser {
 			return &Parser{}
 		},
 	)

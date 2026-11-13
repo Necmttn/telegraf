@@ -1,13 +1,17 @@
-# Filestat Input Plugin
+# File statistics Input Plugin
 
-The filestat plugin gathers metrics about file existence, size, and other stats.
+This plugin gathers metrics about file existence, size, and other file
+statistics.
+
+⭐ Telegraf v0.13.0
+🏷️ system
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -44,5 +48,5 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 ```text
 filestat,file=/tmp/foo/bar,host=tyrion exists=0i 1507218518192154351
-filestat,file=/Users/sparrc/ws/telegraf.conf,host=tyrion exists=1i,size=47894i,modification_time=1507152973123456789i  1507218518192154351
+filestat,file=/Users/sparrc/ws/telegraf.conf,host=tyrion exists=1i,size_bytes=47894i,modification_time=1507152973123456789i  1507218518192154351
 ```

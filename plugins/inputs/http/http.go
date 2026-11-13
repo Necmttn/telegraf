@@ -5,22 +5,26 @@ package http
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
-	httpconfig "github.com/influxdata/telegraf/plugins/common/http"
+	common_http "github.com/influxdata/telegraf/plugins/common/http"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
+
+var once sync.Once
 
 type HTTP struct {
 	URLs            []string `toml:"urls"`
@@ -33,15 +37,14 @@ type HTTP struct {
 	Password config.Secret `toml:"password"`
 
 	// Bearer authentication
-	BearerToken string        `toml:"bearer_token" deprecated:"1.28.0;use 'token_file' instead"`
-	Token       config.Secret `toml:"token"`
-	TokenFile   string        `toml:"token_file"`
+	Token     config.Secret `toml:"token"`
+	TokenFile string        `toml:"token_file"`
 
-	Headers            map[string]string `toml:"headers"`
-	SuccessStatusCodes []int             `toml:"success_status_codes"`
-	Log                telegraf.Logger   `toml:"-"`
+	Headers            map[string]*config.Secret `toml:"headers"`
+	SuccessStatusCodes []int                     `toml:"success_status_codes"`
+	Log                telegraf.Logger           `toml:"-"`
 
-	httpconfig.HTTPClientConfig
+	common_http.HTTPClientConfig
 
 	client     *http.Client
 	parserFunc telegraf.ParserFunc
@@ -52,16 +55,9 @@ func (*HTTP) SampleConfig() string {
 }
 
 func (h *HTTP) Init() error {
-	// For backward compatibility
-	if h.TokenFile != "" && h.BearerToken != "" && h.TokenFile != h.BearerToken {
-		return fmt.Errorf("conflicting settings for 'bearer_token' and 'token_file'")
-	} else if h.TokenFile == "" && h.BearerToken != "" {
-		h.TokenFile = h.BearerToken
-	}
-
 	// We cannot use multiple sources for tokens
 	if h.TokenFile != "" && !h.Token.Empty() {
-		return fmt.Errorf("either use 'token_file' or 'token' not both")
+		return errors.New("either use 'token_file' or 'token' not both")
 	}
 
 	// Create the client
@@ -79,8 +75,14 @@ func (h *HTTP) Init() error {
 	return nil
 }
 
-// Gather takes in an accumulator and adds the metrics that the Input
-// gathers. This is called every "interval"
+func (h *HTTP) SetParserFunc(fn telegraf.ParserFunc) {
+	h.parserFunc = fn
+}
+
+func (*HTTP) Start(telegraf.Accumulator) error {
+	return nil
+}
+
 func (h *HTTP) Gather(acc telegraf.Accumulator) error {
 	var wg sync.WaitGroup
 	for _, u := range h.URLs {
@@ -98,9 +100,10 @@ func (h *HTTP) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-// SetParserFunc takes the data_format from the config and finds the right parser for that format
-func (h *HTTP) SetParserFunc(fn telegraf.ParserFunc) {
-	h.parserFunc = fn
+func (h *HTTP) Stop() {
+	if h.client != nil {
+		h.client.CloseIdleConnections()
+	}
 }
 
 // Gathers data from a particular URL
@@ -114,9 +117,16 @@ func (h *HTTP) SetParserFunc(fn telegraf.ParserFunc) {
 //	error: Any error that may have occurred
 func (h *HTTP) gatherURL(acc telegraf.Accumulator, url string) error {
 	body := makeRequestBodyReader(h.ContentEncoding, h.Body)
+	if body != nil {
+		defer body.Close()
+	}
+
 	request, err := http.NewRequest(h.Method, url, body)
 	if err != nil {
 		return err
+	}
+	if body != nil && h.ContentEncoding != "gzip" {
+		request.ContentLength = int64(len(h.Body))
 	}
 
 	if !h.Token.Empty() {
@@ -141,11 +151,19 @@ func (h *HTTP) gatherURL(acc telegraf.Accumulator, url string) error {
 	}
 
 	for k, v := range h.Headers {
-		if strings.EqualFold(k, "host") {
-			request.Host = v
-		} else {
-			request.Header.Add(k, v)
+		secret, err := v.Get()
+		if err != nil {
+			return err
 		}
+
+		headerVal := secret.String()
+		if strings.EqualFold(k, "host") {
+			request.Host = headerVal
+		} else {
+			request.Header.Add(k, headerVal)
+		}
+
+		secret.Destroy()
 	}
 
 	if err := h.setRequestAuth(request); err != nil {
@@ -158,13 +176,7 @@ func (h *HTTP) gatherURL(acc telegraf.Accumulator, url string) error {
 	}
 	defer resp.Body.Close()
 
-	responseHasSuccessCode := false
-	for _, statusCode := range h.SuccessStatusCodes {
-		if resp.StatusCode == statusCode {
-			responseHasSuccessCode = true
-			break
-		}
-	}
+	responseHasSuccessCode := slices.Contains(h.SuccessStatusCodes, resp.StatusCode)
 
 	if !responseHasSuccessCode {
 		return fmt.Errorf("received status code %d (%s), expected any value out of %v",
@@ -186,6 +198,12 @@ func (h *HTTP) gatherURL(acc telegraf.Accumulator, url string) error {
 	metrics, err := parser.Parse(b)
 	if err != nil {
 		return fmt.Errorf("parsing metrics failed: %w", err)
+	}
+
+	if len(metrics) == 0 {
+		once.Do(func() {
+			h.Log.Debug(internal.NoMetricsCreatedMsg)
+		})
 	}
 
 	for _, metric := range metrics {
@@ -220,17 +238,17 @@ func (h *HTTP) setRequestAuth(request *http.Request) error {
 	return nil
 }
 
-func makeRequestBodyReader(contentEncoding, body string) io.Reader {
+func makeRequestBodyReader(contentEncoding, body string) io.ReadCloser {
 	if body == "" {
 		return nil
 	}
 
-	var reader io.Reader = strings.NewReader(body)
+	reader := strings.NewReader(body)
 	if contentEncoding == "gzip" {
 		return internal.CompressWithGzip(reader)
 	}
 
-	return reader
+	return io.NopCloser(reader)
 }
 
 func init() {

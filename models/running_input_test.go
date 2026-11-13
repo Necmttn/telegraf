@@ -1,9 +1,11 @@
 package models
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
@@ -12,9 +14,9 @@ import (
 	"github.com/influxdata/telegraf/testutil"
 )
 
-func TestMakeMetricFilterAfterApplyingGlobalTags(t *testing.T) {
+func TestRunningInputMakeMetricFilterAfterApplyingGlobalTags(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Filter: Filter{
 			TagInclude: []string{"b"},
 		},
@@ -24,7 +26,7 @@ func TestMakeMetricFilterAfterApplyingGlobalTags(t *testing.T) {
 
 	m := metric.New("cpu",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": 42,
 		},
 		now)
@@ -35,7 +37,7 @@ func TestMakeMetricFilterAfterApplyingGlobalTags(t *testing.T) {
 		map[string]string{
 			"b": "y",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 42,
 		},
 		now)
@@ -43,15 +45,15 @@ func TestMakeMetricFilterAfterApplyingGlobalTags(t *testing.T) {
 	testutil.RequireMetricEqual(t, expected, actual)
 }
 
-func TestMakeMetricNoFields(t *testing.T) {
+func TestRunningInputMakeMetricNoFields(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 	})
 
 	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{},
+		map[string]any{},
 		now,
 		telegraf.Untyped)
 	actual := ri.MakeMetric(m)
@@ -59,15 +61,15 @@ func TestMakeMetricNoFields(t *testing.T) {
 }
 
 // nil fields should get dropped
-func TestMakeMetricNilFields(t *testing.T) {
+func TestRunningInputMakeMetricNilFields(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 	})
 
 	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 			"nil":   nil,
 		},
@@ -77,7 +79,7 @@ func TestMakeMetricNilFields(t *testing.T) {
 
 	expected := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int(101),
 		},
 		now,
@@ -86,18 +88,18 @@ func TestMakeMetricNilFields(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricWithPluginTags(t *testing.T) {
+func TestRunningInputMakeMetricWithPluginTags(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 		Tags: map[string]string{
 			"foo": "bar",
 		},
 	})
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -108,7 +110,7 @@ func TestMakeMetricWithPluginTags(t *testing.T) {
 		map[string]string{
 			"foo": "bar",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -116,9 +118,9 @@ func TestMakeMetricWithPluginTags(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricFilteredOut(t *testing.T) {
+func TestRunningInputMakeMetricFilteredOut(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 		Tags: map[string]string{
 			"foo": "bar",
@@ -130,7 +132,7 @@ func TestMakeMetricFilteredOut(t *testing.T) {
 
 	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -139,18 +141,18 @@ func TestMakeMetricFilteredOut(t *testing.T) {
 	require.Nil(t, actual)
 }
 
-func TestMakeMetricWithDaemonTags(t *testing.T) {
+func TestRunningInputMakeMetricWithDaemonTags(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 	})
 	ri.SetDefaultTags(map[string]string{
 		"foo": "bar",
 	})
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -160,7 +162,7 @@ func TestMakeMetricWithDaemonTags(t *testing.T) {
 		map[string]string{
 			"foo": "bar",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -168,16 +170,16 @@ func TestMakeMetricWithDaemonTags(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricNameOverride(t *testing.T) {
+func TestRunningInputMakeMetricNameOverride(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name:         "TestRunningInput",
 		NameOverride: "foobar",
 	})
 
 	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -185,7 +187,7 @@ func TestMakeMetricNameOverride(t *testing.T) {
 	actual := ri.MakeMetric(m)
 	expected := metric.New("foobar",
 		nil,
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -193,16 +195,16 @@ func TestMakeMetricNameOverride(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricNamePrefix(t *testing.T) {
+func TestRunningInputMakeMetricNamePrefix(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name:              "TestRunningInput",
 		MeasurementPrefix: "foobar_",
 	})
 
 	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -210,7 +212,7 @@ func TestMakeMetricNamePrefix(t *testing.T) {
 	actual := ri.MakeMetric(m)
 	expected := metric.New("foobar_RITest",
 		nil,
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -218,16 +220,16 @@ func TestMakeMetricNamePrefix(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricNameSuffix(t *testing.T) {
+func TestRunningInputMakeMetricNameSuffix(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name:              "TestRunningInput",
 		MeasurementSuffix: "_foobar",
 	})
 
 	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -235,7 +237,7 @@ func TestMakeMetricNameSuffix(t *testing.T) {
 	actual := ri.MakeMetric(m)
 	expected := metric.New("RITest_foobar",
 		nil,
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -243,8 +245,8 @@ func TestMakeMetricNameSuffix(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMetricErrorCounters(t *testing.T) {
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+func TestRunningInputMetricErrorCounters(t *testing.T) {
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestMetricErrorCounters",
 	})
 
@@ -272,9 +274,9 @@ func TestMetricErrorCounters(t *testing.T) {
 	require.GreaterOrEqual(t, int64(1), GlobalGatherErrors.Get())
 }
 
-func TestMakeMetricWithAlwaysKeepingPluginTagsDisabled(t *testing.T) {
+func TestRunningInputMakeMetricWithAlwaysKeepingPluginTagsDisabled(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 		Tags: map[string]string{
 			"foo": "bar",
@@ -286,11 +288,11 @@ func TestMakeMetricWithAlwaysKeepingPluginTagsDisabled(t *testing.T) {
 	ri.SetDefaultTags(map[string]string{"logic": "rulez"})
 	require.NoError(t, ri.Config.Filter.Compile())
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{
 			"b": "test",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -301,7 +303,7 @@ func TestMakeMetricWithAlwaysKeepingPluginTagsDisabled(t *testing.T) {
 		map[string]string{
 			"b": "test",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -309,9 +311,9 @@ func TestMakeMetricWithAlwaysKeepingPluginTagsDisabled(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricWithAlwaysKeepingLocalPluginTagsEnabled(t *testing.T) {
+func TestRunningInputMakeMetricWithAlwaysKeepingLocalPluginTagsEnabled(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 		Tags: map[string]string{
 			"foo": "bar",
@@ -324,11 +326,11 @@ func TestMakeMetricWithAlwaysKeepingLocalPluginTagsEnabled(t *testing.T) {
 	ri.SetDefaultTags(map[string]string{"logic": "rulez"})
 	require.NoError(t, ri.Config.Filter.Compile())
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{
 			"b": "test",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -340,7 +342,7 @@ func TestMakeMetricWithAlwaysKeepingLocalPluginTagsEnabled(t *testing.T) {
 			"b":   "test",
 			"foo": "bar",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -348,9 +350,9 @@ func TestMakeMetricWithAlwaysKeepingLocalPluginTagsEnabled(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricWithAlwaysKeepingGlobalPluginTagsEnabled(t *testing.T) {
+func TestRunningInputMakeMetricWithAlwaysKeepingGlobalPluginTagsEnabled(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 		Tags: map[string]string{
 			"foo": "bar",
@@ -363,11 +365,11 @@ func TestMakeMetricWithAlwaysKeepingGlobalPluginTagsEnabled(t *testing.T) {
 	ri.SetDefaultTags(map[string]string{"logic": "rulez"})
 	require.NoError(t, ri.Config.Filter.Compile())
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{
 			"b": "test",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -379,7 +381,7 @@ func TestMakeMetricWithAlwaysKeepingGlobalPluginTagsEnabled(t *testing.T) {
 			"b":     "test",
 			"logic": "rulez",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -387,9 +389,9 @@ func TestMakeMetricWithAlwaysKeepingGlobalPluginTagsEnabled(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-func TestMakeMetricWithAlwaysKeepingPluginTagsEnabled(t *testing.T) {
+func TestRunningInputMakeMetricWithAlwaysKeepingPluginTagsEnabled(t *testing.T) {
 	now := time.Now()
-	ri := NewRunningInput(&testInput{}, &InputConfig{
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
 		Name: "TestRunningInput",
 		Tags: map[string]string{
 			"foo": "bar",
@@ -403,11 +405,11 @@ func TestMakeMetricWithAlwaysKeepingPluginTagsEnabled(t *testing.T) {
 	ri.SetDefaultTags(map[string]string{"logic": "rulez"})
 	require.NoError(t, ri.Config.Filter.Compile())
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{
 			"b": "test",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -420,7 +422,7 @@ func TestMakeMetricWithAlwaysKeepingPluginTagsEnabled(t *testing.T) {
 			"foo":   "bar",
 			"logic": "rulez",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 101,
 		},
 		now,
@@ -428,8 +430,203 @@ func TestMakeMetricWithAlwaysKeepingPluginTagsEnabled(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
-type testInput struct{}
+func TestRunningInputMakeMetricWithGatherMetricTimeSource(t *testing.T) {
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
+		Name:                    "TestRunningInput",
+		Tags:                    make(map[string]string),
+		Filter:                  Filter{},
+		AlwaysIncludeLocalTags:  false,
+		AlwaysIncludeGlobalTags: false,
+		TimeSource:              "metric",
+	})
+	start := time.Now()
+	ri.gatherStart = start
+	ri.gatherEnd = start.Add(time.Second)
 
-func (t *testInput) Description() string                 { return "" }
-func (t *testInput) SampleConfig() string                { return "" }
-func (t *testInput) Gather(_ telegraf.Accumulator) error { return nil }
+	expected := testutil.MockMetrics()[0]
+
+	m := testutil.MockMetrics()[0]
+	actual := ri.MakeMetric(m)
+
+	require.Equal(t, expected, actual)
+}
+
+func TestRunningInputMakeMetricWithGatherStartTimeSource(t *testing.T) {
+	start := time.Now()
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
+		Name:                    "TestRunningInput",
+		Tags:                    make(map[string]string),
+		Filter:                  Filter{},
+		AlwaysIncludeLocalTags:  false,
+		AlwaysIncludeGlobalTags: false,
+		TimeSource:              "collection_start",
+	})
+	ri.gatherStart = start
+
+	expected := testutil.MockMetrics()[0]
+	expected.SetTime(start)
+
+	m := testutil.MockMetrics()[0]
+	actual := ri.MakeMetric(m)
+
+	require.Equal(t, expected, actual)
+}
+
+func TestRunningInputMakeMetricWithGatherEndTimeSource(t *testing.T) {
+	end := time.Now()
+	ri := NewRunningInput(&mockInput{}, &InputConfig{
+		Name:       "TestRunningInput",
+		TimeSource: "collection_end",
+	})
+	ri.gatherEnd = end
+
+	expected := testutil.MockMetrics()[0]
+	expected.SetTime(end)
+
+	m := testutil.MockMetrics()[0]
+	actual := ri.MakeMetric(m)
+
+	require.Equal(t, expected, actual)
+}
+
+func TestRunningInputProbingFailure(t *testing.T) {
+	ri := NewRunningInput(&mockInput{
+		probeReturn: errors.New("probing error"),
+	}, &InputConfig{
+		Name:                 "TestRunningInput",
+		StartupErrorBehavior: "probe",
+	})
+	ri.log = testutil.Logger{}
+	require.Error(t, ri.Probe())
+}
+
+func TestRunningInputProbingSuccess(t *testing.T) {
+	probeErr := errors.New("probing error")
+	for _, tt := range []struct {
+		name                 string
+		input                telegraf.Input
+		startupErrorBehavior string
+	}{
+		{
+			name:                 "non-probing plugin with probe value set",
+			input:                &mockInput{},
+			startupErrorBehavior: "probe",
+		},
+		{
+			name:                 "non-probing plugin with probe value not set",
+			input:                &mockInput{},
+			startupErrorBehavior: "ignore",
+		},
+		{
+			name:                 "probing plugin with probe value not set",
+			input:                &mockInput{probeReturn: probeErr},
+			startupErrorBehavior: "ignore",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ri := NewRunningInput(tt.input, &InputConfig{
+				Name:                 "TestRunningInput",
+				StartupErrorBehavior: tt.startupErrorBehavior,
+			})
+			ri.log = testutil.Logger{}
+			require.NoError(t, ri.Probe())
+		})
+	}
+}
+
+func TestRunningInputStatisticsErrorsCount(t *testing.T) {
+	id, err := uuid.NewV4()
+	require.NoError(t, err)
+	expectedErr := errors.New("an error")
+
+	// Setup a plugin that returns an error during gather
+	plugin := &mockInput{
+		gatherReturn: expectedErr,
+	}
+	model := NewRunningInput(plugin, &InputConfig{
+		Name:  "mock",
+		Alias: "TestRunningOutputStatisticsErrorCount",
+		ID:    id.String(),
+	})
+	require.NoError(t, model.Init())
+
+	var acc testutil.Accumulator
+	require.NoError(t, model.Start(&acc))
+	defer model.Stop()
+
+	// Get a reference to the plugin's statistics error counter
+	tags := map[string]string{
+		"input": model.Config.Name,
+		"_id":   model.Config.ID,
+		"alias": model.Config.Alias,
+	}
+	stats := selfstat.Register("gather", "errors", tags)
+	require.Zero(t, stats.Get())
+
+	GlobalGatherErrors.Set(0)
+
+	// Log an error in the plugin and verify the error counter increases
+	plugin.Log.Error("an error logging message")
+	require.Equal(t, int64(1), stats.Get())
+
+	// The counter should not increase in case of other log levels
+	plugin.Log.Warn("a warning message")
+	require.Equal(t, int64(1), stats.Get())
+
+	// The logging errors should not increase the gather error count
+	require.Zero(t, model.GatherErrors.Get())
+	require.Zero(t, GlobalGatherErrors.Get())
+}
+
+func TestRunningInputStatisticsGatherErrorsCount(t *testing.T) {
+	id, err := uuid.NewV4()
+	require.NoError(t, err)
+	expectedErr := errors.New("an error")
+
+	// Setup a plugin that returns an error during gather
+	plugin := &mockInput{
+		gatherReturn: expectedErr,
+	}
+	model := NewRunningInput(plugin, &InputConfig{
+		Name:  "mock",
+		Alias: "TestRunningOutputStatisticsErrorCount",
+		ID:    id.String(),
+	})
+	require.NoError(t, model.Init())
+
+	var acc testutil.Accumulator
+	require.NoError(t, model.Start(&acc))
+	defer model.Stop()
+
+	// We should start off with an empty count
+	require.Zero(t, model.GatherErrors.Get())
+	GlobalGatherErrors.Set(0)
+
+	// Logging an error in the plugin should not increase the count
+	plugin.Log.Error("an error logging message")
+	require.Zero(t, model.GatherErrors.Get())
+
+	// A failed collection should increase the error count
+	require.ErrorIs(t, model.Gather(&acc), expectedErr)
+	require.Equal(t, int64(1), model.GatherErrors.Get())
+	require.Equal(t, int64(1), GlobalGatherErrors.Get())
+}
+
+type mockInput struct {
+	probeReturn  error
+	gatherReturn error
+
+	Log telegraf.Logger
+}
+
+func (*mockInput) SampleConfig() string {
+	return ""
+}
+
+func (m *mockInput) Probe() error {
+	return m.probeReturn
+}
+
+func (m *mockInput) Gather(telegraf.Accumulator) error {
+	return m.gatherReturn
+}

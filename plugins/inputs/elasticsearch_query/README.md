@@ -1,26 +1,26 @@
 # Elasticsearch Query Input Plugin
 
-This [elasticsearch](https://www.elastic.co/) query plugin queries endpoints
-to obtain metrics from data stored in an Elasticsearch cluster.
+This plugin allows to query an [Elasticsearch][elastic] instance to obtain
+metrics from data stored in the cluster. The plugins supports counting the
+number of hits for a search query, calculating statistics for numeric fields,
+filtered by a query, aggregated per tag and to count the number of terms for a
+particular field.
 
-The following is supported:
+> [!IMPORTANT]
+> This plugin supports Elasticsearch 5.x to 9.x only.
+> Node discovery is not supported with Elasticsearch 5.x.
 
-- return number of hits for a search query
-- calculate the avg/max/min/sum for a numeric field, filtered by a query,
-  aggregated per tag
-- count number of terms for a particular field
+⭐ Telegraf v1.20.0
+🏷️ datastore
+💻 all
 
-## Elasticsearch Support
-
-This plugins is tested against Elasticsearch 5.x and 6.x releases.
-Currently it is known to break on 7.x or greater versions.
+[elastic]: https://www.elastic.co/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -29,23 +29,22 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 ```toml @sample.conf
 # Derive metrics from aggregating Elasticsearch query results
 [[inputs.elasticsearch_query]]
-  ## The full HTTP endpoint URL for your Elasticsearch instance
-  ## Multiple urls can be specified as part of the same cluster,
-  ## this means that only ONE of the urls will be written to each interval.
-  urls = [ "http://node1.es.example.com:9200" ] # required.
+  ## Full HTTP endpoint URL for your Elasticsearch instance
+  ## Multiple urls can be specified as part of the same cluster, but only ONE
+  ## will be queried in each interval.
+  urls = [ "http://node1.es.example.com:9200" ]
 
-  ## Elasticsearch client timeout, defaults to "5s".
+  ## Timeout for operations
   # timeout = "5s"
 
-  ## Set to true to ask Elasticsearch a list of all cluster nodes,
-  ## thus it is not necessary to list all nodes in the urls config option
+  ## List all cluster nodes making it unnecessary to list all nodes in 'urls'
   # enable_sniffer = false
 
-  ## Set the interval to check if the Elasticsearch nodes are available
-  ## This option is only used if enable_sniffer is also set (0s to disable it)
-  # health_check_interval = "10s"
+  ## Interval for discovering cluster nodes; only used if sniffer is enabled
+  ## (0s will disable discovery)
+  # health_check_interval = "15m"
 
-  ## HTTP basic authentication details (eg. when using x-pack)
+  ## HTTP basic authentication credentials
   # username = "telegraf"
   # password = "mypassword"
 
@@ -55,7 +54,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   # tls_key = "/etc/telegraf/key.pem"
   ## Use TLS but skip chain & host verification
   # insecure_skip_verify = false
- 
+
   ## If 'use_system_proxy' is set to true, Telegraf will check env vars such as
   ## HTTP_PROXY, HTTPS_PROXY, and NO_PROXY (or their lowercase counterparts).
   ## If 'use_system_proxy' is set to false (default) and 'http_proxy_url' is
@@ -67,21 +66,17 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
     ## measurement name for the results of the aggregation query
     measurement_name = "measurement"
 
-    ## Elasticsearch indexes to query (accept wildcards).
+    ## Elasticsearch indexes to query (accept wildcards)
     index = "index-*"
 
-    ## The date/time field in the Elasticsearch index (mandatory).
+    ## Date/time field in the Elasticsearch index
     date_field = "@timestamp"
 
-    ## If the field used for the date/time field in Elasticsearch is also using
-    ## a custom date/time format it may be required to provide the format to
-    ## correctly parse the field.
-    ##
-    ## If using one of the built in elasticsearch formats this is not required.
+    ## Custom format for date/time field if used
     # date_field_custom_format = ""
 
     ## Time window to query (eg. "1m" to query documents from last minute).
-    ## Normally should be set to same as collection interval
+    ## Should be set to same as collection interval
     query_period = "1m"
 
     ## Lucene query to filter results
@@ -90,21 +85,18 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
     ## Fields to aggregate values (must be numeric fields)
     # metric_fields = ["metric"]
 
-    ## Aggregation function to use on the metric fields
-    ## Must be set if 'metric_fields' is set
-    ## Valid values are: avg, sum, min, max, sum
+    ## Aggregation function to use on the metric fields; required if
+    ## 'metric_fields' is set. Available values: avg, sum, min, max, sum
     # metric_function = "avg"
 
-    ## Fields to be used as tags
-    ## Must be text, non-analyzed fields. Metric aggregations are performed
-    ## per tag
+    ## Text, non-analyzed fields to be used as tags
     # tags = ["field.keyword", "field2.keyword"]
 
-    ## Set to true to not ignore documents when the tag(s) above are missing
+    ## Do not ignore documents when the tag(s) above are missing
     # include_missing_tag = false
 
-    ## String value of the tag when the tag does not exist
-    ## Used when include_missing_tag is true
+    ## Fallback value when the tag does not exist; ignored if
+    ## include_missing_tag is false
     # missing_tag_value = "null"
 ```
 
@@ -186,9 +178,9 @@ of the examples below.
 - `filter_query`: Lucene query to filter the results (default: "\*")
 - `metric_fields`: The list of fields to perform metric aggregation (these must
   be indexed as numeric fields)
-- `metric_funcion`: The single-value metric aggregation function to be performed
+- `metric_function`: The single-value metric aggregation function to be performed
   on the `metric_fields` defined. Currently supported aggregations are "avg",
-  "min", "max", "sum". (see the [aggregation docs][agg]
+  "min", "max", "sum". (see the [aggregation docs][agg])
 - `tags`: The list of fields to be used as tags (these must be indexed as
   non-analyzed fields). A "terms aggregation" will be done per tag defined
 - `include_missing_tag`: Set to true to not ignore documents where the tag(s)
@@ -202,5 +194,8 @@ of the examples below.
 [agg]: https://www.elastic.co/guide/en/elasticsearch/reference/current/search-aggregations-metrics.html
 
 ## Metrics
+
+The format of metrics produced by this plugin depends on the content of the
+database and the queries used.
 
 ## Example Output

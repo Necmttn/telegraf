@@ -2,6 +2,7 @@
 package nginx_plus_api
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"net/http"
@@ -11,21 +12,12 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/plugins/common/tls"
+	common_http "github.com/influxdata/telegraf/plugins/common/http"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
-
-type NginxPlusAPI struct {
-	Urls            []string        `toml:"urls"`
-	APIVersion      int64           `toml:"api_version"`
-	ResponseTimeout config.Duration `toml:"response_timeout"`
-	tls.ClientConfig
-
-	client *http.Client
-}
 
 const (
 	// Default settings
@@ -48,6 +40,15 @@ const (
 	streamServerZonesPath = "stream/server_zones"
 	streamUpstreamsPath   = "stream/upstreams"
 )
+
+type NginxPlusAPI struct {
+	Urls       []string        `toml:"urls"`
+	APIVersion int64           `toml:"api_version"`
+	Log        telegraf.Logger `toml:"-"`
+	common_http.HTTPClientConfig
+
+	client *http.Client
+}
 
 func (*NginxPlusAPI) SampleConfig() string {
 	return sampleConfig
@@ -74,7 +75,7 @@ func (n *NginxPlusAPI) Gather(acc telegraf.Accumulator) error {
 	for _, u := range n.Urls {
 		addr, err := url.Parse(u)
 		if err != nil {
-			acc.AddError(fmt.Errorf("Unable to parse address %q: %w", u, err))
+			acc.AddError(fmt.Errorf("unable to parse address %q: %w", u, err))
 			continue
 		}
 
@@ -90,20 +91,15 @@ func (n *NginxPlusAPI) Gather(acc telegraf.Accumulator) error {
 }
 
 func (n *NginxPlusAPI) createHTTPClient() (*http.Client, error) {
-	if n.ResponseTimeout < config.Duration(time.Second) {
-		n.ResponseTimeout = config.Duration(time.Second * 5)
+	if n.HTTPClientConfig.ResponseHeaderTimeout < config.Duration(time.Second) {
+		n.HTTPClientConfig.ResponseHeaderTimeout = config.Duration(time.Second * 5)
 	}
 
-	tlsConfig, err := n.ClientConfig.TLSConfig()
+	// Create the client
+	ctx := context.Background()
+	client, err := n.HTTPClientConfig.CreateClient(ctx, n.Log)
 	if err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-		Timeout: time.Duration(n.ResponseTimeout),
+		return nil, fmt.Errorf("creating client failed: %w", err)
 	}
 
 	return client, nil

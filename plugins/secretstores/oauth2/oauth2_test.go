@@ -9,13 +9,35 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf/config"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestSampleConfig(t *testing.T) {
 	plugin := &OAuth2{}
 	require.NotEmpty(t, plugin.SampleConfig())
+}
+
+func TestEndpointParams(t *testing.T) {
+	plugin := &OAuth2{
+		Endpoint: "http://localhost:8080/token",
+		Tenant:   "tenantID",
+		TokenConfigs: []tokenConfig{
+			{
+				ClientID:     config.NewSecret([]byte("clientID")),
+				ClientSecret: config.NewSecret([]byte("clientSecret")),
+				Key:          "test",
+				Params: map[string]string{
+					"foo": "bar",
+				},
+			},
+		},
+		Log: testutil.Logger{},
+	}
+
+	require.NoError(t, plugin.Init())
 }
 
 func TestInitFail(t *testing.T) {
@@ -49,7 +71,7 @@ func TestInitFail(t *testing.T) {
 			plugin: &OAuth2{
 				Service:      "custom",
 				Endpoint:     "http://localhost:8080",
-				TokenConfigs: []TokenConfig{{}}},
+				TokenConfigs: []tokenConfig{{}}},
 			expected: "'key' not specified",
 		},
 		{
@@ -57,7 +79,7 @@ func TestInitFail(t *testing.T) {
 			plugin: &OAuth2{
 				Service:  "custom",
 				Endpoint: "http://localhost:8080",
-				TokenConfigs: []TokenConfig{
+				TokenConfigs: []tokenConfig{
 					{
 						Key: "test",
 					},
@@ -70,7 +92,7 @@ func TestInitFail(t *testing.T) {
 			plugin: &OAuth2{
 				Service:  "custom",
 				Endpoint: "http://localhost:8080",
-				TokenConfigs: []TokenConfig{
+				TokenConfigs: []tokenConfig{
 					{
 						Key:      "test",
 						ClientID: config.NewSecret([]byte("someone")),
@@ -88,27 +110,11 @@ func TestInitFail(t *testing.T) {
 	}
 }
 
-func TestSetUnsupported(t *testing.T) {
-	plugin := &OAuth2{
-		Service:  "custom",
-		Endpoint: "http://localhost:8080",
-		TokenConfigs: []TokenConfig{
-			{
-				Key:          "test",
-				ClientID:     config.NewSecret([]byte("someone")),
-				ClientSecret: config.NewSecret([]byte("s3cr3t")),
-			},
-		},
-	}
-	require.NoError(t, plugin.Init())
-	require.ErrorContains(t, plugin.Set("foo", "bar"), "not supported")
-}
-
 func TestGetNonExisting(t *testing.T) {
 	plugin := &OAuth2{
 		Service:  "custom",
 		Endpoint: "http://localhost:8080",
-		TokenConfigs: []TokenConfig{
+		TokenConfigs: []tokenConfig{
 			{
 				Key:          "test",
 				ClientID:     config.NewSecret([]byte("someone")),
@@ -125,7 +131,7 @@ func TestGetNonExisting(t *testing.T) {
 
 func TestResolver404(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
+		func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
 	defer server.Close()
@@ -133,7 +139,7 @@ func TestResolver404(t *testing.T) {
 	plugin := &OAuth2{
 		Service:  "custom",
 		Endpoint: server.URL + "/token",
-		TokenConfigs: []TokenConfig{
+		TokenConfigs: []tokenConfig{
 			{
 				Key:          "test",
 				ClientID:     config.NewSecret([]byte("someone")),
@@ -157,7 +163,11 @@ func TestGet(t *testing.T) {
 		func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				_, _ = w.Write([]byte(err.Error()))
+				if _, err := w.Write([]byte(err.Error())); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -174,7 +184,7 @@ func TestGet(t *testing.T) {
 	plugin := &OAuth2{
 		Service:  "custom",
 		Endpoint: server.URL + "/token",
-		TokenConfigs: []TokenConfig{
+		TokenConfigs: []tokenConfig{
 			{
 				Key:          "test",
 				ClientID:     config.NewSecret([]byte("someone")),
@@ -197,7 +207,11 @@ func TestGetMultipleTimes(t *testing.T) {
 		func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				_, _ = w.Write([]byte(err.Error()))
+				if _, err := w.Write([]byte(err.Error())); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -215,7 +229,7 @@ func TestGetMultipleTimes(t *testing.T) {
 	plugin := &OAuth2{
 		Service:  "custom",
 		Endpoint: server.URL + "/token",
-		TokenConfigs: []TokenConfig{
+		TokenConfigs: []tokenConfig{
 			{
 				Key:          "test",
 				ClientID:     config.NewSecret([]byte("someone")),
@@ -243,7 +257,11 @@ func TestGetExpired(t *testing.T) {
 		func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				_, _ = w.Write([]byte(err.Error()))
+				if _, err := w.Write([]byte(err.Error())); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -261,7 +279,7 @@ func TestGetExpired(t *testing.T) {
 		Service:      "custom",
 		Endpoint:     server.URL + "/token",
 		ExpiryMargin: config.Duration(5 * time.Second),
-		TokenConfigs: []TokenConfig{
+		TokenConfigs: []tokenConfig{
 			{
 				Key:          "test",
 				ClientID:     config.NewSecret([]byte("someone")),
@@ -284,7 +302,11 @@ func TestGetRefresh(t *testing.T) {
 		func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				_, _ = w.Write([]byte(err.Error()))
+				if _, err := w.Write([]byte(err.Error())); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -303,7 +325,7 @@ func TestGetRefresh(t *testing.T) {
 		Service:      "custom",
 		Endpoint:     server.URL + "/token",
 		ExpiryMargin: config.Duration(5 * time.Second),
-		TokenConfigs: []TokenConfig{
+		TokenConfigs: []tokenConfig{
 			{
 				Key:          "test",
 				ClientID:     config.NewSecret([]byte("someone")),

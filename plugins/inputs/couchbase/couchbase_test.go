@@ -17,13 +17,29 @@ func TestGatherServer(t *testing.T) {
 	bucket := "blastro-df"
 	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/pools" {
-			_, _ = w.Write(readJSON(t, "testdata/pools_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/pools_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else if r.URL.Path == "/pools/default" {
-			_, _ = w.Write(readJSON(t, "testdata/pools_default_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/pools_default_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else if r.URL.Path == "/pools/default/buckets" {
-			_, _ = w.Write(readJSON(t, "testdata/bucket_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/bucket_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else if r.URL.Path == "/pools/default/buckets/"+bucket+"/stats" {
-			_, _ = w.Write(readJSON(t, "testdata/bucket_stats_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/bucket_stats_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -39,13 +55,13 @@ func TestGatherServer(t *testing.T) {
 	require.NoError(t, cb.gatherServer(&acc, fakeServer.URL))
 
 	acc.AssertContainsTaggedFields(t, "couchbase_node",
-		map[string]interface{}{"memory_free": 23181365248.0, "memory_total": 64424656896.0},
+		map[string]any{"memory_free": 23181365248.0, "memory_total": 64424656896.0},
 		map[string]string{"cluster": fakeServer.URL, "hostname": "172.16.10.187:8091"})
 	acc.AssertContainsTaggedFields(t, "couchbase_node",
-		map[string]interface{}{"memory_free": 23665811456.0, "memory_total": 64424656896.0},
+		map[string]any{"memory_free": 23665811456.0, "memory_total": 64424656896.0},
 		map[string]string{"cluster": fakeServer.URL, "hostname": "172.16.10.65:8091"})
 	acc.AssertContainsTaggedFields(t, "couchbase_bucket",
-		map[string]interface{}{
+		map[string]any{
 			"quota_percent_used": 68.85424936294555,
 			"ops_per_sec":        5686.789686789687,
 			"disk_fetches":       0.0,
@@ -112,7 +128,11 @@ func TestGatherDetailedBucketMetrics(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/pools/default/buckets/"+bucket+"/stats" || r.URL.Path == "/pools/default/buckets/"+bucket+"/nodes/"+node+"/stats" {
-					_, _ = w.Write(test.response)
+					if _, err := w.Write(test.response); err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+						return
+					}
 				} else {
 					w.WriteHeader(http.StatusNotFound)
 				}
@@ -127,12 +147,12 @@ func TestGatherDetailedBucketMetrics(t *testing.T) {
 			err = cb.Init()
 			require.NoError(t, err)
 			var acc testutil.Accumulator
-			bucketStats := &BucketStats{}
+			bucketStats := &bucketStats{}
 			if err := json.Unmarshal(test.response, bucketStats); err != nil {
 				t.Fatal("parse bucketResponse", err)
 			}
 
-			fields := make(map[string]interface{})
+			fields := make(map[string]any)
 			err = cb.gatherDetailedBucketStats(fakeServer.URL, bucket, test.node, fields)
 			require.NoError(t, err)
 
@@ -148,11 +168,23 @@ func TestGatherDetailedBucketMetrics(t *testing.T) {
 func TestGatherNodeOnly(t *testing.T) {
 	faker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/pools" {
-			_, _ = w.Write(readJSON(t, "testdata/pools_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/pools_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else if r.URL.Path == "/pools/default" {
-			_, _ = w.Write(readJSON(t, "testdata/pools_default_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/pools_default_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else if r.URL.Path == "/pools/default/buckets" {
-			_, _ = w.Write(readJSON(t, "testdata/bucket_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/bucket_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -175,13 +207,29 @@ func TestGatherFailover(t *testing.T) {
 	faker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/pools":
-			_, _ = w.Write(readJSON(t, "testdata/pools_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/pools_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		case "/pools/default":
-			_, _ = w.Write(readJSON(t, "testdata/pools_default_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/pools_default_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		case "/pools/default/buckets":
-			_, _ = w.Write(readJSON(t, "testdata/bucket_response.json"))
+			if _, err := w.Write(readJSON(t, "testdata/bucket_response.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		case "/settings/autoFailover":
-			_, _ = w.Write(readJSON(t, "testdata/settings_autofailover.json"))
+			if _, err := w.Write(readJSON(t, "testdata/settings_autofailover.json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

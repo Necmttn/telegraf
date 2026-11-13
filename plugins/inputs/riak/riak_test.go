@@ -7,16 +7,20 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestRiak(t *testing.T) {
 	// Create a test server with the const response JSON
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := fmt.Fprintln(w, response); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
-		_, err := fmt.Fprintln(w, response)
-		require.NoError(t, err)
 	}))
 	defer ts.Close()
 
@@ -25,7 +29,7 @@ func TestRiak(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a new Riak instance with our given test server
-	riak := NewRiak()
+	riak := newRiak()
 	riak.Servers = []string{ts.URL}
 
 	// Create a test accumulator
@@ -35,7 +39,7 @@ func TestRiak(t *testing.T) {
 	require.NoError(t, riak.Gather(acc))
 
 	// Expect the correct values for all known keys
-	expectFields := map[string]interface{}{
+	expectFields := map[string]any{
 		"cpu_avg1":                     int64(504),
 		"cpu_avg15":                    int64(294),
 		"cpu_avg5":                     int64(325),

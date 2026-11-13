@@ -1,4 +1,4 @@
-package influxdb_test
+package influxdb
 
 import (
 	"fmt"
@@ -7,24 +7,28 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
 
-	"github.com/influxdata/telegraf/plugins/inputs/influxdb"
+	"github.com/influxdata/telegraf/plugins/parsers/influx"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestBasic(t *testing.T) {
 	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
-			_, err := w.Write([]byte(basicJSON))
-			require.NoError(t, err)
+			if _, err := w.Write([]byte(basicJSON)); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fakeServer.Close()
 
-	plugin := &influxdb.InfluxDB{
+	plugin := &InfluxDB{
 		URLs: []string{fakeServer.URL + "/endpoint"},
 	}
 
@@ -32,7 +36,7 @@ func TestBasic(t *testing.T) {
 	require.NoError(t, acc.GatherError(plugin.Gather))
 
 	require.Len(t, acc.Metrics, 3)
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		// JSON will truncate floats to integer representations.
 		// Since there's no distinction in JSON, we can't assume it's an int.
 		"i": -1.0,
@@ -46,7 +50,7 @@ func TestBasic(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "influxdb_foo", fields, tags)
 
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"x": "x",
 	}
 	tags = map[string]string{
@@ -56,7 +60,7 @@ func TestBasic(t *testing.T) {
 	acc.AssertContainsTaggedFields(t, "influxdb_bar", fields, tags)
 
 	acc.AssertContainsTaggedFields(t, "influxdb",
-		map[string]interface{}{
+		map[string]any{
 			"n_shards": 0,
 		}, map[string]string{})
 }
@@ -67,24 +71,27 @@ func TestInfluxDB(t *testing.T) {
 
 	fakeInfluxServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
-			_, err := w.Write(influxReturn)
-			require.NoError(t, err)
+			if _, err := w.Write(influxReturn); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fakeInfluxServer.Close()
 
-	plugin := &influxdb.InfluxDB{
+	plugin := &InfluxDB{
 		URLs: []string{fakeInfluxServer.URL + "/endpoint"},
 	}
 
 	var acc testutil.Accumulator
 	require.NoError(t, acc.GatherError(plugin.Gather))
 
-	require.Len(t, acc.Metrics, 35)
+	require.Len(t, acc.Metrics, 36)
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"heap_inuse":      int64(18046976),
 		"heap_released":   int64(3473408),
 		"mspan_inuse":     int64(97440),
@@ -119,7 +126,7 @@ func TestInfluxDB(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "influxdb_memstats", fields, tags)
 
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"current_time": "2023-01-11T16:51:52.723166944Z",
 		"started":      "2023-01-11T16:51:23.355766023Z",
 		"uptime":       uint64(29),
@@ -127,7 +134,7 @@ func TestInfluxDB(t *testing.T) {
 	acc.AssertContainsTaggedFields(t, "influxdb_system", fields, tags)
 
 	acc.AssertContainsTaggedFields(t, "influxdb",
-		map[string]interface{}{
+		map[string]any{
 			"n_shards": 1,
 		}, map[string]string{})
 }
@@ -139,29 +146,32 @@ func TestInfluxDB2(t *testing.T) {
 
 	fakeInfluxServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
-			_, err := w.Write(influxReturn2)
-			require.NoError(t, err)
+			if _, err := w.Write(influxReturn2); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer fakeInfluxServer.Close()
 
-	plugin := &influxdb.InfluxDB{
+	plugin := &InfluxDB{
 		URLs: []string{fakeInfluxServer.URL + "/endpoint"},
 	}
 
 	var acc testutil.Accumulator
 	require.NoError(t, acc.GatherError(plugin.Gather))
 
-	require.Len(t, acc.Metrics, 35)
+	require.Len(t, acc.Metrics, 36)
 
 	acc.AssertContainsTaggedFields(t, "influxdb",
-		map[string]interface{}{
+		map[string]any{
 			"n_shards": 1,
 		}, map[string]string{})
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"current_time": "2023-01-11T17:04:59.928454705Z",
 		"started":      "2023-01-11T16:51:23.355766023Z",
 		"uptime":       uint64(816),
@@ -172,18 +182,63 @@ func TestInfluxDB2(t *testing.T) {
 	acc.AssertContainsTaggedFields(t, "influxdb_system", fields, tags)
 }
 
+func TestCloud1(t *testing.T) {
+	// Setup a fake endpoint with the input data
+	input, err := os.ReadFile("./testdata/cloud1.json")
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/endpoint" {
+			if _, err := w.Write(input); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	// Setup the plugin
+	plugin := &InfluxDB{
+		URLs: []string{server.URL + "/endpoint"},
+	}
+
+	// Gather the data
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	// Read the expected data
+	parser := &influx.Parser{}
+	require.NoError(t, parser.Init())
+
+	buf, err := os.ReadFile("./testdata/cloud1.influx")
+	require.NoError(t, err)
+	expected, err := parser.Parse(buf)
+	require.NoError(t, err)
+
+	// Check the output
+	opts := []cmp.Option{testutil.IgnoreTags("url"), testutil.IgnoreTime()}
+	actual := acc.GetTelegrafMetrics()
+	testutil.RequireMetricsEqual(t, expected, actual, opts...)
+}
+
 func TestErrorHandling(t *testing.T) {
 	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
-			_, err := w.Write([]byte("not json"))
-			require.NoError(t, err)
+			if _, err := w.Write([]byte("not json")); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer badServer.Close()
 
-	plugin := &influxdb.InfluxDB{
+	plugin := &InfluxDB{
 		URLs: []string{badServer.URL + "/endpoint"},
 	}
 
@@ -194,15 +249,18 @@ func TestErrorHandling(t *testing.T) {
 func TestErrorHandling404(t *testing.T) {
 	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
-			_, err := w.Write([]byte(basicJSON))
-			require.NoError(t, err)
+			if _, err := w.Write([]byte(basicJSON)); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer badServer.Close()
 
-	plugin := &influxdb.InfluxDB{
+	plugin := &InfluxDB{
 		URLs: []string{badServer.URL},
 	}
 
@@ -211,14 +269,17 @@ func TestErrorHandling404(t *testing.T) {
 }
 
 func TestErrorResponse(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		_, err := w.Write([]byte(`{"error": "unable to parse authentication credentials"}`))
-		require.NoError(t, err)
+		if _, err := w.Write([]byte(`{"error": "unable to parse authentication credentials"}`)); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 	}))
 	defer ts.Close()
 
-	plugin := &influxdb.InfluxDB{
+	plugin := &InfluxDB{
 		URLs: []string{ts.URL},
 	}
 
@@ -227,7 +288,7 @@ func TestErrorResponse(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := []error{
-		&influxdb.APIError{
+		&apiError{
 			StatusCode:  http.StatusUnauthorized,
 			Reason:      fmt.Sprintf("%d %s", http.StatusUnauthorized, http.StatusText(http.StatusUnauthorized)),
 			Description: "unable to parse authentication credentials",

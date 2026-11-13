@@ -9,12 +9,13 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	tlsint "github.com/influxdata/telegraf/plugins/common/tls"
+	common_tls "github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/outputs"
 	"github.com/influxdata/telegraf/plugins/serializers/graphite"
 )
@@ -37,15 +38,16 @@ type Graphite struct {
 	GraphiteStrictRegex     string `toml:"graphite_strict_sanitize_regex"`
 	// URL is only for backwards compatibility
 	Servers   []string        `toml:"servers"`
+	LocalAddr string          `toml:"local_address"`
 	Prefix    string          `toml:"prefix"`
 	Template  string          `toml:"template"`
 	Templates []string        `toml:"templates"`
 	Timeout   config.Duration `toml:"timeout"`
 	Log       telegraf.Logger `toml:"-"`
-	tlsint.ClientConfig
+	common_tls.ClientConfig
 
 	connections []connection
-	serializer  *graphite.GraphiteSerializer
+	serializer  *graphite.Serializer
 }
 
 func (*Graphite) SampleConfig() string {
@@ -53,7 +55,7 @@ func (*Graphite) SampleConfig() string {
 }
 
 func (g *Graphite) Init() error {
-	s := &graphite.GraphiteSerializer{
+	s := &graphite.Serializer{
 		Prefix:          g.Prefix,
 		Template:        g.Template,
 		StrictRegex:     g.GraphiteStrictRegex,
@@ -104,6 +106,31 @@ func (g *Graphite) Connect() error {
 
 		// Dialer with timeout
 		d := net.Dialer{Timeout: time.Duration(g.Timeout)}
+		if g.LocalAddr != "" {
+			// Resolve the local address into IP address and the given port if any
+			addr, sPort, err := net.SplitHostPort(g.LocalAddr)
+			if err != nil {
+				if !strings.Contains(err.Error(), "missing port") {
+					return fmt.Errorf("invalid local address: %w", err)
+				}
+				addr = g.LocalAddr
+			}
+			local, err := net.ResolveIPAddr("ip", addr)
+			if err != nil {
+				return fmt.Errorf("cannot resolve local address: %w", err)
+			}
+
+			var port int
+			if sPort != "" {
+				p, err := strconv.ParseUint(sPort, 10, 16)
+				if err != nil {
+					return fmt.Errorf("invalid port: %w", err)
+				}
+				port = int(p)
+			}
+
+			d.LocalAddr = &net.TCPAddr{IP: local.IP, Port: port, Zone: local.Zone}
+		}
 
 		// Get secure connection if tls config is set
 		var conn net.Conn
@@ -173,7 +200,7 @@ func (g *Graphite) checkEOF(conn net.Conn) error {
 	}
 	// Log non-timeout errors and close.
 	var netErr net.Error
-	if !(errors.As(err, &netErr) && netErr.Timeout()) {
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
 		g.Log.Debugf("conn %s checkEOF .conn.Read returned err != EOF, which is unexpected.  closing conn. error: %s", conn, err)
 		err = conn.Close()
 		g.Log.Debugf("Failed to close the connection: %v", err)
@@ -183,8 +210,6 @@ func (g *Graphite) checkEOF(conn net.Conn) error {
 	return nil
 }
 
-// Choose a random server in the cluster to write to until a successful write
-// occurs, logging each unsuccessful. If all servers fail, return error.
 func (g *Graphite) Write(metrics []telegraf.Metric) error {
 	// Prepare data
 	var batch []byte
@@ -225,6 +250,7 @@ func (g *Graphite) Write(metrics []telegraf.Metric) error {
 
 func (g *Graphite) send(batch []byte) error {
 	// Try sending the data to a server. Try them in random order
+	//nolint:gosec // False-positive G404 as this doesn't require strong RNG
 	p := rand.Perm(len(g.connections))
 	for i, n := range p {
 		server := g.connections[n]

@@ -9,7 +9,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
-	"github.com/influxdata/telegraf/plugins/serializers"
+	"github.com/influxdata/telegraf/testutil/serializers"
 )
 
 var tests = []struct {
@@ -25,7 +25,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42.0,
 			},
 			time.Unix(0, 0),
@@ -40,7 +40,7 @@ var tests = []struct {
 				"host": "localhost",
 				"cpu":  "CPU0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42.0,
 			},
 			time.Unix(0, 0),
@@ -52,7 +52,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"x": 42.0,
 				"y": 42.0,
 			},
@@ -65,7 +65,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"x": math.NaN(),
 				"y": 42,
 			},
@@ -78,19 +78,19 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": math.NaN(),
 			},
 			time.Unix(0, 0),
 		),
-		errReason: NoFields,
+		errReason: noFields,
 	},
 	{
 		name: "float Inf",
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": math.Inf(1),
 				"y":     42,
 			},
@@ -103,7 +103,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -115,7 +115,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": int64(123456789012345),
 			},
 			time.Unix(0, 0),
@@ -127,7 +127,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": uint64(42),
 			},
 			time.Unix(0, 0),
@@ -140,7 +140,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": uint64(18446744073709551615),
 			},
 			time.Unix(0, 0),
@@ -153,7 +153,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": uint64(42),
 			},
 			time.Unix(0, 0),
@@ -165,7 +165,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": uint64(18446744073709551615),
 			},
 			time.Unix(0, 0),
@@ -177,7 +177,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": true,
 			},
 			time.Unix(0, 0),
@@ -189,7 +189,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": "howdy",
 			},
 			time.Unix(0, 0),
@@ -201,7 +201,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42.0,
 			},
 			time.Unix(1519194109, 42),
@@ -214,7 +214,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"abc": 123,
 				"def": 456,
 			},
@@ -228,7 +228,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"abc": 123,
 				"def": 456,
 			},
@@ -242,7 +242,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"abc": 123,
 				"def": 456,
 				"ghi": 789,
@@ -257,7 +257,7 @@ var tests = []struct {
 		input: metric.New(
 			"c\npu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -271,7 +271,7 @@ var tests = []struct {
 			map[string]string{
 				"host": "x\ny",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -285,7 +285,7 @@ var tests = []struct {
 			map[string]string{
 				"host": "",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -299,7 +299,7 @@ var tests = []struct {
 			map[string]string{
 				"": "example.org",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -313,7 +313,7 @@ var tests = []struct {
 			map[string]string{
 				"path": `C:\`,
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -327,7 +327,7 @@ var tests = []struct {
 			map[string]string{
 				`path\`: "/",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -341,7 +341,7 @@ var tests = []struct {
 			map[string]string{
 				`\`: "example.org",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -355,7 +355,7 @@ var tests = []struct {
 			map[string]string{
 				"host": `\`,
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 42,
 			},
 			time.Unix(0, 0),
@@ -367,7 +367,7 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"value": "x\ny",
 			},
 			time.Unix(0, 0),
@@ -380,24 +380,24 @@ var tests = []struct {
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"abc": 123,
 				"def": 456,
 			},
 			time.Unix(1519194109, 42),
 		),
 		output:    nil,
-		errReason: NeedMoreSpace,
+		errReason: needMoreSpace,
 	},
 	{
 		name: "no fields",
 		input: metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{},
+			map[string]any{},
 			time.Unix(0, 0),
 		),
-		errReason: NoFields,
+		errReason: noFields,
 	},
 	{
 		name: "procstat",
@@ -407,7 +407,7 @@ var tests = []struct {
 				"exe":          "bash",
 				"process_name": "bash",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"cpu_time":                      0,
 				"cpu_time_guest":                float64(0),
 				"cpu_time_guest_nice":           float64(0),
@@ -497,6 +497,24 @@ func TestSerializer(t *testing.T) {
 	}
 }
 
+func TestOmitTimestamp(t *testing.T) {
+	m := metric.New(
+		"cpu",
+		map[string]string{},
+		map[string]any{
+			"value": 42.0,
+		},
+		time.Unix(1519194109, 42),
+	)
+
+	serializer := &Serializer{
+		OmitTimestamp: true,
+	}
+	output, err := serializer.Serialize(m)
+	require.NoError(t, err)
+	require.Equal(t, []byte("cpu value=42\n"), output)
+}
+
 func BenchmarkSerializer(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
@@ -517,7 +535,7 @@ func TestSerialize_SerializeBatch(t *testing.T) {
 	m := metric.New(
 		"cpu",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": 42.0,
 		},
 		time.Unix(0, 0),
@@ -536,7 +554,7 @@ func TestSerialize_SerializeBatch(t *testing.T) {
 func BenchmarkSerialize(b *testing.B) {
 	s := &Serializer{}
 	require.NoError(b, s.Init())
-	metrics := serializers.BenchmarkMetrics(b)
+	metrics := serializers.BenchmarkMetrics()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := s.Serialize(metrics[i%len(metrics)])
@@ -547,7 +565,7 @@ func BenchmarkSerialize(b *testing.B) {
 func BenchmarkSerializeBatch(b *testing.B) {
 	s := &Serializer{}
 	require.NoError(b, s.Init())
-	m := serializers.BenchmarkMetrics(b)
+	m := serializers.BenchmarkMetrics()
 	metrics := m[:]
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

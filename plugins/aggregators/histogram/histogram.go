@@ -3,44 +3,46 @@ package histogram
 
 import (
 	_ "embed"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/influxdata/telegraf"
-	telegrafConfig "github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/plugins/aggregators"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-// bucketRightTag is the tag, which contains right bucket border
-const bucketRightTag = "le"
+var timeNow = time.Now
 
-// bucketPosInf is the right bucket border for infinite values
-const bucketPosInf = "+Inf"
+const (
+	// bucketRightTag is the tag, which contains right bucket border
+	bucketRightTag = "le"
+	// bucketPosInf is the right bucket border for infinite values
+	bucketPosInf = "+Inf"
+	// bucketLeftTag is the tag, which contains left bucket border (exclusive)
+	bucketLeftTag = "gt"
+	// bucketNegInf is the left bucket border for infinite values
+	bucketNegInf = "-Inf"
+)
 
-// bucketLeftTag is the tag, which contains left bucket border (exclusive)
-const bucketLeftTag = "gt"
-
-// bucketNegInf is the left bucket border for infinite values
-const bucketNegInf = "-Inf"
-
-// HistogramAggregator is aggregator with histogram configs and particular histograms for defined metrics
-type HistogramAggregator struct {
-	Configs            []config                `toml:"config"`
-	ResetBuckets       bool                    `toml:"reset"`
-	Cumulative         bool                    `toml:"cumulative"`
-	ExpirationInterval telegrafConfig.Duration `toml:"expiration_interval"`
-	PushOnlyOnUpdate   bool                    `toml:"push_only_on_update"`
+type Histogram struct {
+	Configs            []bucketConfig  `toml:"config"`
+	ResetBuckets       bool            `toml:"reset"`
+	Cumulative         bool            `toml:"cumulative"`
+	ExpirationInterval config.Duration `toml:"expiration_interval"`
+	PushOnlyOnUpdate   bool            `toml:"push_only_on_update"`
 
 	buckets bucketsByMetrics
 	cache   map[uint64]metricHistogramCollection
 }
 
-// config is the config, which contains name, field of metric and histogram buckets.
-type config struct {
+// bucketConfig is the config, which contains name, field of metric and histogram buckets.
+type bucketConfig struct {
 	Metric  string   `toml:"measurement_name"`
 	Fields  []string `toml:"fields"`
 	Buckets buckets  `toml:"buckets"`
@@ -74,25 +76,11 @@ type groupedByCountFields struct {
 	fieldsWithCount map[string]int64
 }
 
-var timeNow = time.Now
-
-// NewHistogramAggregator creates new histogram aggregator
-func NewHistogramAggregator() *HistogramAggregator {
-	h := &HistogramAggregator{
-		Cumulative: true,
-	}
-	h.buckets = make(bucketsByMetrics)
-	h.resetCache()
-
-	return h
-}
-
-func (*HistogramAggregator) SampleConfig() string {
+func (*Histogram) SampleConfig() string {
 	return sampleConfig
 }
 
-// Add adds new hit to the buckets
-func (h *HistogramAggregator) Add(in telegraf.Metric) {
+func (h *Histogram) Add(in telegraf.Metric) {
 	addTime := timeNow()
 
 	bucketsByField := make(map[string][]float64)
@@ -137,11 +125,9 @@ func (h *HistogramAggregator) Add(in telegraf.Metric) {
 	h.cache[id] = agr
 }
 
-// Push returns histogram values for metrics
-func (h *HistogramAggregator) Push(acc telegraf.Accumulator) {
-	metricsWithGroupedFields := []groupedByCountFields{}
+func (h *Histogram) Push(acc telegraf.Accumulator) {
 	now := timeNow()
-
+	metricsWithGroupedFields := make([]groupedByCountFields, 0)
 	for id, aggregate := range h.cache {
 		if h.ExpirationInterval != 0 && now.After(aggregate.expireTime) {
 			delete(h.cache, id)
@@ -153,7 +139,7 @@ func (h *HistogramAggregator) Push(acc telegraf.Accumulator) {
 		aggregate.updated = false
 		h.cache[id] = aggregate
 		for field, counts := range aggregate.histogramCollection {
-			h.groupFieldsByBuckets(&metricsWithGroupedFields, aggregate.name, field, copyTags(aggregate.tags), counts)
+			h.groupFieldsByBuckets(&metricsWithGroupedFields, aggregate.name, field, maps.Clone(aggregate.tags), counts)
 		}
 	}
 
@@ -162,13 +148,19 @@ func (h *HistogramAggregator) Push(acc telegraf.Accumulator) {
 	}
 }
 
+// Reset does nothing by default, because we typically need to collect counts for a long time.
+// Otherwise, if config parameter 'reset' has 'true' value, we will get a histogram
+// with a small amount of the distribution. However, in some use cases, a reset is useful.
+func (h *Histogram) Reset() {
+	if h.ResetBuckets {
+		h.resetCache()
+		h.buckets = make(bucketsByMetrics)
+	}
+}
+
 // groupFieldsByBuckets groups fields by metric buckets which are represented as tags
-func (h *HistogramAggregator) groupFieldsByBuckets(
-	metricsWithGroupedFields *[]groupedByCountFields,
-	name string,
-	field string,
-	tags map[string]string,
-	counts []int64,
+func (h *Histogram) groupFieldsByBuckets(
+	metricsWithGroupedFields *[]groupedByCountFields, name, field string, tags map[string]string, counts []int64,
 ) {
 	sum := int64(0)
 	buckets := h.getBuckets(name, field) // note that len(buckets) + 1 == len(counts)
@@ -189,18 +181,12 @@ func (h *HistogramAggregator) groupFieldsByBuckets(
 		}
 
 		sum += count
-		h.groupField(metricsWithGroupedFields, name, field, sum, copyTags(tags))
+		groupField(metricsWithGroupedFields, name, field, sum, maps.Clone(tags))
 	}
 }
 
 // groupField groups field by count value
-func (h *HistogramAggregator) groupField(
-	metricsWithGroupedFields *[]groupedByCountFields,
-	name string,
-	field string,
-	count int64,
-	tags map[string]string,
-) {
+func groupField(metricsWithGroupedFields *[]groupedByCountFields, name, field string, count int64, tags map[string]string) {
 	for key, metric := range *metricsWithGroupedFields {
 		if name == metric.name && isTagsIdentical(tags, metric.tags) {
 			(*metricsWithGroupedFields)[key].fieldsWithCount[field] = count
@@ -218,30 +204,20 @@ func (h *HistogramAggregator) groupField(
 	)
 }
 
-// Reset does nothing by default, because we typically need to collect counts for a long time.
-// Otherwise if config parameter 'reset' has 'true' value, we will get a histogram
-// with a small amount of the distribution. However in some use cases a reset is useful.
-func (h *HistogramAggregator) Reset() {
-	if h.ResetBuckets {
-		h.resetCache()
-		h.buckets = make(bucketsByMetrics)
-	}
-}
-
 // resetCache resets cached counts(hits) in the buckets
-func (h *HistogramAggregator) resetCache() {
+func (h *Histogram) resetCache() {
 	h.cache = make(map[uint64]metricHistogramCollection)
 }
 
 // getBuckets finds buckets and returns them
-func (h *HistogramAggregator) getBuckets(metric string, field string) []float64 {
+func (h *Histogram) getBuckets(metric, field string) []float64 {
 	if buckets, ok := h.buckets[metric][field]; ok {
 		return buckets
 	}
 
-	for _, config := range h.Configs {
-		if config.Metric == metric {
-			if !isBucketExists(field, config) {
+	for _, cfg := range h.Configs {
+		if cfg.Metric == metric {
+			if !isBucketExists(field, cfg) {
 				continue
 			}
 
@@ -249,7 +225,7 @@ func (h *HistogramAggregator) getBuckets(metric string, field string) []float64 
 				h.buckets[metric] = make(bucketsByFields)
 			}
 
-			h.buckets[metric][field] = sortBuckets(config.Buckets)
+			h.buckets[metric][field] = sortBuckets(cfg.Buckets)
 		}
 	}
 
@@ -257,18 +233,12 @@ func (h *HistogramAggregator) getBuckets(metric string, field string) []float64 
 }
 
 // isBucketExists checks if buckets exists for the passed field
-func isBucketExists(field string, cfg config) bool {
+func isBucketExists(field string, cfg bucketConfig) bool {
 	if len(cfg.Fields) == 0 {
 		return true
 	}
 
-	for _, fl := range cfg.Fields {
-		if fl == field {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(cfg.Fields, field)
 }
 
 // sortBuckets sorts the buckets if it is needed
@@ -284,7 +254,7 @@ func sortBuckets(buckets []float64) []float64 {
 }
 
 // convert converts interface to concrete type
-func convert(in interface{}) (float64, bool) {
+func convert(in any) (float64, bool) {
 	switch v := in.(type) {
 	case float64:
 		return v, true
@@ -293,16 +263,6 @@ func convert(in interface{}) (float64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-// copyTags copies tags
-func copyTags(tags map[string]string) map[string]string {
-	copiedTags := map[string]string{}
-	for key, val := range tags {
-		copiedTags[key] = val
-	}
-
-	return copiedTags
 }
 
 // isTagsIdentical checks the identity of two list of tags
@@ -321,8 +281,8 @@ func isTagsIdentical(originalTags, checkedTags map[string]string) bool {
 }
 
 // makeFieldsWithCount assigns count value to all metric fields
-func makeFieldsWithCount(fieldsWithCountIn map[string]int64) map[string]interface{} {
-	fieldsWithCountOut := map[string]interface{}{}
+func makeFieldsWithCount(fieldsWithCountIn map[string]int64) map[string]any {
+	fieldsWithCountOut := make(map[string]any, len(fieldsWithCountIn))
 	for field, count := range fieldsWithCountIn {
 		fieldsWithCountOut[field+"_bucket"] = count
 	}
@@ -330,9 +290,18 @@ func makeFieldsWithCount(fieldsWithCountIn map[string]int64) map[string]interfac
 	return fieldsWithCountOut
 }
 
-// init initializes histogram aggregator plugin
+func newHistogramAggregator() *Histogram {
+	h := &Histogram{
+		Cumulative: true,
+	}
+	h.buckets = make(bucketsByMetrics)
+	h.resetCache()
+
+	return h
+}
+
 func init() {
 	aggregators.Add("histogram", func() telegraf.Aggregator {
-		return NewHistogramAggregator()
+		return newHistogramAggregator()
 	})
 }

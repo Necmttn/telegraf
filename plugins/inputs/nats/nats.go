@@ -23,8 +23,8 @@ import (
 var sampleConfig string
 
 type Nats struct {
-	Server          string
-	ResponseTimeout config.Duration
+	Server          string          `toml:"server"`
+	ResponseTimeout config.Duration `toml:"response_timeout"`
 
 	client *http.Client
 }
@@ -61,7 +61,7 @@ func (n *Nats) Gather(acc telegraf.Accumulator) error {
 	}
 
 	acc.AddFields("nats",
-		map[string]interface{}{
+		map[string]any{
 			"in_msgs":           stats.InMsgs,
 			"out_msgs":          stats.OutMsgs,
 			"in_bytes":          stats.InBytes,

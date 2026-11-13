@@ -1,24 +1,29 @@
 # GroundWork Output Plugin
 
-This plugin writes to a [GroundWork Monitor][1] instance. Plugin only supports
-GW8+
+This plugin writes metrics to a [GroundWork Monitor][groundwork] instance.
 
-[1]: https://www.gwos.com/product/groundwork-monitor/
+> [!IMPORTANT]
+> Plugin only supports GroundWork v8 or later.
+
+⭐ Telegraf v1.21.0
+🏷️ applications, messaging
+💻 all
+
+[groundwork]: https://www.gwos.com/product/groundwork-monitor/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `username` and
+This plugin supports secrets from secret stores for the `username` and
 `password` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -44,7 +49,8 @@ to use them.
   ## Default display name for the host with services(metrics).
   # default_host = "telegraf"
 
-  ## Default service state.
+  ## Service state used when the status is neither given by a "status" tag or
+  ## field, nor computed from thresholds.
   # default_service_state = "SERVICE_OK"
 
   ## The name of the tag that contains the hostname.
@@ -52,6 +58,13 @@ to use them.
 
   ## The name of the tag that contains the host group name.
   # group_tag = "group"
+
+  ## The name of the tag that contains the host alias (display name).
+  ## Empty by default, so no alias is sent.
+  # alias_tag = ""
+
+  ## The name of the tag that contains the service name.
+  # service_tag = "service"
 ```
 
 ## List of tags used by the plugin
@@ -60,7 +73,8 @@ to use them.
   can be changed with config.
 * __host__ - to define the name of the host you want to monitor,
   can be changed with config.
-* __service__ - to define the name of the service you want to monitor.
+* __service__ - to define the name of the service you want to monitor,
+  can be changed with config.
 * __status__ - to define the status of the service. Supported statuses:
   "SERVICE_OK", "SERVICE_WARNING", "SERVICE_UNSCHEDULED_CRITICAL",
   "SERVICE_PENDING", "SERVICE_SCHEDULED_CRITICAL", "SERVICE_UNKNOWN".

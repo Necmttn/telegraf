@@ -1,17 +1,18 @@
 //go:generate ../../../tools/readme_config_includer/generator
 //go:build linux
-// +build linux
 
 package intel_dlb
 
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,17 @@ import (
 var sampleConfig string
 
 var unreachableSocketBehaviors = []string{"error", "ignore"}
+
+const (
+	defaultSocketPath      = "/var/run/dpdk/rte/dpdk_telemetry.v2"
+	pluginName             = "intel_dlb"
+	eventdevListCommand    = "/eventdev/dev_list"
+	dlbDeviceIDLocation    = "/sys/devices/*/*/device"
+	aerCorrectableFileName = "aer_dev_correctable"
+	aerFatalFileName       = "aer_dev_fatal"
+	aerNonFatalFileName    = "aer_dev_nonfatal"
+	defaultDLBDevice       = "0x2710"
+)
 
 type IntelDLB struct {
 	SocketPath                string          `toml:"socket_path"`
@@ -38,23 +50,10 @@ type IntelDLB struct {
 	maxInitMessageLength uint32
 }
 
-const (
-	defaultSocketPath      = "/var/run/dpdk/rte/dpdk_telemetry.v2"
-	pluginName             = "intel_dlb"
-	eventdevListCommand    = "/eventdev/dev_list"
-	dlbDeviceIDLocation    = "/sys/devices/*/*/device"
-	aerCorrectableFileName = "aer_dev_correctable"
-	aerFatalFileName       = "aer_dev_fatal"
-	aerNonFatalFileName    = "aer_dev_nonfatal"
-	defaultDLBDevice       = "0x2710"
-)
-
-// SampleConfig returns sample config
-func (d *IntelDLB) SampleConfig() string {
+func (*IntelDLB) SampleConfig() string {
 	return sampleConfig
 }
 
-// Init performs validation of all parameters from configuration.
 func (d *IntelDLB) Init() error {
 	var err error
 
@@ -104,7 +103,6 @@ func (d *IntelDLB) Init() error {
 	return nil
 }
 
-// Gather all unique commands and process each command sequentially.
 func (d *IntelDLB) Gather(acc telegraf.Accumulator) error {
 	err := d.gatherMetricsFromSocket(acc)
 	if err != nil {
@@ -142,7 +140,7 @@ func (d *IntelDLB) gatherRasMetrics(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (d *IntelDLB) readRasMetrics(devicePath, metricPath string) (map[string]interface{}, error) {
+func (d *IntelDLB) readRasMetrics(devicePath, metricPath string) (map[string]any, error) {
 	deviceMetricPath := filepath.Join(devicePath, metricPath)
 
 	data, err := d.rasReader.readFromFile(deviceMetricPath)
@@ -152,7 +150,7 @@ func (d *IntelDLB) readRasMetrics(devicePath, metricPath string) (map[string]int
 
 	metrics := strings.Split(strings.TrimSpace(string(data)), "\n")
 
-	rasMetric := make(map[string]interface{})
+	rasMetric := make(map[string]any)
 	for _, metric := range metrics {
 		metricPart := strings.Split(metric, " ")
 		if len(metricPart) < 2 {
@@ -183,7 +181,7 @@ func (d *IntelDLB) gatherMetricsFromSocket(acc telegraf.Accumulator) error {
 		if err != nil {
 			return err
 		}
-		var statsWithValue = make(map[string]interface{})
+		var statsWithValue = make(map[string]any)
 		for _, commandBody := range parsedDeviceXstats {
 			for metricName, metricValue := range commandBody {
 				statsWithValue[metricName] = metricValue
@@ -228,7 +226,7 @@ func (d *IntelDLB) gatherCommandsWithDeviceIndex() ([]string, error) {
 	return commandsWithIndex, nil
 }
 
-func (d *IntelDLB) gatherCommandsResult(command string, deviceToParse interface{}) error {
+func (d *IntelDLB) gatherCommandsResult(command string, deviceToParse any) error {
 	err := d.ensureConnected()
 	if err != nil {
 		return err
@@ -308,7 +306,7 @@ func (d *IntelDLB) setInitMessageLength() error {
 		return d.closeSocketAndThrowError("custom", fmt.Errorf("failed to read InitMessage from socket: %w", err))
 	}
 	if messageLength > len(buf) {
-		return d.closeSocketAndThrowError("custom", fmt.Errorf("socket reply length is bigger than default buffer length"))
+		return d.closeSocketAndThrowError("custom", errors.New("socket reply length is bigger than default buffer length"))
 	}
 
 	var initMsg initMessage
@@ -339,21 +337,21 @@ func (d *IntelDLB) writeReadSocketMessage(messageToWrite string) (int, []byte, e
 	}
 
 	if replyMsgLen == 0 {
-		return 0, nil, d.closeSocketAndThrowError("message", fmt.Errorf("message length is empty"))
+		return 0, nil, d.closeSocketAndThrowError("message", errors.New("message length is empty"))
 	}
 
 	return replyMsgLen, socketReply, nil
 }
 
-func (d *IntelDLB) parseJSON(replyMsgLen int, socketReply []byte, parsedDeviceInfo interface{}) error {
+func (d *IntelDLB) parseJSON(replyMsgLen int, socketReply []byte, parsedDeviceInfo any) error {
 	if len(socketReply) == 0 {
-		return d.closeSocketAndThrowError("json", fmt.Errorf("socket reply is empty"))
+		return d.closeSocketAndThrowError("json", errors.New("socket reply is empty"))
 	}
 	if replyMsgLen > len(socketReply) {
-		return d.closeSocketAndThrowError("json", fmt.Errorf("socket reply length is bigger than it should be"))
+		return d.closeSocketAndThrowError("json", errors.New("socket reply length is bigger than it should be"))
 	}
 	if replyMsgLen == 0 {
-		return d.closeSocketAndThrowError("json", fmt.Errorf("socket reply message is empty"))
+		return d.closeSocketAndThrowError("json", errors.New("socket reply message is empty"))
 	}
 	// Assign reply to variable, e.g.:  {"/eventdev/dev_list": [0, 1]}
 	jsonDeviceIndexes := socketReply[:replyMsgLen]
@@ -405,7 +403,7 @@ func (d *IntelDLB) closeSocketAndThrowError(errType string, err error) error {
 
 func (d *IntelDLB) checkAndAddDLBDevice() error {
 	if d.rasReader == nil {
-		return fmt.Errorf("rasreader was not initialized")
+		return errors.New("rasreader was not initialized")
 	}
 	filePaths, err := d.rasReader.gatherPaths(dlbDeviceIDLocation)
 	if err != nil {
@@ -421,7 +419,7 @@ func (d *IntelDLB) checkAndAddDLBDevice() error {
 
 		// check if it is DLB device
 		trimmedDeviceID := strings.TrimSpace(string(fileData))
-		if !choice.Contains(trimmedDeviceID, d.DLBDeviceIDs) {
+		if !slices.Contains(d.DLBDeviceIDs, trimmedDeviceID) {
 			continue
 		}
 		deviceDir := filepath.Dir(path)

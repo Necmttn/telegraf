@@ -2,6 +2,7 @@ package prometheusremotewrite
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/prompb"
 
 	"github.com/influxdata/telegraf"
@@ -17,30 +19,56 @@ import (
 	"github.com/influxdata/telegraf/plugins/serializers/prometheus"
 )
 
-type MetricKey uint64
-
 type Serializer struct {
-	SortMetrics   bool `toml:"prometheus_sort_metrics"`
-	StringAsLabel bool `toml:"prometheus_string_as_label"`
+	SortMetrics   bool            `toml:"prometheus_sort_metrics"`
+	StringAsLabel bool            `toml:"prometheus_string_as_label"`
+	Log           telegraf.Logger `toml:"-"`
 }
+
+type metricKey uint64
 
 func (s *Serializer) Serialize(metric telegraf.Metric) ([]byte, error) {
 	return s.SerializeBatch([]telegraf.Metric{metric})
 }
 
 func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
-	var buf bytes.Buffer
+	var lastErr error
+	// traceAndKeepErr logs on Trace level every passed error.
+	// with each call it updates lastErr, so it can be logged later with higher level.
+	traceAndKeepErr := func(format string, a ...any) {
+		lastErr = fmt.Errorf(format, a...)
+		s.Log.Trace(lastErr)
+	}
 
-	var entries = make(map[MetricKey]prompb.TimeSeries)
+	var buf bytes.Buffer
+	var entries = make(map[metricKey]prompb.TimeSeries)
 	var labels = make([]prompb.Label, 0)
 	for _, metric := range metrics {
 		labels = s.appendCommonLabels(labels[:0], metric)
-		var metrickey MetricKey
+		var metrickey metricKey
 		var promts prompb.TimeSeries
+
+		// First try to parse out native histogram with tryGetNativeHistogram;
+		// This has to be done before the field loop because we need to look at multiple fields at the same time.
+		if metric.Type() == telegraf.Histogram {
+			if metrickey, data := tryConvertToNativeHistogram(metric, labels); data != nil {
+				// A batch of metrics can contain multiple values for a single
+				// Prometheus histogram. Accumulate the histograms on the
+				// existing time series instead of replacing it, so none of
+				// them are dropped.
+				if err := accumulateHistogram(entries, metrickey, *data); err != nil {
+					traceAndKeepErr("dropping histogram of metric %q with timestamp %v: %w", metric.Name(), metric.Time(), err)
+				}
+				continue
+			}
+		}
+
+		// If it's not a native histogram, we parse field by field as per normal.
 		for _, field := range metric.FieldList() {
-			metricName := prometheus.MetricName(metric.Name(), field.Key, metric.Type())
-			metricName, ok := prometheus.SanitizeMetricName(metricName)
+			rawName := prometheus.MetricName(metric.Name(), field.Key, metric.Type())
+			metricName, ok := prometheus.SanitizeMetricName(rawName)
 			if !ok {
+				traceAndKeepErr("failed to parse metric name %q", rawName)
 				continue
 			}
 
@@ -52,58 +80,46 @@ func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
 			case telegraf.Untyped:
 				value, ok := prometheus.SampleValue(field.Value)
 				if !ok {
+					traceAndKeepErr("failed to parse %q: bad sample value %#v", metricName, field.Value)
 					continue
 				}
 				metrickey, promts = getPromTS(metricName, labels, value, metric.Time())
 			case telegraf.Histogram:
 				switch {
 				case strings.HasSuffix(field.Key, "_bucket"):
-					// if bucket only, init sum, count, inf
-					metrickeysum, promtssum := getPromTS(fmt.Sprintf("%s_sum", metricName), labels, float64(0), metric.Time())
-					if _, ok = entries[metrickeysum]; !ok {
-						entries[metrickeysum] = promtssum
-					}
-					metrickeycount, promtscount := getPromTS(fmt.Sprintf("%s_count", metricName), labels, float64(0), metric.Time())
-					if _, ok = entries[metrickeycount]; !ok {
-						entries[metrickeycount] = promtscount
-					}
-					extraLabel := prompb.Label{
-						Name:  "le",
-						Value: "+Inf",
-					}
-					metrickeyinf, promtsinf := getPromTS(fmt.Sprintf("%s_bucket", metricName), labels, float64(0), metric.Time(), extraLabel)
-					if _, ok = entries[metrickeyinf]; !ok {
-						entries[metrickeyinf] = promtsinf
-					}
-
 					le, ok := metric.GetTag("le")
 					if !ok {
+						traceAndKeepErr("failed to parse %q: can't find `le` label", metricName)
 						continue
 					}
 					bound, err := strconv.ParseFloat(le, 64)
 					if err != nil {
+						traceAndKeepErr("failed to parse %q: can't parse %q value: %w", metricName, le, err)
 						continue
 					}
 					count, ok := prometheus.SampleCount(field.Value)
 					if !ok {
+						traceAndKeepErr("failed to parse %q: bad sample value %#v", metricName, field.Value)
 						continue
 					}
 
-					extraLabel = prompb.Label{
+					extraLabel := prompb.Label{
 						Name:  "le",
 						Value: fmt.Sprint(bound),
 					}
-					metrickey, promts = getPromTS(fmt.Sprintf("%s_bucket", metricName), labels, float64(count), metric.Time(), extraLabel)
+					metrickey, promts = getPromTS(metricName+"_bucket", labels, float64(count), metric.Time(), extraLabel)
 				case strings.HasSuffix(field.Key, "_sum"):
 					sum, ok := prometheus.SampleSum(field.Value)
 					if !ok {
+						traceAndKeepErr("failed to parse %q: bad sample value %#v", metricName, field.Value)
 						continue
 					}
 
-					metrickey, promts = getPromTS(fmt.Sprintf("%s_sum", metricName), labels, sum, metric.Time())
+					metrickey, promts = getPromTS(metricName+"_sum", labels, sum, metric.Time())
 				case strings.HasSuffix(field.Key, "_count"):
 					count, ok := prometheus.SampleCount(field.Value)
 					if !ok {
+						traceAndKeepErr("failed to parse %q: bad sample value %#v", metricName, field.Value)
 						continue
 					}
 
@@ -112,13 +128,17 @@ func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
 						Name:  "le",
 						Value: "+Inf",
 					}
-					metrickeyinf, promtsinf := getPromTS(fmt.Sprintf("%s_bucket", metricName), labels, float64(count), metric.Time(), extraLabel)
-					if minf, ok := entries[metrickeyinf]; !ok || minf.Samples[0].Value == 0 {
-						entries[metrickeyinf] = promtsinf
+					// The +Inf bucket holds the same value as the count, so
+					// accumulate it here to keep it in sync with the other
+					// buckets of the histogram.
+					metrickeyinf, promtsinf := getPromTS(metricName+"_bucket", labels, float64(count), metric.Time(), extraLabel)
+					if err := accumulateSample(entries, metrickeyinf, promtsinf); err != nil {
+						traceAndKeepErr("dropping +Inf bucket of metric %q with timestamp %v: %w", metric.Name(), metric.Time(), err)
 					}
 
-					metrickey, promts = getPromTS(fmt.Sprintf("%s_count", metricName), labels, float64(count), metric.Time())
+					metrickey, promts = getPromTS(metricName+"_count", labels, float64(count), metric.Time())
 				default:
+					traceAndKeepErr("failed to parse %q: series %q should have `_count`, `_sum` or `_bucket` suffix", metricName, field.Key)
 					continue
 				}
 			case telegraf.Summary:
@@ -126,28 +146,33 @@ func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
 				case strings.HasSuffix(field.Key, "_sum"):
 					sum, ok := prometheus.SampleSum(field.Value)
 					if !ok {
+						traceAndKeepErr("failed to parse %q: bad sample value %#v", metricName, field.Value)
 						continue
 					}
 
-					metrickey, promts = getPromTS(fmt.Sprintf("%s_sum", metricName), labels, sum, metric.Time())
+					metrickey, promts = getPromTS(metricName+"_sum", labels, sum, metric.Time())
 				case strings.HasSuffix(field.Key, "_count"):
 					count, ok := prometheus.SampleCount(field.Value)
 					if !ok {
+						traceAndKeepErr("failed to parse %q: bad sample value %#v", metricName, field.Value)
 						continue
 					}
 
-					metrickey, promts = getPromTS(fmt.Sprintf("%s_count", metricName), labels, float64(count), metric.Time())
+					metrickey, promts = getPromTS(metricName+"_count", labels, float64(count), metric.Time())
 				default:
 					quantileTag, ok := metric.GetTag("quantile")
 					if !ok {
+						traceAndKeepErr("failed to parse %q: can't find `quantile` label", metricName)
 						continue
 					}
 					quantile, err := strconv.ParseFloat(quantileTag, 64)
 					if err != nil {
+						traceAndKeepErr("failed to parse %q: can't parse %q value: %w", metricName, quantileTag, err)
 						continue
 					}
 					value, ok := prometheus.SampleValue(field.Value)
 					if !ok {
+						traceAndKeepErr("failed to parse %q: bad sample value %#v", metricName, field.Value)
 						continue
 					}
 
@@ -162,16 +187,18 @@ func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
 			}
 
 			// A batch of metrics can contain multiple values for a single
-			// Prometheus sample.  If this metric is older than the existing
-			// sample then we can skip over it.
-			m, ok := entries[metrickey]
-			if ok {
-				if metric.Time().Before(time.Unix(0, m.Samples[0].Timestamp*1_000_000)) {
-					continue
-				}
+			// Prometheus series. Accumulate the samples on the existing time
+			// series instead of replacing it, so no samples are dropped.
+			if err := accumulateSample(entries, metrickey, promts); err != nil {
+				traceAndKeepErr("dropping sample of metric %q with timestamp %v: %w", metric.Name(), metric.Time(), err)
 			}
-			entries[metrickey] = promts
 		}
+	}
+
+	if lastErr != nil {
+		// log only the last recorded error in the batch, as it could have many errors and logging each one
+		// could be too verbose. The following log line still provides enough info for user to act on.
+		s.Log.Warnf("some series were dropped, %d series left to send; last recorded error: %v", len(entries), lastErr)
 	}
 
 	var promTS = make([]prompb.TimeSeries, len(entries))
@@ -213,6 +240,62 @@ func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
 	encoded := snappy.Encode(nil, data)
 	buf.Write(encoded)
 	return buf.Bytes(), nil
+}
+
+// accumulateSample adds the sample of the given series to the series already
+// registered under the given key, keeping the samples in chronological order.
+// For a duplicated timestamp the later value wins.
+func accumulateSample(entries map[metricKey]prompb.TimeSeries, key metricKey, series prompb.TimeSeries) error {
+	entry, found := entries[key]
+	if !found {
+		entries[key] = series
+		return nil
+	}
+	if len(entry.Samples) == 0 {
+		return errors.New("series is already registered as native histogram")
+	}
+
+	sample := series.Samples[0]
+	last := len(entry.Samples) - 1
+	switch {
+	case sample.Timestamp < entry.Samples[last].Timestamp:
+		return errors.New("sample is older than the last registered one")
+	case sample.Timestamp == entry.Samples[last].Timestamp:
+		entry.Samples[last] = sample
+	default:
+		entry.Samples = append(entry.Samples, sample)
+	}
+	entries[key] = entry
+
+	return nil
+}
+
+// accumulateHistogram adds the native histogram of the given series to the
+// series already registered under the given key, keeping the histograms in
+// chronological order. For a duplicated timestamp the later histogram wins.
+func accumulateHistogram(entries map[metricKey]prompb.TimeSeries, key metricKey, series prompb.TimeSeries) error {
+	entry, found := entries[key]
+	if !found {
+		entries[key] = series
+		return nil
+	}
+	if len(entry.Histograms) == 0 {
+		return errors.New("series is already registered with samples")
+	}
+
+	hist := series.Histograms[0]
+	last := len(entry.Histograms) - 1
+	switch {
+	case hist.Timestamp < entry.Histograms[last].Timestamp:
+		return errors.New("histogram is older than the last registered one")
+	case hist.Timestamp == entry.Histograms[last].Timestamp:
+		entry.Histograms[last] = hist
+	default:
+		entry.Histograms = append(entry.Histograms, hist)
+	}
+	entries[key] = entry
+
+	return nil
 }
 
 func hasLabel(name string, labels []prompb.Label) bool {
@@ -278,7 +361,7 @@ func (s *Serializer) appendCommonLabels(labels []prompb.Label, metric telegraf.M
 	return labels
 }
 
-func MakeMetricKey(labels []prompb.Label) MetricKey {
+func makeMetricKey(labels []prompb.Label) metricKey {
 	h := fnv.New64a()
 	for _, label := range labels {
 		h.Write([]byte(label.Name))
@@ -286,10 +369,10 @@ func MakeMetricKey(labels []prompb.Label) MetricKey {
 		h.Write([]byte(label.Value))
 		h.Write([]byte("\x00"))
 	}
-	return MetricKey(h.Sum64())
+	return metricKey(h.Sum64())
 }
 
-func getPromTS(name string, labels []prompb.Label, value float64, ts time.Time, extraLabels ...prompb.Label) (MetricKey, prompb.TimeSeries) {
+func getPromTS(name string, labels []prompb.Label, value float64, ts time.Time, extraLabels ...prompb.Label) (metricKey, prompb.TimeSeries) {
 	labelscopy := make([]prompb.Label, len(labels), len(labels)+1)
 	copy(labelscopy, labels)
 
@@ -307,7 +390,181 @@ func getPromTS(name string, labels []prompb.Label, value float64, ts time.Time, 
 	// we sort the labels since Prometheus TSDB does not like out of order labels
 	sort.Sort(sortableLabels(labelscopy))
 
-	return MakeMetricKey(labelscopy), prompb.TimeSeries{Labels: labelscopy, Samples: sample}
+	return makeMetricKey(labelscopy), prompb.TimeSeries{Labels: labelscopy, Samples: sample}
+}
+
+func tryConvertToNativeHistogram(metric telegraf.Metric, labels []prompb.Label) (metricKey, *prompb.TimeSeries) {
+	fields := metric.Fields()
+
+	// Native histograms have count, sum, schema, counter_reset_hint, zero_threshold, zero_count
+	// If any of these are missing, we can't convert to a native histogram and short-circuit.
+	count, found := fields["count"]
+	if !found {
+		return 0, nil
+	}
+	countFloat, ok := count.(float64)
+	if !ok {
+		return 0, nil
+	}
+	sum, found := fields["sum"]
+	if !found {
+		return 0, nil
+	}
+	sumFloat, ok := sum.(float64)
+	if !ok {
+		return 0, nil
+	}
+	schema, found := fields["schema"]
+	if !found {
+		return 0, nil
+	}
+	schemaInt, ok := schema.(int64)
+	if !ok {
+		return 0, nil
+	}
+	counterResetHint, found := fields["counter_reset_hint"]
+	if !found {
+		return 0, nil
+	}
+	counterResetHintInt, ok := counterResetHint.(uint64)
+	if !ok {
+		return 0, nil
+	}
+	zeroThreshold, found := fields["zero_threshold"]
+	if !found {
+		return 0, nil
+	}
+	zeroThresholdFloat, ok := zeroThreshold.(float64)
+	if !ok {
+		return 0, nil
+	}
+	zeroCount, found := fields["zero_count"]
+	if !found {
+		return 0, nil
+	}
+	zeroCountFloat, ok := zeroCount.(float64)
+	if !ok {
+		return 0, nil
+	}
+
+	floatHistogram := &histogram.FloatHistogram{
+		Count:            countFloat,
+		Sum:              sumFloat,
+		Schema:           int32(schemaInt),
+		CounterResetHint: histogram.CounterResetHint(counterResetHintInt),
+		ZeroThreshold:    zeroThresholdFloat,
+		ZeroCount:        zeroCountFloat,
+		PositiveSpans:    make([]histogram.Span, 0),
+		NegativeSpans:    make([]histogram.Span, 0),
+		PositiveBuckets:  make([]float64, 0),
+		NegativeBuckets:  make([]float64, 0),
+	}
+
+	// Span (offset, length pair) define bucket boundaries.
+	// A native histogram can have 0 or multiple positive spans.
+	// We do not know how many spans there are, so iterate from 0 until we break.
+	i := 0
+	for {
+		offset, offsetFound := fields[fmt.Sprintf("positive_span_%d_offset", i)]
+		length, lengthFound := fields[fmt.Sprintf("positive_span_%d_length", i)]
+		if !offsetFound || !lengthFound {
+			break
+		}
+		offsetInt, offsetOk := offset.(int64)
+		lengthInt, lengthOk := length.(uint64)
+		if !offsetOk || !lengthOk {
+			break
+		}
+		floatHistogram.PositiveSpans = append(floatHistogram.PositiveSpans,
+			histogram.Span{
+				Offset: int32(offsetInt),
+				Length: uint32(lengthInt),
+			},
+		)
+		i++
+	}
+
+	// Do the same for negative spans
+	i = 0
+	for {
+		offset, offsetFound := fields[fmt.Sprintf("negative_span_%d_offset", i)]
+		length, lengthFound := fields[fmt.Sprintf("negative_span_%d_length", i)]
+		if !offsetFound || !lengthFound {
+			break
+		}
+		offsetInt, offsetOk := offset.(int64)
+		lengthInt, lengthOk := length.(uint64)
+		if !offsetOk || !lengthOk {
+			break
+		}
+		floatHistogram.NegativeSpans = append(floatHistogram.NegativeSpans,
+			histogram.Span{
+				Offset: int32(offsetInt),
+				Length: uint32(lengthInt),
+			},
+		)
+		i++
+	}
+
+	// Bucket defines count in each bucket.
+	// Similarly, there can be 0 or multiple positive bucket fields.
+	// Similarly, we do not know how many bucket fields there are, so iterate from 0 until we break.
+	// Note that length of bucket array can be more than the length of spans due to delta encoding of bucket boundaries.
+	i = 0
+	for {
+		bucket, found := fields[fmt.Sprintf("positive_bucket_%d", i)]
+		if !found {
+			break
+		}
+		bucketFloat, ok := bucket.(float64)
+		if !ok {
+			break
+		}
+		floatHistogram.PositiveBuckets = append(floatHistogram.PositiveBuckets, bucketFloat)
+		i++
+	}
+
+	// Do the same for negative buckets
+	i = 0
+	for {
+		bucket, found := fields[fmt.Sprintf("negative_bucket_%d", i)]
+		if !found {
+			break
+		}
+		bucketFloat, ok := bucket.(float64)
+		if !ok {
+			break
+		}
+		floatHistogram.NegativeBuckets = append(floatHistogram.NegativeBuckets, bucketFloat)
+		i++
+	}
+
+	// Validate the floatHistogram
+	err := floatHistogram.Validate()
+	if err != nil {
+		return 0, nil
+	}
+
+	// Now we have a valid floatHistogram, we convert it to a prompb.TimeSeries
+	labelscopy := make([]prompb.Label, len(labels), len(labels)+1)
+	copy(labelscopy, labels)
+
+	histograms := []prompb.Histogram{
+		prompb.FromFloatHistogram(
+			metric.Time().UnixNano()/int64(time.Millisecond),
+			floatHistogram,
+		),
+	}
+	labelscopy = append(labelscopy, prompb.Label{
+		Name:  "__name__",
+		Value: metric.Name(),
+	})
+
+	// We sort the labels since Prometheus TSDB does not like out of order labels
+	sort.Sort(sortableLabels(labelscopy))
+
+	// For a native histogram, samples are not used; instead, histograms field is used
+	return makeMetricKey(labelscopy), &prompb.TimeSeries{Labels: labelscopy, Histograms: histograms}
 }
 
 type sortableLabels []prompb.Label
@@ -322,16 +579,8 @@ func (sl sortableLabels) Swap(i, j int) {
 
 func init() {
 	serializers.Add("prometheusremotewrite",
-		func() serializers.Serializer {
+		func() telegraf.Serializer {
 			return &Serializer{}
 		},
 	)
-}
-
-// InitFromConfig is a compatibility function to construct the parser the old way
-func (s *Serializer) InitFromConfig(cfg *serializers.Config) error {
-	s.SortMetrics = cfg.PrometheusSortMetrics
-	s.StringAsLabel = cfg.PrometheusStringAsLabel
-
-	return nil
 }

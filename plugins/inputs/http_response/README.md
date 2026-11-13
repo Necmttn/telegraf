@@ -1,21 +1,25 @@
 # HTTP Response Input Plugin
 
-This input plugin checks HTTP/HTTPS connections.
+This plugin generates metrics from HTTP responses including the status code and
+response statistics.
+
+⭐ Telegraf v0.12.1
+🏷️ server
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `username` and
-`password` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+This plugin supports secrets from secret stores for the `username`, `password`
+and `token` options.
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -32,6 +36,14 @@ to use them.
   ## Telegraf uses the system wide proxy settings if it's is not set.
   # http_proxy = "http://localhost:8888"
 
+  ## Optional SOCKS5 proxy to use when connecting to the server
+  ## If enabled, the system wide proxy settings are ignored and only an
+  ## explicitly set http_proxy is used through the SOCKS5 proxy.
+  # socks5_enabled = true
+  # socks5_address = "127.0.0.1:1080"
+  # socks5_username = "alice"
+  # socks5_password = "pass123"
+
   ## Set response_timeout (default 5 seconds)
   # response_timeout = "5s"
 
@@ -41,9 +53,9 @@ to use them.
   ## Whether to follow redirects from the server (defaults to false)
   # follow_redirects = false
 
-  ## Optional file with Bearer token
-  ## file content is added as an Authorization header
-  # bearer_token = "/path/to/file"
+  ## Bearer token for authentication, accepting secret-store references
+  ## This option cannot be used in combination with 'bearer_token'.
+  # token = "my-token"
 
   ## Optional HTTP Basic Auth Credentials
   # username = "username"
@@ -106,6 +118,15 @@ to use them.
 
   ## Interface to use when dialing an address
   # interface = "eth0"
+
+  ## Optional Cookie authentication
+  # cookie_auth_url = "https://localhost/authMe"
+  # cookie_auth_method = "POST"
+  # cookie_auth_username = "username"
+  # cookie_auth_password = "pa$$word"
+  # cookie_auth_body = '{"username": "user", "password": "pa$$word", "authenticate": "me"}'
+  ## cookie_auth_renewal not set or set to "0" will auth once and never renew the cookie
+  # cookie_auth_renewal = "5m"
 ```
 
 ## Metrics
@@ -136,7 +157,7 @@ This tag is used to expose network and plugin errors. HTTP errors are considered
 a successful connection.
 
 |Tag value                     |Corresponding field value|Description|
--------------------------------|-------------------------|-----------|
+|------------------------------|-------------------------|-----------|
 |success                       | 0                       |The HTTP request completed, even if the HTTP code represents an error|
 |response_string_mismatch      | 1                       |The option `response_string_match` was used, and the body of the response didn't match the regex. HTTP errors with content in their body (like 4xx, 5xx) will trigger this error|
 |body_read_error               | 2                       |The option `response_string_match` was used, but the plugin wasn't able to read the body of the response. Responses with empty bodies (like 3xx, HEAD, etc) will trigger this error. Or the option `response_body_field` was used and the content of the response body was not a valid utf-8. Or the size of the body of the response exceeded the `response_body_max_size` |
@@ -150,3 +171,14 @@ a successful connection.
 ```text
 http_response,method=GET,result=success,server=http://github.com,status_code=200 content_length=87878i,http_response_code=200i,response_time=0.937655534,result_code=0i,result_type="success" 1565839598000000000
 ```
+
+## Optional Cookie Authentication Settings
+
+The optional Cookie Authentication Settings will retrieve a cookie from the
+given authorization endpoint, and use it in subsequent API requests.  This is
+useful for services that do not provide OAuth or Basic Auth authentication,
+e.g. the [Tesla Powerwall API][tesla], which uses a Cookie Auth Body to retrieve
+an authorization cookie.  The Cookie Auth Renewal interval will renew the
+authorization by retrieving a new cookie at the given interval.
+
+[tesla]: https://www.tesla.com/support/energy/powerwall/own/monitoring-from-home-network

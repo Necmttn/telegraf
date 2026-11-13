@@ -1,18 +1,19 @@
 # HAProxy Input Plugin
 
-The [HAProxy](http://www.haproxy.org/) input plugin gathers [statistics][1]
-using the [stats socket][2] or [HTTP statistics page][3] of a HAProxy server.
+This plugin gathers statistics of [HAProxy][haproxy] servers using sockets or
+the HTTP protocol.
 
-[1]: https://cbonte.github.io/haproxy-dconv/1.9/intro.html#3.3.16
-[2]: https://cbonte.github.io/haproxy-dconv/1.9/management.html#9.3
-[3]: https://cbonte.github.io/haproxy-dconv/1.9/management.html#9
+⭐ Telegraf v0.1.5
+🏷️ network, server
+💻 all
+
+[haproxy]: http://www.haproxy.org/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

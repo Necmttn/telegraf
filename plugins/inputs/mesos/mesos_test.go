@@ -15,9 +15,9 @@ import (
 	"github.com/influxdata/telegraf/testutil"
 )
 
-var masterMetrics map[string]interface{}
+var masterMetrics map[string]any
 var masterTestServer *httptest.Server
-var slaveMetrics map[string]interface{}
+var slaveMetrics map[string]any
 
 var slaveTestServer *httptest.Server
 
@@ -270,12 +270,12 @@ var slaveMetricNames = []string{
 }
 
 func generateMetrics() {
-	masterMetrics = make(map[string]interface{})
+	masterMetrics = make(map[string]any)
 	for _, k := range masterMetricNames {
 		masterMetrics[k] = rand.Float64()
 	}
 
-	slaveMetrics = make(map[string]interface{})
+	slaveMetrics = make(map[string]any)
 	for _, k := range slaveMetricNames {
 		slaveMetrics[k] = rand.Float64()
 	}
@@ -285,7 +285,7 @@ func TestMain(m *testing.M) {
 	generateMetrics()
 
 	masterRouter := http.NewServeMux()
-	masterRouter.HandleFunc("/metrics/snapshot", func(w http.ResponseWriter, r *http.Request) {
+	masterRouter.HandleFunc("/metrics/snapshot", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(masterMetrics) //nolint:errcheck // ignore the returned error as we cannot do anything about it anyway
@@ -293,7 +293,7 @@ func TestMain(m *testing.M) {
 	masterTestServer = httptest.NewServer(masterRouter)
 
 	slaveRouter := http.NewServeMux()
-	slaveRouter.HandleFunc("/metrics/snapshot", func(w http.ResponseWriter, r *http.Request) {
+	slaveRouter.HandleFunc("/metrics/snapshot", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(slaveMetrics) //nolint:errcheck // ignore the returned error as we cannot do anything about it anyway
@@ -333,11 +333,11 @@ func TestMasterFilter(t *testing.T) {
 		"messages", "evqueue", "tasks",
 	}
 
-	m.filterMetrics(MASTER, &masterMetrics)
+	m.filterMetrics(master, &masterMetrics)
 
 	// Assert expected metrics are present.
 	for _, v := range m.MasterCols {
-		for _, x := range m.getMetrics(MASTER, v) {
+		for _, x := range m.getMetrics(master, v) {
 			_, ok := masterMetrics[x]
 			require.Truef(t, ok, "Didn't find key %s, it should present.", x)
 		}
@@ -354,7 +354,7 @@ func TestMasterFilter(t *testing.T) {
 
 	// Assert unexpected metrics are not present.
 	for _, v := range b {
-		for _, x := range m.getMetrics(MASTER, v) {
+		for _, x := range m.getMetrics(master, v) {
 			_, ok := masterMetrics[x]
 			require.Falsef(t, ok, "Found key %s, it should be gone.", x)
 		}
@@ -364,7 +364,7 @@ func TestMasterFilter(t *testing.T) {
 	// getMetrics(). We have to find them by checking name prefixes.
 	for k := range masterMetrics {
 		if strings.HasPrefix(k, "master/frameworks/") || strings.HasPrefix(k, "frameworks/") {
-			require.Failf(t, "Found key %s, it should be gone.", k)
+			require.Failf(t, "Wrong key", "Found key %s, it should be gone.", k)
 		}
 	}
 }
@@ -373,9 +373,8 @@ func TestMesosSlave(t *testing.T) {
 	var acc testutil.Accumulator
 
 	m := Mesos{
-		Log:     testutil.Logger{},
-		Masters: []string{},
-		Slaves:  []string{slaveTestServer.Listener.Addr().String()},
+		Log:    testutil.Logger{},
+		Slaves: []string{slaveTestServer.Listener.Addr().String()},
 		// SlaveTasks: true,
 		Timeout: 10,
 	}
@@ -396,16 +395,16 @@ func TestSlaveFilter(t *testing.T) {
 		"system", "executors", "messages",
 	}
 
-	m.filterMetrics(SLAVE, &slaveMetrics)
+	m.filterMetrics(slave, &slaveMetrics)
 
 	for _, v := range b {
-		for _, x := range m.getMetrics(SLAVE, v) {
+		for _, x := range m.getMetrics(slave, v) {
 			_, ok := slaveMetrics[x]
 			require.Falsef(t, ok, "Found key %s, it should be gone.", x)
 		}
 	}
 	for _, v := range m.MasterCols {
-		for _, x := range m.getMetrics(SLAVE, v) {
+		for _, x := range m.getMetrics(slave, v) {
 			_, ok := slaveMetrics[x]
 			require.Truef(t, ok, "Didn't find key %s, it should present.", x)
 		}

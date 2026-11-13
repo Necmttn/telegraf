@@ -5,15 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 
 	"github.com/influxdata/telegraf/filter"
 )
@@ -36,6 +36,7 @@ type packageInfo struct {
 }
 
 type packageCollection struct {
+	root     string
 	packages map[string][]packageInfo
 }
 
@@ -49,19 +50,11 @@ var exceptions = map[string][]packageInfo{
 			Tag:      "parsers.influx",
 		},
 	},
-	"processors": {
-		{
-			Category: "processors",
-			Plugin:   "aws_ec2",
-			Path:     "plugins/processors/aws/ec2",
-			Tag:      "processors.aws_ec2",
-		},
-	},
 }
 
 func (p *packageCollection) collectPackagesForCategory(category string) error {
 	var entries []packageInfo
-	pluginDir := filepath.Join("plugins", category)
+	pluginDir := filepath.Join(p.root, "plugins", category)
 
 	// Add exceptional packages if any
 	if pkgs, found := exceptions[category]; found {
@@ -81,21 +74,31 @@ func (p *packageCollection) collectPackagesForCategory(category string) error {
 		}
 
 		var fset token.FileSet
-		pkgs, err := parser.ParseDir(&fset, path, sourceFileFilter, parser.ParseComments)
+		config := &packages.Config{
+			Dir:  path,
+			Fset: &fset,
+			Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
+		}
+		pkgs, err := packages.Load(config, ".")
 		if err != nil {
 			log.Printf("parsing directory %q failed: %v", path, err)
 			continue
 		}
 
-		for name, pkg := range pkgs {
-			if packageFilter.Match(category + "/" + name) {
+		for _, pkg := range pkgs {
+			if len(pkg.Errors) > 0 {
+				log.Printf("loading package %q had errors: %v", pkg.PkgPath, pkg.Errors)
+				continue
+			}
+
+			if packageFilter.Match(category + "/" + pkg.Name) {
 				continue
 			}
 
 			// Extract the names of the plugins registered by this package
 			registeredNames := extractRegisteredNames(pkg, category)
 			if len(registeredNames) == 0 {
-				log.Printf("WARN: Could not extract information from package %q", name)
+				log.Printf("WARN: Could not extract information from package %q", pkg.Name)
 				continue
 			}
 
@@ -106,23 +109,23 @@ func (p *packageCollection) collectPackagesForCategory(category string) error {
 			case "inputs":
 				dataformat, err := extractDefaultDataFormat(path)
 				if err != nil {
-					log.Printf("Getting default data-format for %s.%s failed: %v", category, name, err)
+					log.Printf("Getting default data-format for %s.%s failed: %v", category, pkg.Name, err)
 				}
 				defaultParser = dataformat
 			case "processors":
 				dataformat, err := extractDefaultDataFormat(path)
 				if err != nil {
-					log.Printf("Getting default data-format for %s.%s failed: %v", category, name, err)
+					log.Printf("Getting default data-format for %s.%s failed: %v", category, pkg.Name, err)
 				}
 				defaultParser = dataformat
 				// The execd processor requires both a parser and serializer
-				if name == "execd" {
+				if pkg.Name == "execd" {
 					defaultSerializer = dataformat
 				}
 			case "outputs":
 				dataformat, err := extractDefaultDataFormat(path)
 				if err != nil {
-					log.Printf("Getting default data-format for %s.%s failed: %v", category, name, err)
+					log.Printf("Getting default data-format for %s.%s failed: %v", category, pkg.Name, err)
 				}
 				defaultSerializer = dataformat
 			}
@@ -185,10 +188,6 @@ func (p *packageCollection) Print() {
 		}
 		fmt.Println("-------------------------------------------------------------------------------")
 	}
-}
-
-func sourceFileFilter(d fs.FileInfo) bool {
-	return strings.HasSuffix(d.Name(), ".go") && !strings.HasSuffix(d.Name(), "_test.go")
 }
 
 func findFunctionDecl(file *ast.File, name string) *ast.FuncDecl {
@@ -262,10 +261,10 @@ func extractPluginInfo(file *ast.File, pluginType string, declarations map[strin
 	return registeredNames, nil
 }
 
-func extractPackageDeclarations(pkg *ast.Package) map[string]string {
+func extractPackageDeclarations(pkg *packages.Package) map[string]string {
 	declarations := make(map[string]string)
 
-	for _, file := range pkg.Files {
+	for _, file := range pkg.Syntax {
 		for _, d := range file.Decls {
 			gendecl, ok := d.(*ast.GenDecl)
 			if !ok {
@@ -293,7 +292,7 @@ func extractPackageDeclarations(pkg *ast.Package) map[string]string {
 	return declarations
 }
 
-func extractRegisteredNames(pkg *ast.Package, pluginType string) []string {
+func extractRegisteredNames(pkg *packages.Package, pluginType string) []string {
 	var registeredNames []string
 
 	// Extract all declared variables of all files. This might be necessary when
@@ -301,10 +300,10 @@ func extractRegisteredNames(pkg *ast.Package, pluginType string) []string {
 	declarations := extractPackageDeclarations(pkg)
 
 	// Find the registry Add statement and extract all registered names
-	for fn, file := range pkg.Files {
+	for _, file := range pkg.Syntax {
 		names, err := extractPluginInfo(file, pluginType, declarations)
 		if err != nil {
-			log.Printf("%q error: %v", fn, err)
+			log.Printf("%q/%q error: %v", pkg.PkgPath, file.Name.Name, err)
 			continue
 		}
 		registeredNames = append(registeredNames, names...)

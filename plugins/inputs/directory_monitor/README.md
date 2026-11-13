@@ -1,24 +1,33 @@
 # Directory Monitor Input Plugin
 
-This plugin monitors a single directory (traversing sub-directories),
-and takes in each file placed in the directory.  The plugin will gather all
-files in the directory at the configured interval, and parse the ones that
-haven't been picked up yet.
+This plugin monitors a single directory (traversing sub-directories), and
+processes each file placed in the directory. The plugin will gather all files in
+the directory at the configured interval, and parse the ones that haven't been
+picked up yet.
 
-This plugin is intended to read files that are moved or copied to the monitored
-directory, and thus files should also not be used by another process or else
-they may fail to be gathered. Please be advised that this plugin pulls files
-directly after they've been in the directory for the length of the configurable
-`directory_duration_threshold`, and thus files should not be written 'live' to
-the monitored directory. If you absolutely must write files directly, they must
-be guaranteed to finish writing before the `directory_duration_threshold`.
+> [!NOTE]
+> Files should not be used by another process or the plugin may fail.
+> Furthermore, files should not be written _live_ to the monitored directory.
+> If you absolutely must write files directly, they must be guaranteed to finish
+> writing before `directory_duration_threshold`.
+
+⭐ Telegraf v1.18.0
+🏷️ system
+💻 all
+
+## Tracking metric support <!-- @/docs/includes/plugin_tracking_metrics.md -->
+
+This plugin supports [tracking metrics][METRICS.md], which allows the plugin
+to be notified when metrics have been delivered to all outputs, enabling proper
+acknowledgment back to the source.
+
+[METRICS.md]: ../../../docs/METRICS.md#tracking-metrics
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -65,6 +74,10 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## significantly. Read more about cardinality here:
   ## https://docs.influxdata.com/influxdb/cloud/reference/glossary/#series-cardinality
   # file_tag = ""
+  #
+  ## Preserve the original modification timestamp when moving processed files
+  ## to the finished or error directory. Access times are best-effort only.
+  # preserve_timestamps = false
   #
   ## Specify if the file can be read completely at once or if it needs to be read line by line (default).
   ## Possible values: "line-by-line", "at-once"

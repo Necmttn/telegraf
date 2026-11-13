@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -68,7 +67,12 @@ func TestCases(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
-				_, _ = w.Write(page)
+
+				if _, err := w.Write(page); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			}))
 			require.NotNil(t, server)
 			defer server.Close()
@@ -142,7 +146,7 @@ func TestIntegration(t *testing.T) {
 				ExposedPorts: []string{servicePort},
 				Cmd:          []string{"solr-precreate", "main"},
 				WaitingFor: wait.ForAll(
-					wait.ForListeningPort(nat.Port(servicePort)),
+					wait.ForListeningPort(servicePort),
 					wait.ForLog("Registered new searcher"),
 				),
 			}

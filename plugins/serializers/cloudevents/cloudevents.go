@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	EventTypeSingle = "com.influxdata.telegraf.metric"
-	EventTypeBatch  = "com.influxdata.telegraf.metrics"
+	eventTypeSingle = "com.influxdata.telegraf.metric"
+	eventTypeBatch  = "com.influxdata.telegraf.metrics"
 )
 
 type Serializer struct {
@@ -86,7 +86,7 @@ func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
 
 func (s *Serializer) batchMetrics(metrics []telegraf.Metric) ([]byte, error) {
 	// Determine the necessary information
-	eventType := EventTypeBatch
+	eventType := eventTypeBatch
 	if s.EventType != "" {
 		eventType = s.EventType
 	}
@@ -97,10 +97,10 @@ func (s *Serializer) batchMetrics(metrics []telegraf.Metric) ([]byte, error) {
 
 	// Serialize the metrics
 	var earliest, latest time.Time
-	data := make([]map[string]interface{}, 0, len(metrics))
+	data := make([]map[string]any, 0, len(metrics))
 	for _, m := range metrics {
 		ts := m.Time()
-		data = append(data, map[string]interface{}{
+		data = append(data, map[string]any{
 			"name":      m.Name(),
 			"tags":      m.Tags(),
 			"fields":    m.Fields(),
@@ -155,7 +155,7 @@ func (s *Serializer) createEvent(m telegraf.Metric) (*cloudevents.Event, error) 
 			source = v
 		}
 	}
-	eventType := EventTypeSingle
+	eventType := eventTypeSingle
 	if s.EventType != "" {
 		eventType = s.EventType
 	}
@@ -165,7 +165,7 @@ func (s *Serializer) createEvent(m telegraf.Metric) (*cloudevents.Event, error) 
 	}
 
 	// Serialize the metric
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name":      m.Name(),
 		"tags":      m.Tags(),
 		"fields":    m.Fields(),
@@ -192,7 +192,7 @@ func (s *Serializer) createEvent(m telegraf.Metric) (*cloudevents.Event, error) 
 
 func init() {
 	serializers.Add("cloudevents",
-		func() serializers.Serializer {
+		func() telegraf.Serializer {
 			return &Serializer{}
 		},
 	)

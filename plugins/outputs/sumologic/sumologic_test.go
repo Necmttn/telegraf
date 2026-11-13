@@ -30,7 +30,7 @@ func getMetric() telegraf.Metric {
 	m := metric.New(
 		"cpu",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": 42.0,
 		},
 		time.Unix(0, 0),
@@ -42,14 +42,14 @@ func getMetrics() []telegraf.Metric {
 	const count = 100
 	var metrics = make([]telegraf.Metric, count)
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		m := metric.New(
 			fmt.Sprintf("cpu-%d", i),
 			map[string]string{
 				"ec2_instance": "aws-129038123",
 				"image":        "aws-ami-1234567890",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"idle":   5876876,
 				"steal":  5876876,
 				"system": 5876876,
@@ -67,7 +67,7 @@ func TestMethod(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	defer ts.Close()
 
-	u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+	u, err := url.Parse("http://" + ts.Listener.Addr().String())
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -90,7 +90,11 @@ func TestMethod(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, tt.expectedMethod, r.Method)
+				if r.Method != tt.expectedMethod {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Errorf("Not equal, expected: %q, actual: %q", tt.expectedMethod, r.Method)
+					return
+				}
 				w.WriteHeader(http.StatusOK)
 			})
 
@@ -118,7 +122,7 @@ func TestStatusCode(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	defer ts.Close()
 
-	u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+	u, err := url.Parse("http://" + ts.Listener.Addr().String())
 	require.NoError(t, err)
 
 	pluginFn := func() *SumoLogic {
@@ -169,7 +173,7 @@ func TestStatusCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.statusCode)
 			})
 
@@ -233,7 +237,7 @@ func TestContentType(t *testing.T) {
 				s.headers = map[string]string{
 					contentTypeHeader: graphiteContentType,
 				}
-				serializer := &graphite.GraphiteSerializer{}
+				serializer := &graphite.Serializer{}
 				require.NoError(t, serializer.Init())
 				s.SetSerializer(serializer)
 				return s
@@ -257,21 +261,33 @@ func TestContentType(t *testing.T) {
 			var body bytes.Buffer
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gz, err := gzip.NewReader(r.Body)
-				require.NoError(t, err)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 
 				var maxDecompressionSize int64 = 500 * 1024 * 1024
 				n, err := io.CopyN(&body, gz, maxDecompressionSize)
 				if errors.Is(err, io.EOF) {
 					err = nil
 				}
-				require.NoError(t, err)
-				require.NotEqualf(t, n, maxDecompressionSize, "size of decoded data exceeds allowed size %d", maxDecompressionSize)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
+				if n > maxDecompressionSize {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Errorf("Size of decoded data exceeds (%v) allowed size (%v)", n, maxDecompressionSize)
+					return
+				}
 
 				w.WriteHeader(http.StatusOK)
 			}))
 			defer ts.Close()
 
-			u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+			u, err := url.Parse("http://" + ts.Listener.Addr().String())
 			require.NoError(t, err)
 
 			plugin := tt.plugin()
@@ -293,7 +309,7 @@ func TestContentEncodingGzip(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	defer ts.Close()
 
-	u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+	u, err := url.Parse("http://" + ts.Listener.Addr().String())
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -313,15 +329,30 @@ func TestContentEncodingGzip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
+				if r.Header.Get("Content-Encoding") != "gzip" {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Errorf("Not equal, expected: %q, actual: %q", "gzip", r.Header.Get("Content-Encoding"))
+					return
+				}
 
 				body, err := gzip.NewReader(r.Body)
-				require.NoError(t, err)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 
 				payload, err := io.ReadAll(body)
-				require.NoError(t, err)
-
-				require.Equal(t, "metric=cpu field=value  42 0\n", string(payload))
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
+				if string(payload) != "metric=cpu field=value  42 0\n" {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Errorf("Not equal, expected: %q, actual: %q", "metric=cpu field=value  42 0\n", string(payload))
+					return
+				}
 
 				w.WriteHeader(http.StatusNoContent)
 			})
@@ -347,18 +378,22 @@ func TestDefaultUserAgent(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	defer ts.Close()
 
-	u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+	u, err := url.Parse("http://" + ts.Listener.Addr().String())
 	require.NoError(t, err)
 
 	t.Run("default-user-agent", func(t *testing.T) {
 		ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, internal.ProductToken(), r.Header.Get("User-Agent"))
+			if r.Header.Get("User-Agent") != internal.ProductToken() {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Errorf("Not equal, expected: %q, actual: %q", internal.ProductToken(), r.Header.Get("User-Agent"))
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 		})
 
 		plugin := &SumoLogic{
-			URL:               u.String(),
-			MaxRequstBodySize: Default().MaxRequstBodySize,
+			URL:                u.String(),
+			MaxRequestBodySize: Default().MaxRequestBodySize,
 		}
 
 		serializer := &carbon2.Serializer{
@@ -454,9 +489,9 @@ func TestTOMLConfig(t *testing.T) {
 			c := config.NewConfig()
 
 			if tt.expectedError {
-				require.Error(t, c.LoadConfigData(tt.configBytes))
+				require.Error(t, c.LoadConfigData(tt.configBytes, config.EmptySourcePath))
 			} else {
-				require.NoError(t, c.LoadConfigData(tt.configBytes))
+				require.NoError(t, c.LoadConfigData(tt.configBytes, config.EmptySourcePath))
 			}
 		})
 	}
@@ -466,7 +501,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	defer ts.Close()
 
-	u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+	u, err := url.Parse("http://" + ts.Listener.Addr().String())
 	require.NoError(t, err)
 
 	testcases := []struct {
@@ -508,7 +543,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 				s.URL = u.String()
 				// getMetrics returns metrics that serialized (using carbon2),
 				// uncompressed size is 43750B
-				s.MaxRequstBodySize = 43_749
+				s.MaxRequestBodySize = 43_749
 				return s
 			},
 			metrics:                  getMetrics(),
@@ -521,7 +556,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 			plugin: func() *SumoLogic {
 				s := Default()
 				s.URL = u.String()
-				s.MaxRequstBodySize = 10_000
+				s.MaxRequestBodySize = 10_000
 				return s
 			},
 			metrics:                  getMetrics(),
@@ -534,7 +569,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 			plugin: func() *SumoLogic {
 				s := Default()
 				s.URL = u.String()
-				s.MaxRequstBodySize = 5_000
+				s.MaxRequestBodySize = 5_000
 				return s
 			},
 			metrics:                  getMetrics(),
@@ -547,7 +582,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 			plugin: func() *SumoLogic {
 				s := Default()
 				s.URL = u.String()
-				s.MaxRequstBodySize = 2_500
+				s.MaxRequestBodySize = 2_500
 				return s
 			},
 			metrics:                  getMetrics(),
@@ -560,7 +595,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 			plugin: func() *SumoLogic {
 				s := Default()
 				s.URL = u.String()
-				s.MaxRequstBodySize = 1_000
+				s.MaxRequestBodySize = 1_000
 				return s
 			},
 			metrics:                  getMetrics(),
@@ -573,7 +608,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 			plugin: func() *SumoLogic {
 				s := Default()
 				s.URL = u.String()
-				s.MaxRequstBodySize = 500
+				s.MaxRequestBodySize = 500
 				return s
 			},
 			metrics:                  getMetrics(),
@@ -586,7 +621,7 @@ func TestMaxRequestBodySize(t *testing.T) {
 			plugin: func() *SumoLogic {
 				s := Default()
 				s.URL = u.String()
-				s.MaxRequstBodySize = 300
+				s.MaxRequestBodySize = 300
 				return s
 			},
 			metrics:                  getMetrics(),
@@ -599,14 +634,14 @@ func TestMaxRequestBodySize(t *testing.T) {
 	for _, tt := range testcases {
 		t.Run(tt.name, func(t *testing.T) {
 			var (
-				requestCount int32
-				linesCount   int32
+				requestCount atomic.Int32
+				linesCount   atomic.Int32
 			)
 			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				atomic.AddInt32(&requestCount, 1)
+				requestCount.Add(1)
 
 				if tt.expectedMetricLinesCount != 0 {
-					atomic.AddInt32(&linesCount, int32(countLines(t, r.Body)))
+					linesCount.Add(int32(countLines(t, r.Body)))
 				}
 
 				w.WriteHeader(http.StatusOK)
@@ -629,8 +664,8 @@ func TestMaxRequestBodySize(t *testing.T) {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
-				require.Equal(t, tt.expectedRequestCount, atomic.LoadInt32(&requestCount))
-				require.Equal(t, tt.expectedMetricLinesCount, atomic.LoadInt32(&linesCount))
+				require.Equal(t, tt.expectedRequestCount, requestCount.Load())
+				require.Equal(t, tt.expectedMetricLinesCount, linesCount.Load())
 			}
 		})
 	}
@@ -640,7 +675,7 @@ func TestTryingToSendEmptyMetricsDoesntFail(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	defer ts.Close()
 
-	u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+	u, err := url.Parse("http://" + ts.Listener.Addr().String())
 	require.NoError(t, err)
 
 	metrics := make([]telegraf.Metric, 0)

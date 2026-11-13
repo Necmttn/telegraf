@@ -4,13 +4,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestResourceQuota(t *testing.T) {
@@ -26,17 +27,16 @@ func TestResourceQuota(t *testing.T) {
 		{
 			name: "no ressourcequota",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/resourcequotas/": corev1.ResourceQuotaList{},
 				},
 			},
-			output:   []telegraf.Metric{},
 			hasError: false,
 		},
 		{
 			name: "collect resourceqota",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/resourcequotas/": corev1.ResourceQuotaList{
 						Items: []corev1.ResourceQuota{
 							{
@@ -52,29 +52,27 @@ func TestResourceQuota(t *testing.T) {
 										"pods":   resource.MustParse("0"),
 									},
 								},
-								ObjectMeta: metav1.ObjectMeta{
-									Generation: 11232,
-									Namespace:  "ns1",
-									Name:       "rq1",
-									Labels: map[string]string{
-										"lab1": "v1",
-										"lab2": "v2",
-									},
-									CreationTimestamp: metav1.Time{Time: now},
+								Generation: 11232,
+								Namespace:  "ns1",
+								Name:       "rq1",
+								Labels: map[string]string{
+									"lab1": "v1",
+									"lab2": "v2",
 								},
+								CreationTimestamp: metav1.Time{Time: now},
 							},
 						},
 					},
 				},
 			},
 			output: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					resourcequotaMeasurement,
 					map[string]string{
 						"resource":  "rq1",
 						"namespace": "ns1",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"hard_cpu":    int64(16),
 						"hard_memory": int64(1.28837533696e+11),
 						"hard_pods":   int64(110),

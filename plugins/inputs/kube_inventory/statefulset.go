@@ -3,7 +3,7 @@ package kube_inventory
 import (
 	"context"
 
-	v1 "k8s.io/api/apps/v1"
+	"k8s.io/api/apps/v1"
 
 	"github.com/influxdata/telegraf"
 )
@@ -21,7 +21,7 @@ func collectStatefulSets(ctx context.Context, acc telegraf.Accumulator, ki *Kube
 
 func (ki *KubernetesInventory) gatherStatefulSet(s *v1.StatefulSet, acc telegraf.Accumulator) {
 	status := s.Status
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"created":             s.GetCreationTimestamp().UnixNano(),
 		"generation":          s.Generation,
 		"replicas":            status.Replicas,

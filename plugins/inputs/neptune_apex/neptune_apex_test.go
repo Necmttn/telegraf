@@ -11,14 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestGather(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := w.Write([]byte("data")); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
-		_, err := w.Write([]byte("data"))
-		require.NoError(t, err)
 	})
 	c, destroy := fakeHTTPClient(h)
 	defer destroy()
@@ -34,8 +38,7 @@ func TestGather(t *testing.T) {
 			servers: []string{"http://abc", "https://def"},
 		},
 		{
-			name:    "Good case, 0 servers",
-			servers: []string{},
+			name: "Good case, 0 servers",
 		},
 		{
 			name:    "Good case nil",
@@ -44,7 +47,6 @@ func TestGather(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			var acc testutil.Accumulator
 			n.Servers = test.servers
@@ -56,9 +58,7 @@ func TestGather(t *testing.T) {
 }
 
 func TestParseXML(t *testing.T) {
-	n := &NeptuneApex{}
-	goodTime := time.Date(2018, 12, 22, 21, 55, 37, 0,
-		time.FixedZone("PST", 3600*-8))
+	goodTime := time.Date(2018, 12, 22, 21, 55, 37, 0, time.FixedZone("PST", 3600*-8))
 	tests := []struct {
 		name        string
 		xmlResponse []byte
@@ -68,9 +68,9 @@ func TestParseXML(t *testing.T) {
 	}{
 		{
 			name:        "Good test",
-			xmlResponse: []byte(APEX2016),
+			xmlResponse: []byte(apex2016),
 			wantMetrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":   "apex",
@@ -78,14 +78,14 @@ func TestParseXML(t *testing.T) {
 						"software": "5.04_7A18",
 						"hardware": "1.0",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"serial":         "AC5:12345",
 						"power_failed":   int64(1544814000000000000),
 						"power_restored": int64(1544833875000000000),
 					},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":      "apex",
@@ -97,10 +97,10 @@ func TestParseXML(t *testing.T) {
 						"software":    "5.04_7A18",
 						"hardware":    "1.0",
 					},
-					map[string]interface{}{"state": "PF1"},
+					map[string]any{"state": "PF1"},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":      "apex",
@@ -112,10 +112,10 @@ func TestParseXML(t *testing.T) {
 						"software":    "5.04_7A18",
 						"hardware":    "1.0",
 					},
-					map[string]interface{}{"state": "AOF"},
+					map[string]any{"state": "AOF"},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":      "apex",
@@ -127,14 +127,14 @@ func TestParseXML(t *testing.T) {
 						"software":    "5.04_7A18",
 						"hardware":    "1.0",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"state": "AON",
 						"watt":  35.0,
 						"amp":   0.3,
 					},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":      "apex",
@@ -146,13 +146,13 @@ func TestParseXML(t *testing.T) {
 						"software":    "5.04_7A18",
 						"hardware":    "1.0",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"state":   "TBL",
 						"xstatus": "OK",
 					},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":      "apex",
@@ -164,10 +164,10 @@ func TestParseXML(t *testing.T) {
 						"software":    "5.04_7A18",
 						"hardware":    "1.0",
 					},
-					map[string]interface{}{"state": "AOF"},
+					map[string]any{"state": "AOF"},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":      "apex",
@@ -179,10 +179,10 @@ func TestParseXML(t *testing.T) {
 						"software":    "5.04_7A18",
 						"hardware":    "1.0",
 					},
-					map[string]interface{}{"state": "AOF"},
+					map[string]any{"state": "AOF"},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":     "apex",
@@ -192,10 +192,10 @@ func TestParseXML(t *testing.T) {
 						"software":   "5.04_7A18",
 						"hardware":   "1.0",
 					},
-					map[string]interface{}{"value": 30.1},
+					map[string]any{"value": 30.1},
 					goodTime,
 				),
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":   "apex",
@@ -204,7 +204,7 @@ func TestParseXML(t *testing.T) {
 						"software": "5.04_7A18",
 						"hardware": "1.0",
 					},
-					map[string]interface{}{"value": 115.0},
+					map[string]any{"value": 115.0},
 					goodTime,
 				),
 			},
@@ -226,7 +226,7 @@ func TestParseXML(t *testing.T) {
 				<timezone>-8.0</timezone><power><failed>a</failed>
 				<restored>12/22/2018 22:55:37</restored></power></status>`),
 			wantMetrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":   "",
@@ -234,7 +234,7 @@ func TestParseXML(t *testing.T) {
 						"hardware": "",
 						"software": "",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"serial":         "",
 						"power_restored": int64(1545548137000000000),
 					},
@@ -249,7 +249,7 @@ func TestParseXML(t *testing.T) {
 				<timezone>-8.0</timezone><power><restored>a</restored>
 				<failed>12/22/2018 22:55:37</failed></power></status>`),
 			wantMetrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":   "",
@@ -257,7 +257,7 @@ func TestParseXML(t *testing.T) {
 						"hardware": "",
 						"software": "",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"serial":       "",
 						"power_failed": int64(1545548137000000000),
 					},
@@ -283,7 +283,7 @@ func TestParseXML(t *testing.T) {
 				</probes></status>`),
 			wantAccErr: true,
 			wantMetrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":   "",
@@ -291,7 +291,7 @@ func TestParseXML(t *testing.T) {
 						"hardware": "",
 						"software": "",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"serial":         "",
 						"power_failed":   int64(1545544537000000000),
 						"power_restored": int64(1545544537000000000),
@@ -312,7 +312,7 @@ func TestParseXML(t *testing.T) {
 				</probes></status>`),
 			wantAccErr: true,
 			wantMetrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":   "",
@@ -320,7 +320,7 @@ func TestParseXML(t *testing.T) {
 						"hardware": "",
 						"software": "",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"serial":         "",
 						"power_failed":   int64(1545544537000000000),
 						"power_restored": int64(1545544537000000000),
@@ -340,7 +340,7 @@ func TestParseXML(t *testing.T) {
 				</probes></status>`),
 			wantAccErr: true,
 			wantMetrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					Measurement,
 					map[string]string{
 						"source":   "",
@@ -348,7 +348,7 @@ func TestParseXML(t *testing.T) {
 						"hardware": "",
 						"software": "",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"serial":         "",
 						"power_failed":   int64(1545544537000000000),
 						"power_restored": int64(1545544537000000000),
@@ -360,10 +360,9 @@ func TestParseXML(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			var acc testutil.Accumulator
-			err := n.parseXML(&acc, test.xmlResponse)
+			err := parseXML(&acc, test.xmlResponse)
 			if test.wantErr {
 				require.Error(t, err, "expected error but got <nil>")
 				return
@@ -403,14 +402,15 @@ func TestSendRequest(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			h := http.HandlerFunc(func(
-				w http.ResponseWriter, r *http.Request) {
+			h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(test.statusCode)
-				_, err := w.Write([]byte("data"))
-				require.NoError(t, err)
+				if _, err := w.Write([]byte("data")); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			})
 			c, destroy := fakeHTTPClient(h)
 			defer destroy()
@@ -462,7 +462,6 @@ func TestParseTime(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			res, err := parseTime(test.input, test.timeZone)
@@ -507,7 +506,6 @@ func TestFindProbe(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			index := findProbe(test.probeName, fakeProbes)
@@ -533,7 +531,7 @@ func fakeHTTPClient(h http.Handler) (*http.Client, func()) {
 }
 
 // Sample configuration from a 2016 version Neptune Apex.
-const APEX2016 = `<?xml version="1.0"?>
+const apex2016 = `<?xml version="1.0"?>
 <status software="5.04_7A18" hardware="1.0">
 <hostname>apex</hostname>
 <serial>AC5:12345</serial>

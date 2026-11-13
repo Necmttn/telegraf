@@ -1,26 +1,29 @@
 //go:build linux
-// +build linux
 
 package temp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/internal"
 )
 
 const scalingFactor = float64(1000.0)
 
-type TemperatureStat struct {
-	Name        string
-	Label       string
-	Device      string
-	Temperature float64
-	Additional  map[string]interface{}
+type temperatureStat struct {
+	name        string
+	label       string
+	device      string
+	temperature float64
+	additional  map[string]any
 }
 
 func (t *Temperature) Init() error {
@@ -37,10 +40,7 @@ func (t *Temperature) Init() error {
 
 func (t *Temperature) Gather(acc telegraf.Accumulator) error {
 	// Get all sensors and honor the HOST_SYS environment variable
-	path := os.Getenv("HOST_SYS")
-	if path == "" {
-		path = "/sys"
-	}
+	path := internal.GetSysPath()
 
 	// Try to use the hwmon interface
 	temperatures, err := t.gatherHwmon(path)
@@ -48,37 +48,68 @@ func (t *Temperature) Gather(acc telegraf.Accumulator) error {
 		return fmt.Errorf("getting temperatures failed: %w", err)
 	}
 
-	if len(temperatures) == 0 {
+	if len(temperatures) == 0 || t.ThermalZones {
 		// There is no hwmon interface, fallback to thermal-zone parsing
-		temperatures, err = t.gatherThermalZone(path)
+		// Or append the thermal-zone parsing if set in the configuration
+		temperaturesZones, err := t.gatherThermalZone(path)
 		if err != nil {
 			return fmt.Errorf("getting temperatures (via fallback) failed: %w", err)
 		}
+		temperatures = append(temperatures, temperaturesZones...)
 	}
 
-	for _, temp := range temperatures {
-		acc.AddFields(
-			"temp",
-			map[string]interface{}{"temp": temp.Temperature},
-			t.getTagsForTemperature(temp, "_input"),
-		)
-
-		for measurement, value := range temp.Additional {
-			fieldname := "temp"
-			if measurement == "alarm" {
-				fieldname = "active"
-			}
-			acc.AddFields(
-				"temp",
-				map[string]interface{}{fieldname: value},
-				t.getTagsForTemperature(temp, "_"+measurement),
-			)
-		}
+	switch t.MetricFormat {
+	case "v1":
+		t.createMetricsV1(acc, temperatures)
+	case "v2":
+		t.createMetricsV2(acc, temperatures)
 	}
+
 	return nil
 }
 
-func (t *Temperature) gatherHwmon(syspath string) ([]TemperatureStat, error) {
+func (t *Temperature) createMetricsV1(acc telegraf.Accumulator, temperatures []temperatureStat) {
+	for _, temp := range temperatures {
+		sensor := temp.name
+		if temp.label != "" {
+			sensor += "_" + strings.ReplaceAll(temp.label, " ", "")
+		}
+
+		// Mandatory measurement value
+		tags := map[string]string{"sensor": sensor + "_input"}
+		if t.DeviceTag {
+			tags["device"] = temp.device
+		}
+		acc.AddFields("temp", map[string]any{"temp": temp.temperature}, tags)
+
+		// Optional values values
+		for measurement, value := range temp.additional {
+			tags := map[string]string{"sensor": sensor + "_" + measurement}
+			if t.DeviceTag {
+				tags["device"] = temp.device
+			}
+			acc.AddFields("temp", map[string]any{"temp": value}, tags)
+		}
+	}
+}
+
+func (t *Temperature) createMetricsV2(acc telegraf.Accumulator, temperatures []temperatureStat) {
+	for _, temp := range temperatures {
+		sensor := temp.name
+		if temp.label != "" {
+			sensor += "_" + strings.ReplaceAll(temp.label, " ", "_")
+		}
+
+		// Mandatory measurement value
+		tags := map[string]string{"sensor": sensor}
+		if t.DeviceTag {
+			tags["device"] = temp.device
+		}
+		acc.AddFields("temp", map[string]any{"temp": temp.temperature}, tags)
+	}
+}
+
+func (t *Temperature) gatherHwmon(syspath string) ([]temperatureStat, error) {
 	// Get all hwmon devices
 	sensors, err := filepath.Glob(filepath.Join(syspath, "class", "hwmon", "hwmon*", "temp*_input"))
 	if err != nil {
@@ -100,11 +131,11 @@ func (t *Temperature) gatherHwmon(syspath string) ([]TemperatureStat, error) {
 	}
 
 	// Collect the sensor information
-	stats := make([]TemperatureStat, 0, len(sensors))
+	stats := make([]temperatureStat, 0, len(sensors))
 	for _, s := range sensors {
 		// Get the sensor directory and the temperature prefix from the path
 		path := filepath.Dir(s)
-		prefix := strings.SplitN(filepath.Base(s), "_", 2)[0]
+		prefix, _, _ := strings.Cut(filepath.Base(s), "_")
 
 		// Read the sensor and device name
 		deviceName, err := os.Readlink(filepath.Join(path, "device"))
@@ -126,31 +157,24 @@ func (t *Temperature) gatherHwmon(syspath string) ([]TemperatureStat, error) {
 		}
 
 		// Do the actual sensor readings
-		temp := TemperatureStat{
-			Name:       name,
-			Label:      strings.ToLower(label),
-			Device:     deviceName,
-			Additional: make(map[string]interface{}),
+		temp := temperatureStat{
+			name:       name,
+			label:      strings.ToLower(label),
+			device:     deviceName,
+			additional: make(map[string]any),
 		}
 
-		// Temperature (mandatory)
+		// Temperature (mandatory). Use a non-blocking read as the underlying
+		// hardware might be unavailable (e.g. asleep) and a blocking read would
+		// hang the gather cycle.
 		fn := filepath.Join(path, prefix+"_input")
-		buf, err := os.ReadFile(fn)
+		buf, err := readFileNonblocking(fn)
 		if err != nil {
-			t.Log.Warnf("Couldn't read temperature from %q: %v", fn, err)
+			t.Log.Debugf("Couldn't read temperature from %q: %v", fn, err)
 			continue
 		}
 		if v, err := strconv.ParseFloat(strings.TrimSpace(string(buf)), 64); err == nil {
-			temp.Temperature = v / scalingFactor
-		}
-
-		// Alarm (optional)
-		fn = filepath.Join(path, prefix+"_alarm")
-		buf, err = os.ReadFile(fn)
-		if err == nil {
-			if a, err := strconv.ParseBool(strings.TrimSpace(string(buf))); err == nil {
-				temp.Additional["alarm"] = a
-			}
+			temp.temperature = v / scalingFactor
 		}
 
 		// Read all possible values of the sensor
@@ -172,7 +196,7 @@ func (t *Temperature) gatherHwmon(syspath string) ([]TemperatureStat, error) {
 
 			// Skip already added values
 			switch measurement {
-			case "label", "input", "alarm":
+			case "label", "input":
 				continue
 			}
 
@@ -180,7 +204,7 @@ func (t *Temperature) gatherHwmon(syspath string) ([]TemperatureStat, error) {
 			if err != nil {
 				continue
 			}
-			temp.Additional[measurement] = v / scalingFactor
+			temp.additional[measurement] = v / scalingFactor
 		}
 
 		stats = append(stats, temp)
@@ -189,7 +213,7 @@ func (t *Temperature) gatherHwmon(syspath string) ([]TemperatureStat, error) {
 	return stats, nil
 }
 
-func (t *Temperature) gatherThermalZone(syspath string) ([]TemperatureStat, error) {
+func (t *Temperature) gatherThermalZone(syspath string) ([]temperatureStat, error) {
 	// For file layout see https://www.kernel.org/doc/Documentation/thermal/sysfs-api.txt
 	zones, err := filepath.Glob(filepath.Join(syspath, "class", "thermal", "thermal_zone*"))
 	if err != nil {
@@ -202,7 +226,7 @@ func (t *Temperature) gatherThermalZone(syspath string) ([]TemperatureStat, erro
 	}
 
 	// Collect the sensor information
-	stats := make([]TemperatureStat, 0, len(zones))
+	stats := make([]temperatureStat, 0, len(zones))
 	for _, path := range zones {
 		// Type of the zone corresponding to the sensor name in our nomenclature
 		buf, err := os.ReadFile(filepath.Join(path, "type"))
@@ -212,10 +236,15 @@ func (t *Temperature) gatherThermalZone(syspath string) ([]TemperatureStat, erro
 		}
 		name := strings.TrimSpace(string(buf))
 
-		// Actual temperature
-		buf, err = os.ReadFile(filepath.Join(path, "temp"))
+		// Actual temperature. On Linux EAGAIN and EWOULDBLOCK are the same errno.
+		buf, err = readFileNonblocking(filepath.Join(path, "temp"))
 		if err != nil {
-			t.Log.Errorf("Cannot read temperature of zone %q", path)
+			if errors.Is(err, unix.EAGAIN) {
+				// Silently ignore this thermal-zone when the underlying hardware is unavailable
+				t.Log.Tracef("Skipping zone %q as the hardware is unavailable: %v", path, err)
+				continue
+			}
+			t.Log.Errorf("Cannot read temperature of zone %q: %v", path, err)
 			continue
 		}
 		v, err := strconv.ParseFloat(strings.TrimSpace(string(buf)), 64)
@@ -223,27 +252,27 @@ func (t *Temperature) gatherThermalZone(syspath string) ([]TemperatureStat, erro
 			continue
 		}
 
-		temp := TemperatureStat{Name: name, Temperature: v / scalingFactor}
+		temp := temperatureStat{name: name, temperature: v / scalingFactor}
 		stats = append(stats, temp)
 	}
 
 	return stats, nil
 }
 
-func (t *Temperature) getTagsForTemperature(temp TemperatureStat, suffix string) map[string]string {
-	sensor := temp.Name
-	if temp.Label != "" && suffix != "" {
-		switch t.MetricFormat {
-		case "v1":
-			sensor += "_" + strings.ReplaceAll(temp.Label, " ", "") + suffix
-		case "v2":
-			sensor += "_" + strings.ReplaceAll(temp.Label, " ", "_") + suffix
-		}
+func readFileNonblocking(path string) ([]byte, error) {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
 	}
+	defer unix.Close(fd)
 
-	tags := map[string]string{"sensor": sensor}
-	if t.DeviceTag {
-		tags["device"] = temp.Device
+	// The kernel specifies the temperatures are expressed in millidegrees
+	// tempBuf of 8 bytes stores temperatures up to 99999.999°C
+	var tempBuf [8]byte
+
+	n, err := unix.Read(fd, tempBuf[:])
+	if err != nil {
+		return nil, err
 	}
-	return tags
+	return tempBuf[:n], nil
 }

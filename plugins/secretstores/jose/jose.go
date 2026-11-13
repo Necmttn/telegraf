@@ -28,7 +28,6 @@ func (*Jose) SampleConfig() string {
 	return sampleConfig
 }
 
-// Init initializes all internals of the secret-store
 func (j *Jose) Init() error {
 	defer j.Password.Destroy()
 
@@ -73,7 +72,6 @@ func (j *Jose) Init() error {
 	return nil
 }
 
-// Get searches for the given key and return the secret
 func (j *Jose) Get(key string) ([]byte, error) {
 	item, err := j.ring.Get(key)
 	if err != nil {
@@ -83,7 +81,8 @@ func (j *Jose) Get(key string) ([]byte, error) {
 	return item.Data, nil
 }
 
-// Set sets the given secret for the given key
+var _ telegraf.SecretStoreEditor = (*Jose)(nil)
+
 func (j *Jose) Set(key, value string) error {
 	item := keyring.Item{
 		Key:  key,
@@ -93,12 +92,14 @@ func (j *Jose) Set(key, value string) error {
 	return j.ring.Set(item)
 }
 
-// List lists all known secret keys
+func (j *Jose) Remove(key string) error {
+	return j.ring.Remove(key)
+}
+
 func (j *Jose) List() ([]string, error) {
 	return j.ring.Keys()
 }
 
-// GetResolver returns a function to resolve the given key.
 func (j *Jose) GetResolver(key string) (telegraf.ResolveFunc, error) {
 	resolver := func() ([]byte, bool, error) {
 		s, err := j.Get(key)
@@ -107,7 +108,6 @@ func (j *Jose) GetResolver(key string) (telegraf.ResolveFunc, error) {
 	return resolver, nil
 }
 
-// Register the secret-store on load.
 func init() {
 	secretstores.Add("jose", func(id string) telegraf.SecretStore {
 		return &Jose{ID: id}

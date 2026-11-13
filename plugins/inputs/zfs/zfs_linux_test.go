@@ -3,12 +3,17 @@
 package zfs
 
 import (
-	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/plugins/inputs"
+	"github.com/influxdata/telegraf/plugins/parsers/influx"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -157,6 +162,13 @@ zil_itx_metaslab_slog_bytes     4    15
 zil_itx_metaslab_slog_write     4    16
 zil_itx_metaslab_slog_alloc     4    17
 `
+const ioStatsContents = `128 1 0x01 3 816 31102162300 94789608938355
+name                            type data
+trim_extents_written            4    12
+arc_read_count                  4    145242
+arc_read_bytes                  4    4520346112
+`
+
 const zilContents = `7 1 0x01 14 672 34118481334 437444452158445
 name                            type data
 zil_commit_count                4    77
@@ -221,12 +233,9 @@ scatter_sg_table_retry          4    99221
 `
 
 func TestZfsPoolMetrics(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telegraf-zfs-pool")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
+	tmpDir := t.TempDir()
 	testKstatPath := tmpDir + "/telegraf/proc/spl/kstat/zfs"
-	err = os.MkdirAll(testKstatPath, 0750)
+	err := os.MkdirAll(testKstatPath, 0750)
 	require.NoError(t, err)
 
 	err = os.MkdirAll(testKstatPath+"/HOME", 0750)
@@ -253,7 +262,7 @@ func TestZfsPoolMetrics(t *testing.T) {
 	err = z.Gather(&acc)
 	require.NoError(t, err)
 
-	//one pool, all metrics
+	// one pool, all metrics
 	tags := map[string]string{
 		"pool": "HOME",
 	}
@@ -279,13 +288,45 @@ func TestZfsPoolMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
 }
 
-func TestZfsGeneratesMetrics(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telegraf-zfs-generates")
+func TestZfsPoolIOStats(t *testing.T) {
+	testKstatPath := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(testKstatPath, "with-datasets"), 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(testKstatPath, "with-datasets", "objset-0x20a"), []byte(objsetContents), 0640))
+	require.NoError(t, os.WriteFile(filepath.Join(testKstatPath, "with-datasets", "iostats"), []byte(ioStatsContents), 0640))
+	require.NoError(t, os.Mkdir(filepath.Join(testKstatPath, "a-no-datasets"), 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(testKstatPath, "a-no-datasets", "iostats"), []byte(ioStatsContents), 0640))
+
+	expected := map[string]any{
+		"iostats_trim_extents_written": int64(12),
+		"iostats_arc_read_count":       int64(145242),
+		"iostats_arc_read_bytes":       int64(4520346112),
+	}
+
+	// Pool statistics are only gathered if enabled
+	plugin := &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{""}, Log: testutil.Logger{}}
+	require.NoError(t, plugin.Init())
+	var acc testutil.Accumulator
+	require.NoError(t, plugin.Gather(&acc))
+	require.Empty(t, acc.Errors)
+	require.False(t, acc.HasMeasurement("zfs_pool"))
+
+	plugin.PoolMetrics = true
+	require.NoError(t, plugin.Gather(&acc))
+	require.Empty(t, acc.Errors)
+	acc.AssertContainsTaggedFields(t, "zfs_pool", expected, map[string]string{"pool": "with-datasets"})
+	acc.AssertContainsTaggedFields(t, "zfs_pool", expected, map[string]string{"pool": "a-no-datasets"})
+	acc.AssertContainsTaggedFields(t, "zfs_pool", getPoolMetricsNewFormat(), map[string]string{"pool": "with-datasets", "dataset": "HOME"})
+
+	pools, err := getPools(testKstatPath)
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	require.Equal(t, map[string]string{"pools": "a-no-datasets::with-datasets"}, getTags(pools))
+}
+
+func TestZfsGeneratesMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
 
 	testKstatPath := tmpDir + "/telegraf/proc/spl/kstat/zfs"
-	err = os.MkdirAll(testKstatPath, 0750)
+	err := os.MkdirAll(testKstatPath, 0750)
 	require.NoError(t, err)
 
 	err = os.MkdirAll(testKstatPath, 0750)
@@ -319,19 +360,19 @@ func TestZfsGeneratesMetrics(t *testing.T) {
 
 	var acc testutil.Accumulator
 
-	//one pool, all metrics
+	// one pool, all metrics
 	tags := map[string]string{
 		"pools": "HOME",
 	}
 
 	z := &Zfs{KstatPath: testKstatPath}
-	err = z.Gather(&acc)
-	require.NoError(t, err)
+	require.NoError(t, z.Init())
+	require.NoError(t, z.Gather(&acc))
 
 	acc.AssertContainsTaggedFields(t, "zfs", intMetrics, tags)
 	acc.Metrics = nil
 
-	//two pools, all metrics
+	// two pools, all metrics
 	err = os.MkdirAll(testKstatPath+"/STORAGE", 0750)
 	require.NoError(t, err)
 
@@ -343,6 +384,7 @@ func TestZfsGeneratesMetrics(t *testing.T) {
 	}
 
 	z = &Zfs{KstatPath: testKstatPath}
+	require.NoError(t, z.Init())
 	acc2 := testutil.Accumulator{}
 	err = z.Gather(&acc2)
 	require.NoError(t, err)
@@ -352,8 +394,9 @@ func TestZfsGeneratesMetrics(t *testing.T) {
 
 	intMetrics = getKstatMetricsArcOnly()
 
-	//two pools, one metric
+	// two pools, one metric
 	z = &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}}
+	require.NoError(t, z.Init())
 	acc3 := testutil.Accumulator{}
 	err = z.Gather(&acc3)
 	require.NoError(t, err)
@@ -368,38 +411,106 @@ func TestGetTags(t *testing.T) {
 		expected map[string]string
 	}{
 		{
-			"no pools",
-			[]poolInfo{},
-			map[string]string{"pools": ""},
+			name:     "no pools",
+			expected: map[string]string{"pools": ""},
 		},
 		{
-			"single pool",
-			[]poolInfo{
+			name: "single pool",
+			pools: []poolInfo{
 				{"data", "/proc/spl/kstat/zfs/data/objset-0x9288", v2},
 			},
-			map[string]string{"pools": "data"},
+			expected: map[string]string{"pools": "data"},
 		},
 		{
-			"duplicate pool names",
-			[]poolInfo{
+			name: "duplicate pool names",
+			pools: []poolInfo{
 				{"pool", "/proc/spl/kstat/zfs/pool/objset-0x23ce1", v2},
 				{"pool", "/proc/spl/kstat/zfs/pool/objset-0x2e", v2},
 				{"data", "/proc/spl/kstat/zfs/data/objset-0x9288", v2},
 			},
-			map[string]string{"pools": "pool::data"},
+			expected: map[string]string{"pools": "pool::data"},
 		},
 	}
 
 	for _, tc := range tests {
-		t.Run(fmt.Sprintf(tc.name), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			tags := getTags(tc.pools)
 			require.Equal(t, tc.expected, tags)
 		})
 	}
 }
 
-func getKstatMetricsArcOnly() map[string]interface{} {
-	return map[string]interface{}{
+func TestDefaults(t *testing.T) {
+	expectedPath := "/proc/spl/kstat/zfs"
+	expectedMetrics := []string{
+		"abdstats", "arcstats", "brtstats", "dnodestats", "dbufcachestats",
+		"dbufstats", "dmu_tx", "fm", "metaslab_stats", "vdev_mirror_stats",
+		"zfetchstats", "zil", "zio_stats", "zstd",
+	}
+
+	plugin := &Zfs{}
+	require.NoError(t, plugin.Init())
+	require.Equal(t, expectedPath, plugin.KstatPath)
+	require.ElementsMatch(t, expectedMetrics, plugin.KstatMetrics)
+}
+
+func TestInvalidKstatMetric(t *testing.T) {
+	plugin := &Zfs{
+		KstatMetrics: []string{"foo"},
+	}
+	require.ErrorContains(t, plugin.Init(), "invalid kstat metric")
+}
+
+func TestCases(t *testing.T) {
+	// Get all testcase directories
+	testpath := filepath.Join("testcases", "linux")
+	folders, err := os.ReadDir(testpath)
+	require.NoError(t, err)
+
+	// Register the plugin
+	inputs.Add("zfs", func() telegraf.Input { return &Zfs{} })
+
+	for _, f := range folders {
+		// Only handle folders
+		if !f.IsDir() {
+			continue
+		}
+
+		t.Run(f.Name(), func(t *testing.T) {
+			testcasePath := filepath.Join(testpath, f.Name())
+			configFilename := filepath.Join(testcasePath, "telegraf.conf")
+			expectedFilename := filepath.Join(testcasePath, "expected.out")
+			procPath := filepath.Join(testcasePath, "zfs") // contents of /proc/spl/kstat/zfs
+
+			// Read the expected output
+			parser := &influx.Parser{}
+			require.NoError(t, parser.Init())
+			expected, err := testutil.ParseMetricsFromFile(expectedFilename, parser)
+			require.NoError(t, err)
+
+			// Configure the plugin
+			cfg := config.NewConfig()
+			require.NoError(t, cfg.LoadConfig(configFilename))
+			require.Len(t, cfg.Inputs, 1)
+
+			// Setup the plugin
+			plugin := cfg.Inputs[0].Input.(*Zfs)
+			plugin.KstatPath = procPath
+			plugin.Log = testutil.Logger{}
+			require.NoError(t, plugin.Init())
+
+			// Gather and test
+			var acc testutil.Accumulator
+			require.NoError(t, plugin.Gather(&acc))
+
+			actual := acc.GetTelegrafMetrics()
+			testutil.RequireMetricsEqual(t, expected, actual, testutil.IgnoreTime())
+		})
+	}
+}
+
+func getKstatMetricsArcOnly() map[string]any {
+	return map[string]any{
 		"arcstats_hits":                     int64(5968846374),
 		"arcstats_misses":                   int64(1659178751),
 		"arcstats_demand_data_hits":         int64(4860247322),
@@ -489,8 +600,8 @@ func getKstatMetricsArcOnly() map[string]interface{} {
 	}
 }
 
-func getKstatMetricsAll() map[string]interface{} {
-	otherMetrics := map[string]interface{}{
+func getKstatMetricsAll() map[string]any {
+	otherMetrics := map[string]any{
 		"zfetchstats_hits":                  int64(7812959060),
 		"zfetchstats_misses":                int64(4154484207),
 		"zfetchstats_colinear_hits":         int64(1366368),
@@ -553,14 +664,12 @@ func getKstatMetricsAll() map[string]interface{} {
 		"abdstats_scatter_sg_table_retry":   int64(99221),
 	}
 	arcMetrics := getKstatMetricsArcOnly()
-	for k, v := range otherMetrics {
-		arcMetrics[k] = v
-	}
+	maps.Copy(arcMetrics, otherMetrics)
 	return arcMetrics
 }
 
-func getPoolMetrics() map[string]interface{} {
-	return map[string]interface{}{
+func getPoolMetrics() map[string]any {
+	return map[string]any{
 		"nread":    int64(1884160),
 		"nwritten": int64(6450688),
 		"reads":    int64(22),
@@ -576,8 +685,8 @@ func getPoolMetrics() map[string]interface{} {
 	}
 }
 
-func getPoolMetricsNewFormat() map[string]interface{} {
-	return map[string]interface{}{
+func getPoolMetricsNewFormat() map[string]any {
+	return map[string]any{
 		"nread":     int64(1884160),
 		"nunlinked": int64(14147),
 		"nunlinks":  int64(14148),
@@ -587,8 +696,8 @@ func getPoolMetricsNewFormat() map[string]interface{} {
 	}
 }
 
-func getPoolMetricsNewFormatV22() map[string]interface{} {
-	return map[string]interface{}{
+func getPoolMetricsNewFormatV22() map[string]any {
+	return map[string]any{
 		"nread":                         int64(1884160),
 		"nunlinked":                     int64(14147),
 		"nunlinks":                      int64(14148),

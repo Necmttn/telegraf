@@ -3,6 +3,7 @@ package influxdb_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/outputs/influxdb"
+	"github.com/influxdata/telegraf/selfstat"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -27,7 +29,7 @@ func getMetric() telegraf.Metric {
 	m := metric.New(
 		"cpu",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": 42.0,
 		},
 		time.Unix(0, 0),
@@ -58,11 +60,11 @@ func (c *MockConn) Close() error {
 }
 
 type MockDialer struct {
-	DialContextF func(network, address string) (influxdb.Conn, error)
+	DialContextF func() (influxdb.Conn, error)
 }
 
-func (d *MockDialer) DialContext(_ context.Context, network string, address string) (influxdb.Conn, error) {
-	return d.DialContextF(network, address)
+func (d *MockDialer) DialContext(_ context.Context, _, _ string) (influxdb.Conn, error) {
+	return d.DialContextF()
 }
 
 func TestUDP_NewUDPClientNoURL(t *testing.T) {
@@ -89,7 +91,7 @@ func TestUDP_Simple(t *testing.T) {
 	config := influxdb.UDPConfig{
 		URL: getURL(),
 		Dialer: &MockDialer{
-			DialContextF: func(network, address string) (influxdb.Conn, error) {
+			DialContextF: func() (influxdb.Conn, error) {
 				conn := &MockConn{
 					WriteF: func(b []byte) (n int, err error) {
 						buffer.Write(b)
@@ -99,12 +101,14 @@ func TestUDP_Simple(t *testing.T) {
 				return conn, nil
 			},
 		},
+		BytesWritten: selfstat.Register("write", "bytes_written", nil),
 	}
+	defer config.BytesWritten.Unregister()
+
 	client, err := influxdb.NewUDPClient(config)
 	require.NoError(t, err)
 
-	ctx := context.Background()
-	err = client.Write(ctx, []telegraf.Metric{
+	err = client.Write(t.Context(), []telegraf.Metric{
 		getMetric(),
 		getMetric(),
 	})
@@ -120,18 +124,18 @@ func TestUDP_DialError(t *testing.T) {
 	config := influxdb.UDPConfig{
 		URL: u,
 		Dialer: &MockDialer{
-			DialContextF: func(network, address string) (influxdb.Conn, error) {
-				return nil, fmt.Errorf(
-					`unsupported scheme [invalid://localhost:9999]: "invalid"`)
+			DialContextF: func() (influxdb.Conn, error) {
+				return nil, errors.New(`unsupported scheme [invalid://localhost:9999]: "invalid"`)
 			},
 		},
+		BytesWritten: selfstat.Register("write", "bytes_written", nil),
 	}
+	defer config.BytesWritten.Unregister()
+
 	client, err := influxdb.NewUDPClient(config)
 	require.NoError(t, err)
 
-	ctx := context.Background()
-	err = client.Write(ctx, []telegraf.Metric{getMetric()})
-	require.Error(t, err)
+	require.Error(t, client.Write(t.Context(), []telegraf.Metric{getMetric()}))
 }
 
 func TestUDP_WriteError(t *testing.T) {
@@ -140,11 +144,10 @@ func TestUDP_WriteError(t *testing.T) {
 	config := influxdb.UDPConfig{
 		URL: getURL(),
 		Dialer: &MockDialer{
-			DialContextF: func(network, address string) (influxdb.Conn, error) {
+			DialContextF: func() (influxdb.Conn, error) {
 				conn := &MockConn{
-					WriteF: func(b []byte) (n int, err error) {
-						return 0, fmt.Errorf(
-							"write udp 127.0.0.1:52190->127.0.0.1:9999: write: connection refused")
+					WriteF: func(_ []byte) (n int, err error) {
+						return 0, errors.New("write udp 127.0.0.1:52190->127.0.0.1:9999: write: connection refused")
 					},
 					CloseF: func() error {
 						closed = true
@@ -154,13 +157,14 @@ func TestUDP_WriteError(t *testing.T) {
 				return conn, nil
 			},
 		},
+		BytesWritten: selfstat.Register("write", "bytes_written", nil),
 	}
+	defer config.BytesWritten.Unregister()
+
 	client, err := influxdb.NewUDPClient(config)
 	require.NoError(t, err)
 
-	ctx := context.Background()
-	err = client.Write(ctx, []telegraf.Metric{getMetric()})
-	require.Error(t, err)
+	require.Error(t, client.Write(t.Context(), []telegraf.Metric{getMetric()}))
 	require.True(t, closed)
 }
 
@@ -177,7 +181,7 @@ func TestUDP_ErrorLogging(t *testing.T) {
 				MaxPayloadSize: 1,
 				URL:            getURL(),
 				Dialer: &MockDialer{
-					DialContextF: func(network, address string) (influxdb.Conn, error) {
+					DialContextF: func() (influxdb.Conn, error) {
 						conn := &MockConn{}
 						return conn, nil
 					},
@@ -192,7 +196,7 @@ func TestUDP_ErrorLogging(t *testing.T) {
 			config: influxdb.UDPConfig{
 				URL: getURL(),
 				Dialer: &MockDialer{
-					DialContextF: func(network, address string) (influxdb.Conn, error) {
+					DialContextF: func() (influxdb.Conn, error) {
 						conn := &MockConn{}
 						return conn, nil
 					},
@@ -206,7 +210,7 @@ func TestUDP_ErrorLogging(t *testing.T) {
 						map[string]string{
 							"host": "example.org",
 						},
-						map[string]interface{}{},
+						map[string]any{},
 						time.Unix(0, 0),
 					)
 					return m
@@ -220,12 +224,13 @@ func TestUDP_ErrorLogging(t *testing.T) {
 			var b bytes.Buffer
 			log.SetOutput(&b)
 
+			tt.config.BytesWritten = selfstat.Register("write", "bytes_written", nil)
+			defer tt.config.BytesWritten.Unregister()
+
 			client, err := influxdb.NewUDPClient(tt.config)
 			require.NoError(t, err)
 
-			ctx := context.Background()
-			err = client.Write(ctx, tt.metrics)
-			require.NoError(t, err)
+			require.NoError(t, client.Write(t.Context(), tt.metrics))
 			require.Contains(t, b.String(), tt.logContains)
 		})
 	}
@@ -242,9 +247,7 @@ func TestUDP_WriteWithRealConn(t *testing.T) {
 
 	buf := make([]byte, 200)
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		var total int
 		for range metrics {
 			n, _, err := conn.ReadFrom(buf[total:])
@@ -254,21 +257,21 @@ func TestUDP_WriteWithRealConn(t *testing.T) {
 			total += n
 		}
 		buf = buf[:total]
-	}()
+	})
 
 	addr := conn.LocalAddr()
 	u, err := url.Parse(fmt.Sprintf("%s://%s", addr.Network(), addr))
 	require.NoError(t, err)
 
 	config := influxdb.UDPConfig{
-		URL: u,
+		URL:          u,
+		BytesWritten: selfstat.Register("write", "bytes_written", nil),
 	}
+	defer config.BytesWritten.Unregister()
+
 	client, err := influxdb.NewUDPClient(config)
 	require.NoError(t, err)
-
-	ctx := context.Background()
-	err = client.Write(ctx, metrics)
-	require.NoError(t, err)
+	require.NoError(t, client.Write(t.Context(), metrics))
 
 	wg.Wait()
 

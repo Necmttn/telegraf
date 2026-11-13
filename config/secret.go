@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -10,19 +11,21 @@ import (
 )
 
 // unlinkedSecrets contains the list of secrets that contain
-// references not yet linked to their corresponding secret-store.
+// references not yet linked to their corresponding secret store.
 // Those secrets must later (after reading the config) be linked
-// by the config to their respective secret-stores.
+// by the config to their respective secret stores.
 // Secrets containing constant strings will not be found in this
 // list.
-var unlinkedSecrets = make([]*Secret, 0)
+var unlinkedSecrets []*Secret
 
-// secretStorePattern is a regex to validate secret-store IDs
+// secretStorePattern is a regex to validate secret store IDs
 var secretStorePattern = regexp.MustCompile(`^\w+$`)
 
-// secretPattern is a regex to extract references to secrets stored
-// in a secret-store.
+// secretPattern is a regex to extract references to secrets store in a secret store
 var secretPattern = regexp.MustCompile(`@\{(\w+:\w+)\}`)
+
+// secretCandidatePattern is a regex to find secret candidates to warn users on invalid characters in references
+var secretCandidatePattern = regexp.MustCompile(`@\{.+?:.+?}`)
 
 // secretCount is the number of secrets use in Telegraf
 var secretCount atomic.Int64
@@ -35,6 +38,11 @@ type secretImpl interface {
 	Container(secret []byte) secretContainer
 	EmptyBuffer() SecretBuffer
 	Wipe(secret []byte)
+}
+
+func ResetSecrets() {
+	unlinkedSecrets = make([]*Secret, 0)
+	secretCount.Store(0)
 }
 
 func EnableSecretProtection() {
@@ -108,7 +116,7 @@ func (s *Secret) UnmarshalText(b []byte) error {
 	// Unmarshal secret from TOML and put it into protected memory
 	s.init(b)
 
-	// Keep track of secrets that contain references to secret-stores
+	// Keep track of secrets that contain references to secret stores
 	// for later resolving by the config.
 	if len(s.unlinked) > 0 && s.notempty {
 		unlinkedSecrets = append(unlinkedSecrets, s)
@@ -125,8 +133,18 @@ func (s *Secret) init(secret []byte) {
 	// Remember if the secret is completely empty
 	s.notempty = len(secret) != 0
 
-	// Find all parts that need to be resolved and return them
-	s.unlinked = secretPattern.FindAllString(string(secret), -1)
+	// Find all secret candidates and check if they are really a valid
+	// reference. Otherwise issue a warning to let the user know that there is
+	// a potential issue with their secret instead of silently ignoring it.
+	candidates := secretCandidatePattern.FindAllString(string(secret), -1)
+	s.unlinked = make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		if secretPattern.MatchString(c) {
+			s.unlinked = append(s.unlinked, c)
+		} else {
+			log.Printf("W! Secret %q contains invalid character(s), only letters, digits and underscores are allowed.", c)
+		}
+	}
 	s.resolvers = nil
 
 	// Setup the container implementation
@@ -142,10 +160,10 @@ func (s *Secret) Destroy() {
 	if s.container != nil {
 		s.container.Destroy()
 		s.container = nil
-	}
 
-	// Keep track of the number of secrets...
-	secretCount.Add(-1)
+		// Keep track of the number of used secrets...
+		secretCount.Add(-1)
+	}
 }
 
 // Empty return if the secret is completely empty
@@ -212,7 +230,7 @@ func (s *Secret) Get() (SecretBuffer, error) {
 }
 
 // Set overwrites the secret's value with a new one. Please note, the secret
-// is not linked again, so only references to secret-stores can be used, e.g. by
+// is not linked again, so only references to secret stores can be used, e.g. by
 // adding more clear-text or reordering secrets.
 func (s *Secret) Set(value []byte) error {
 	// Link the new value can be resolved
@@ -235,7 +253,7 @@ func (s *Secret) GetUnlinked() []string {
 }
 
 // Link used the given resolver map to link the secret parts to their
-// secret-store resolvers.
+// secret store resolvers.
 func (s *Secret) Link(resolvers map[string]telegraf.ResolveFunc) error {
 	// Decrypt the secret so we can return it
 	if s.container == nil {
@@ -295,7 +313,7 @@ func resolve(secret []byte, resolvers map[string]telegraf.ResolveFunc) ([]byte, 
 	return newsecret, remaining, replaceErrs
 }
 
-func splitLink(s string) (storeid string, key string) {
+func splitLink(s string) (storeID, key string) {
 	// There should _ALWAYS_ be two parts due to the regular expression match
 	parts := strings.SplitN(s[2:len(s)-1], ":", 2)
 	return parts[0], parts[1]

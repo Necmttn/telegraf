@@ -44,12 +44,12 @@ func TestParseCoresMeasurement(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, expectedCores, result.cores)
 		require.Equal(t, expectedTimestamp, result.time)
-		require.Equal(t, result.values[0], metricsValues["IPC"])
-		require.Equal(t, result.values[1], metricsValues["LLC_Misses"])
-		require.Equal(t, result.values[2], metricsValues["LLC"])
-		require.Equal(t, result.values[3], metricsValues["MBL"])
-		require.Equal(t, result.values[4], metricsValues["MBR"])
-		require.Equal(t, result.values[5], metricsValues["MBT"])
+		require.InDelta(t, result.values[0], metricsValues["IPC"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[1], metricsValues["LLC_Misses"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[2], metricsValues["LLC"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[3], metricsValues["MBL"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[4], metricsValues["MBR"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[5], metricsValues["MBT"], testutil.DefaultDelta)
 	})
 	t.Run("not valid measurement string", func(t *testing.T) {
 		measurement := "not, valid, measurement"
@@ -57,7 +57,7 @@ func TestParseCoresMeasurement(t *testing.T) {
 		result, err := parseCoresMeasurement(measurement)
 
 		require.Error(t, err)
-		require.Equal(t, "", result.cores)
+		require.Empty(t, result.cores)
 		require.Nil(t, result.values)
 		require.Equal(t, time.Time{}, result.time)
 	})
@@ -75,7 +75,7 @@ func TestParseCoresMeasurement(t *testing.T) {
 		result, err := parseCoresMeasurement(measurement)
 
 		require.Error(t, err)
-		require.Equal(t, "", result.cores)
+		require.Empty(t, result.cores)
 		require.Nil(t, result.values)
 		require.Equal(t, time.Time{}, result.time)
 	})
@@ -94,7 +94,7 @@ func TestParseCoresMeasurement(t *testing.T) {
 		result, err := parseCoresMeasurement(measurement)
 
 		require.Error(t, err)
-		require.Equal(t, "", result.cores)
+		require.Empty(t, result.cores)
 		require.Nil(t, result.values)
 		require.Equal(t, time.Time{}, result.time)
 	})
@@ -131,12 +131,12 @@ func TestParseProcessesMeasurement(t *testing.T) {
 		require.Equal(t, processName, result.process)
 		require.Equal(t, expectedCores, result.cores)
 		require.Equal(t, expectedTimestamp, result.time)
-		require.Equal(t, result.values[0], metricsValues["IPC"])
-		require.Equal(t, result.values[1], metricsValues["LLC_Misses"])
-		require.Equal(t, result.values[2], metricsValues["LLC"])
-		require.Equal(t, result.values[3], metricsValues["MBL"])
-		require.Equal(t, result.values[4], metricsValues["MBR"])
-		require.Equal(t, result.values[5], metricsValues["MBT"])
+		require.InDelta(t, result.values[0], metricsValues["IPC"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[1], metricsValues["LLC_Misses"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[2], metricsValues["LLC"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[3], metricsValues["MBL"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[4], metricsValues["MBR"], testutil.DefaultDelta)
+		require.InDelta(t, result.values[5], metricsValues["MBT"], testutil.DefaultDelta)
 	})
 
 	invalidTimestamp := "2020-20-20-31"
@@ -187,8 +187,8 @@ func TestParseProcessesMeasurement(t *testing.T) {
 			result, err := parseProcessesMeasurement(newMeasurement)
 
 			require.Error(t, err)
-			require.Equal(t, "", result.process)
-			require.Equal(t, "", result.cores)
+			require.Empty(t, result.process)
+			require.Empty(t, result.cores)
 			require.Nil(t, result.values)
 			require.Equal(t, time.Time{}, result.time)
 		})
@@ -198,7 +198,7 @@ func TestParseProcessesMeasurement(t *testing.T) {
 func TestAddToAccumulatorCores(t *testing.T) {
 	t.Run("shortened false", func(t *testing.T) {
 		var acc testutil.Accumulator
-		publisher := Publisher{acc: &acc}
+		publisher := publisher{acc: &acc}
 
 		cores := "1,2,3"
 		metricsValues := []float64{1, 2, 3, 4, 5, 6}
@@ -212,7 +212,7 @@ func TestAddToAccumulatorCores(t *testing.T) {
 	})
 	t.Run("shortened true", func(t *testing.T) {
 		var acc testutil.Accumulator
-		publisher := Publisher{acc: &acc, shortenedMetrics: true}
+		publisher := publisher{acc: &acc, shortenedMetrics: true}
 
 		cores := "1,2,3"
 		metricsValues := []float64{1, 2, 3, 4, 5, 6}
@@ -229,7 +229,7 @@ func TestAddToAccumulatorCores(t *testing.T) {
 func TestAddToAccumulatorProcesses(t *testing.T) {
 	t.Run("shortened false", func(t *testing.T) {
 		var acc testutil.Accumulator
-		publisher := Publisher{acc: &acc}
+		publisher := publisher{acc: &acc}
 
 		process := "process_name"
 		cores := "1,2,3"
@@ -244,7 +244,7 @@ func TestAddToAccumulatorProcesses(t *testing.T) {
 	})
 	t.Run("shortened true", func(t *testing.T) {
 		var acc testutil.Accumulator
-		publisher := Publisher{acc: &acc, shortenedMetrics: true}
+		publisher := publisher{acc: &acc, shortenedMetrics: true}
 
 		process := "process_name"
 		cores := "1,2,3"
@@ -261,11 +261,11 @@ func TestAddToAccumulatorProcesses(t *testing.T) {
 
 var (
 	testCoreMetrics = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(1),
 			},
 			map[string]string{
@@ -274,7 +274,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(2),
 			},
 			map[string]string{
@@ -283,7 +283,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(3),
 			},
 			map[string]string{
@@ -292,7 +292,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(4),
 			},
 			map[string]string{
@@ -301,7 +301,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(5),
 			},
 			map[string]string{
@@ -310,7 +310,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(6),
 			},
 			map[string]string{
@@ -320,11 +320,11 @@ var (
 		},
 	}
 	testCoreMetricsShortened = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(1),
 			},
 			map[string]string{
@@ -333,7 +333,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(2),
 			},
 			map[string]string{
@@ -343,11 +343,11 @@ var (
 		},
 	}
 	testCoreProcesses = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(1),
 			},
 			map[string]string{
@@ -357,7 +357,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(2),
 			},
 			map[string]string{
@@ -367,7 +367,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(3),
 			},
 			map[string]string{
@@ -377,7 +377,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(4),
 			},
 			map[string]string{
@@ -387,7 +387,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(5),
 			},
 			map[string]string{
@@ -397,7 +397,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(6),
 			},
 			map[string]string{
@@ -408,11 +408,11 @@ var (
 		},
 	}
 	testCoreProcessesShortened = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(1),
 			},
 			map[string]string{
@@ -422,7 +422,7 @@ var (
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(2),
 			},
 			map[string]string{

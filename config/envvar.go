@@ -3,12 +3,15 @@ package config
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/compose-spec/compose-go/template"
 	"github.com/compose-spec/compose-go/utils"
+	"github.com/influxdata/toml"
+	"github.com/influxdata/toml/ast"
 )
 
 type trimmer struct {
@@ -39,17 +42,20 @@ func (t *trimmer) process() error {
 		// Switch states if we need to
 		switch c {
 		case '\\':
-			_ = t.input.UnreadByte()
+			//nolint:errcheck // next byte is known
+			t.input.UnreadByte()
 			err = t.escape()
 		case '\'':
-			_ = t.input.UnreadByte()
+			//nolint:errcheck // next byte is known
+			t.input.UnreadByte()
 			if t.hasNQuotes(c, 3) {
 				err = t.tripleSingleQuote()
 			} else {
 				err = t.singleQuote()
 			}
 		case '"':
-			_ = t.input.UnreadByte()
+			//nolint:errcheck // next byte is known
+			t.input.UnreadByte()
 			if t.hasNQuotes(c, 3) {
 				err = t.tripleDoubleQuote()
 			} else {
@@ -72,21 +78,21 @@ func (t *trimmer) process() error {
 }
 
 func (t *trimmer) hasNQuotes(ref byte, limit int64) bool {
-	var count int64
+	var count, unmatched int64
 	// Look ahead check if the next characters are what we expect
 	for count = 0; count < limit; count++ {
 		c, err := t.input.ReadByte()
-		if err != nil || c != ref {
+		if err != nil {
+			break
+		}
+		if c != ref {
+			// We also need to unread the non-matching character
+			unmatched = 1
 			break
 		}
 	}
-	// We also need to unread the non-matching character
-	offset := -count
-	if count < limit {
-		offset--
-	}
-	// Unread the matched characters
-	_, _ = t.input.Seek(offset, io.SeekCurrent)
+	//nolint:errcheck // Unread the already matched characters
+	t.input.Seek(-(count + unmatched), io.SeekCurrent)
 	return count >= limit
 }
 
@@ -99,8 +105,8 @@ func (t *trimmer) readWriteByte() (byte, error) {
 }
 
 func (t *trimmer) escape() error {
-	// Consumer the known starting backslash and quote
-	_, _ = t.readWriteByte()
+	//nolint:errcheck // Consume the known starting backslash and quote
+	t.readWriteByte()
 
 	// Read the next character which is the escaped one and exit
 	_, err := t.readWriteByte()
@@ -108,8 +114,8 @@ func (t *trimmer) escape() error {
 }
 
 func (t *trimmer) singleQuote() error {
-	// Consumer the known starting quote
-	_, _ = t.readWriteByte()
+	//nolint:errcheck // Consume the known starting quote
+	t.readWriteByte()
 
 	// Read bytes until EOF, line end or another single quote
 	for {
@@ -120,9 +126,9 @@ func (t *trimmer) singleQuote() error {
 }
 
 func (t *trimmer) tripleSingleQuote() error {
-	for i := 0; i < 3; i++ {
-		// Consumer the known starting quotes
-		_, _ = t.readWriteByte()
+	for range 3 {
+		//nolint:errcheck // Consume the known starting quotes
+		t.readWriteByte()
 	}
 
 	// Read bytes until EOF or another set of triple single quotes
@@ -133,17 +139,18 @@ func (t *trimmer) tripleSingleQuote() error {
 		}
 
 		if c == '\'' && t.hasNQuotes('\'', 2) {
-			// Consumer the two additional ending quotes
-			_, _ = t.readWriteByte()
-			_, _ = t.readWriteByte()
+			//nolint:errcheck // Consume the two additional ending quotes
+			t.readWriteByte()
+			//nolint:errcheck // Consume the two additional ending quotes
+			t.readWriteByte()
 			return nil
 		}
 	}
 }
 
 func (t *trimmer) doubleQuote() error {
-	// Consumer the known starting quote
-	_, _ = t.readWriteByte()
+	//nolint:errcheck // Consume the known starting quote
+	t.readWriteByte()
 
 	// Read bytes until EOF, line end or another double quote
 	for {
@@ -153,8 +160,8 @@ func (t *trimmer) doubleQuote() error {
 		}
 		switch c {
 		case '\\':
-			// Found escaped character
-			_ = t.input.UnreadByte()
+			//nolint:errcheck // Consume the found escaped character
+			t.input.UnreadByte()
 			if err := t.escape(); err != nil {
 				return err
 			}
@@ -168,9 +175,9 @@ func (t *trimmer) doubleQuote() error {
 }
 
 func (t *trimmer) tripleDoubleQuote() error {
-	for i := 0; i < 3; i++ {
-		// Consumer the known starting quotes
-		_, _ = t.readWriteByte()
+	for range 3 {
+		//nolint:errcheck // Consume the known starting quotes
+		t.readWriteByte()
 	}
 
 	// Read bytes until EOF or another set of triple double quotes
@@ -181,8 +188,8 @@ func (t *trimmer) tripleDoubleQuote() error {
 		}
 		switch c {
 		case '\\':
-			// Found escaped character
-			_ = t.input.UnreadByte()
+			//nolint:errcheck // Consume the found escape character
+			t.input.UnreadByte()
 			if err := t.escape(); err != nil {
 				return err
 			}
@@ -190,9 +197,10 @@ func (t *trimmer) tripleDoubleQuote() error {
 		case '"':
 			t.output.WriteByte(c)
 			if t.hasNQuotes('"', 2) {
-				// Consumer the two additional ending quotes
-				_, _ = t.readWriteByte()
-				_, _ = t.readWriteByte()
+				//nolint:errcheck // Consume the two additional ending quotes
+				t.readWriteByte()
+				//nolint:errcheck // Consume the two additional ending quotes
+				t.readWriteByte()
 				return nil
 			}
 			continue
@@ -214,7 +222,90 @@ func (t *trimmer) comment() error {
 	}
 }
 
-func substituteEnvironment(contents []byte, oldReplacementBehavior bool) ([]byte, error) {
+func substituteEnvironmentStrict(contents []byte, oldReplacementBehavior bool) (*ast.Table, error) {
+	// Parse the tree
+	tree, err := toml.Parse(contents)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare the environment-variable replacer
+	options := []template.Option{
+		template.WithReplacementFunction(func(s string, m template.Mapping, cfg *template.Config) (string, error) {
+			result, applied, err := template.DefaultReplacementAppliedFunc(s, m, cfg)
+			if err == nil && !applied {
+				// Keep undeclared environment-variable patterns to reproduce
+				// pre-v1.27 behavior
+				return s, nil
+			}
+			if err != nil && strings.HasPrefix(err.Error(), "Invalid template:") {
+				// Keep invalid template patterns to ignore regexp substitutions
+				// like ${1}
+				return s, nil
+			}
+			return result, err
+		}),
+		template.WithoutLogging,
+	}
+	if oldReplacementBehavior {
+		options = append(options, template.WithPattern(oldVarRe))
+	}
+
+	envMap := utils.GetAsEqualsMap(os.Environ())
+
+	// Walk the AST and find string items to replace
+	if err := walk(tree, func(n any) error {
+		v, ok := n.(*ast.String)
+		if !ok {
+			return nil
+		}
+		replacement, err := template.SubstituteWithOptions(v.Value, func(k string) (string, bool) {
+			if v, ok := envMap[k]; ok {
+				return v, ok
+			}
+			return "", false
+		}, options...)
+		if err != nil {
+			return err
+		}
+		v.Value = replacement
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return tree, nil
+}
+
+func walk(node any, f func(any) error) error {
+	switch n := node.(type) {
+	case *ast.Table:
+		for k, v := range n.Fields {
+			if err := walk(v, f); err != nil {
+				return fmt.Errorf("processing field %q with value %v failed: %w", k, v, err)
+			}
+		}
+	case []*ast.Table:
+		for _, v := range n {
+			if err := walk(v, f); err != nil {
+				return fmt.Errorf("processing table %q failed: %w", v.Name, err)
+			}
+		}
+	case *ast.Array:
+		for i, v := range n.Value {
+			if err := walk(v, f); err != nil {
+				return fmt.Errorf("processing element %d with value %v failed: %w", i+1, v, err)
+			}
+		}
+	case *ast.KeyValue:
+		if err := walk(n.Value, f); err != nil {
+			return fmt.Errorf("processing value %v for key %q failed: %w", n.Value, n.Key, err)
+		}
+	}
+	return f(node)
+}
+
+func substituteEnvironmentNonStrict(contents []byte, oldReplacementBehavior bool) ([]byte, error) {
 	options := []template.Option{
 		template.WithReplacementFunction(func(s string, m template.Mapping, cfg *template.Config) (string, error) {
 			result, applied, err := template.DefaultReplacementAppliedFunc(s, m, cfg)

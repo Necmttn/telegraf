@@ -1,10 +1,10 @@
 //go:build linux
-// +build linux
 
 package intel_dlb
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/inputs/dpdk/mocks"
 	"github.com/influxdata/telegraf/testutil"
 )
@@ -25,9 +26,10 @@ func TestDLB_Init(t *testing.T) {
 			SocketPath: "",
 			Log:        testutil.Logger{},
 		}
-		require.Equal(t, "", dlb.SocketPath)
+		require.Empty(t, dlb.SocketPath)
 
-		_ = dlb.Init()
+		//nolint:errcheck // we are just testing that socket path gets set to default, not that default is valid
+		dlb.Init()
 
 		require.Equal(t, defaultSocketPath, dlb.SocketPath)
 	})
@@ -132,7 +134,7 @@ func TestDLB_Init(t *testing.T) {
 			Log:        testutil.Logger{},
 		}
 		const emptyPath = ""
-		fileMock.On("gatherPaths", mock.Anything).Return([]string{emptyPath}, fmt.Errorf("can't find device folder")).Once()
+		fileMock.On("gatherPaths", mock.Anything).Return([]string{emptyPath}, errors.New("can't find device folder")).Once()
 		err := dlb.Init()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "can't find device folder")
@@ -147,7 +149,7 @@ func TestDLB_writeReadSocketMessage(t *testing.T) {
 			connection: mockConn,
 			Log:        testutil.Logger{},
 		}
-		mockConn.On("Write", []byte{}).Return(0, fmt.Errorf("write error")).Once().
+		mockConn.On("Write", make([]byte, 0)).Return(0, errors.New("write error")).Once().
 			On("Close").Return(nil).Once()
 
 		_, _, err := dlb.writeReadSocketMessage("")
@@ -163,7 +165,7 @@ func TestDLB_writeReadSocketMessage(t *testing.T) {
 			connection: mockConn,
 			Log:        testutil.Logger{},
 		}
-		simulateResponse(mockConn, "", fmt.Errorf("read error"))
+		simulateResponse(mockConn, "", errors.New("read error"))
 
 		_, _, err := dlb.writeReadSocketMessage("")
 
@@ -178,7 +180,7 @@ func TestDLB_writeReadSocketMessage(t *testing.T) {
 			connection: mockConn,
 			Log:        testutil.Logger{},
 		}
-		mockConn.On("Write", []byte{}).Return(0, nil).Once().
+		mockConn.On("Write", make([]byte, 0)).Return(0, nil).Once().
 			On("Read", mock.Anything).Return(0, nil).
 			On("Close").Return(nil).Once()
 
@@ -211,7 +213,7 @@ func TestDLB_parseJSON(t *testing.T) {
 			}
 			mockConn.On("Close").Return(nil).Once()
 
-			err := dlb.parseJSON(testCase.replyMsgLen, testCase.socketReply, make(map[string]interface{}))
+			err := dlb.parseJSON(testCase.replyMsgLen, testCase.socketReply, make(map[string]any))
 
 			require.Error(t, err)
 			require.Contains(t, err.Error(), testCase.errMsg)
@@ -420,7 +422,7 @@ func TestDLB_gatherSecondDeviceIndex(t *testing.T) {
 		mockConn.On("Close").Return(nil).Once()
 
 		_, err := dlb.gatherSecondDeviceIndex(0, dlb.EventdevCommands[0])
-		require.Equal(t, nil, dlb.connection)
+		require.Nil(t, dlb.connection)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to parse json")
 		dlb.SocketPath = pathToSocket
@@ -478,12 +480,12 @@ func TestDLB_processCommandResult(t *testing.T) {
 		require.NoError(t, err)
 
 		expected := []telegraf.Metric{
-			testutil.MustMetric(
+			metric.New(
 				"intel_dlb",
 				map[string]string{
 					"command": "/eventdev/dev_xstats,0",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"dev_rx_ok": int64(0),
 				},
 				time.Unix(0, 0),
@@ -584,7 +586,7 @@ func TestDLB_processCommandResult(t *testing.T) {
 		mockConn.On("Read", mock.Anything).Run(func(arg mock.Arguments) {
 			elem := arg.Get(0).([]byte)
 			copy(elem, response)
-		}).Return(len(response), fmt.Errorf("read error")).Once()
+		}).Return(len(response), errors.New("read error")).Once()
 		mockConn.On("Close").Return(nil)
 
 		err := dlb.gatherMetricsFromSocket(mockAcc)
@@ -652,7 +654,7 @@ func Test_checkAndAddDLBDevice(t *testing.T) {
 			rasReader: fileMock,
 			Log:       testutil.Logger{},
 		}
-		fileMock.On("gatherPaths", mock.AnythingOfType("string")).Return(nil, fmt.Errorf("can't find device folder")).Once()
+		fileMock.On("gatherPaths", mock.AnythingOfType("string")).Return(nil, errors.New("can't find device folder")).Once()
 
 		err := dlb.checkAndAddDLBDevice()
 
@@ -670,7 +672,7 @@ func Test_checkAndAddDLBDevice(t *testing.T) {
 		}
 		const globPath = "/sys/devices/pci0000:00/0000:00:00.0/device"
 		fileMock.On("gatherPaths", mock.Anything).Return([]string{globPath}, nil).Once().
-			On("readFromFile", mock.Anything).Return([]byte("0x2710"), fmt.Errorf("read error while getting device folders")).Once()
+			On("readFromFile", mock.Anything).Return([]byte("0x2710"), errors.New("read error while getting device folders")).Once()
 
 		err := dlb.checkAndAddDLBDevice()
 
@@ -701,7 +703,7 @@ func Test_checkAndAddDLBDevice(t *testing.T) {
 		}
 		const globPath = "/sys/devices/pci0000:00/0000:00:00.0/device"
 		fileMock.On("gatherPaths", mock.Anything).Return([]string{globPath}, nil).Once().
-			On("readFromFile", mock.Anything).Return([]byte("0x2710"), fmt.Errorf("read error while getting device folders")).Once()
+			On("readFromFile", mock.Anything).Return([]byte("0x2710"), errors.New("read error while getting device folders")).Once()
 
 		err := dlb.checkAndAddDLBDevice()
 
@@ -778,7 +780,7 @@ func Test_readRasMetrics(t *testing.T) {
 		err            error
 		errMsg         string
 	}{
-		{"error when reading fails", []byte(aerCorrectableData), fmt.Errorf("read error"), "read error"},
+		{"error when reading fails", []byte(aerCorrectableData), errors.New("read error"), "read error"},
 		{"error when empty data is given", []byte(""), nil, "no value to parse"},
 		{"error when trying to split empty data", []byte("x1 x2"), nil, "failed to parse value"},
 	}
@@ -877,7 +879,7 @@ func Test_gatherRasMetrics(t *testing.T) {
 func Test_rasReader(t *testing.T) {
 	file := rasReaderImpl{}
 	// Create unique temporary file
-	fileobj, err := os.CreateTemp("", "qat")
+	fileobj, err := os.CreateTemp(t.TempDir(), "qat")
 	require.NoError(t, err)
 
 	t.Run("tests with existing file", func(t *testing.T) {
@@ -906,7 +908,7 @@ func Test_rasReader(t *testing.T) {
 		expectedErrMsg string
 	}{
 		{"error if file does not exist", fileobj.Name(), "no such file or directory"},
-		{"error if path does not point to regular file", os.TempDir(), "is a directory"},
+		{"error if path does not point to regular file", t.TempDir(), "is a directory"},
 		{"error if file does not exist", "/not/path/unreal/path", "no such file or directory"},
 	}
 
@@ -933,25 +935,36 @@ func simulateResponse(mockConn *mocks.Conn, response string, readErr error) {
 
 func simulateSocketResponseForGather(socket net.Listener, t *testing.T) {
 	conn, err := socket.Accept()
-	require.NoError(t, err)
+	if err != nil {
+		t.Error(err)
+		return
+	}
 
 	type initMessage struct {
 		Version      string `json:"version"`
 		Pid          int    `json:"pid"`
 		MaxOutputLen uint32 `json:"max_output_len"`
 	}
-	initMsg, _ := json.Marshal(initMessage{
+	initMsg, err := json.Marshal(initMessage{
 		Version:      "",
 		Pid:          1,
 		MaxOutputLen: 1024,
 	})
-	_, err = conn.Write(initMsg)
-	require.NoError(t, err)
+	if err != nil {
+		t.Error(err)
+		return
+	}
 
-	require.NoError(t, err)
+	if _, err = conn.Write(initMsg); err != nil {
+		t.Error(err)
+		return
+	}
+
 	eventdevListWithSecondIndex := []string{"/eventdev/port_list", "/eventdev/queue_list"}
-	_, err = fmt.Fprintf(conn, `{%q: [0, 1]}`, eventdevListWithSecondIndex[0])
-	require.NoError(t, err)
+	if _, err = fmt.Fprintf(conn, `{%q: [0, 1]}`, eventdevListWithSecondIndex[0]); err != nil {
+		t.Error(err)
+		return
+	}
 }
 
 func createSocketForTest(t *testing.T) (string, net.Listener) {
@@ -1023,13 +1036,13 @@ TOTAL_ERR_NONFATAL 9`
 
 var (
 	expectedRasMetrics = []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"intel_dlb_ras",
 			map[string]string{
 				"device":      "0000:00:00.0",
 				"metric_file": aerCorrectableFileName,
 			},
-			map[string]interface{}{
+			map[string]any{
 				"RxErr":         uint64(1),
 				"BadTLP":        uint64(0),
 				"BadDLLP":       uint64(0),
@@ -1042,13 +1055,13 @@ var (
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric(
+		metric.New(
 			"intel_dlb_ras",
 			map[string]string{
 				"device":      "0000:00:00.0",
 				"metric_file": aerFatalFileName,
 			},
-			map[string]interface{}{
+			map[string]any{
 				"Undefined":        uint64(0),
 				"DLP":              uint64(1),
 				"SDES":             uint64(0),
@@ -1071,13 +1084,13 @@ var (
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric(
+		metric.New(
 			"intel_dlb_ras",
 			map[string]string{
 				"device":      "0000:00:00.0",
 				"metric_file": aerNonFatalFileName,
 			},
-			map[string]interface{}{
+			map[string]any{
 				"Undefined":          uint64(0),
 				"DLP":                uint64(0),
 				"SDES":               uint64(0),
@@ -1103,12 +1116,12 @@ var (
 	}
 
 	expectedTelegrafMetrics = []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"intel_dlb",
 			map[string]string{
 				"command": "/eventdev/dev_xstats,0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"dev_rx_ok": int64(0),
 			},
 			time.Unix(0, 0),
@@ -1118,3 +1131,68 @@ var (
 		expectedRasMetrics[2],
 	}
 )
+
+// mockRasReader is an autogenerated mock type for the rasReader type
+type mockRasReader struct {
+	mock.Mock
+}
+
+// gatherPaths provides a mock function with given fields: path
+func (_m *mockRasReader) gatherPaths(path string) ([]string, error) {
+	ret := _m.Called(path)
+
+	if len(ret) == 0 {
+		panic("no return value specified for gatherPaths")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]string, error)); ok {
+		return rf(path)
+	}
+	if rf, ok := ret.Get(0).(func(string) []string); ok {
+		r0 = rf(path)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(path)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// readFromFile provides a mock function with given fields: filePath
+func (_m *mockRasReader) readFromFile(filePath string) ([]byte, error) {
+	ret := _m.Called(filePath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for readFromFile")
+	}
+
+	var r0 []byte
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]byte, error)); ok {
+		return rf(filePath)
+	}
+	if rf, ok := ret.Get(0).(func(string) []byte); ok {
+		r0 = rf(filePath)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(filePath)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}

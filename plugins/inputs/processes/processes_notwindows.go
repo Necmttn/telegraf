@@ -14,20 +14,19 @@ import (
 	"syscall"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/internal"
+	"github.com/influxdata/telegraf/plugins/common/sudo"
 	"github.com/influxdata/telegraf/plugins/inputs"
-	"github.com/influxdata/telegraf/plugins/inputs/linux_sysctl_fs"
 )
 
 type Processes struct {
-	UseSudo bool `toml:"use_sudo"`
+	UseSudo bool            `toml:"use_sudo"`
+	Log     telegraf.Logger `toml:"-"`
 
 	execPS       func(UseSudo bool) ([]byte, error)
 	readProcFile func(filename string) ([]byte, error)
-
-	Log telegraf.Logger
-
-	forcePS   bool
-	forceProc bool
+	forcePS      bool
+	forceProc    bool
 }
 
 func (p *Processes) Gather(acc telegraf.Accumulator) error {
@@ -61,8 +60,8 @@ func (p *Processes) Gather(acc telegraf.Accumulator) error {
 }
 
 // Gets empty fields of metrics based on the OS
-func getEmptyFields() map[string]interface{} {
-	fields := map[string]interface{}{
+func getEmptyFields() map[string]any {
+	fields := map[string]any{
 		"blocked":  int64(0),
 		"zombies":  int64(0),
 		"stopped":  int64(0),
@@ -89,7 +88,7 @@ func getEmptyFields() map[string]interface{} {
 }
 
 // exec `ps` to get all process states
-func (p *Processes) gatherFromPS(fields map[string]interface{}) error {
+func (p *Processes) gatherFromPS(fields map[string]any) error {
 	out, err := p.execPS(p.UseSudo)
 	if err != nil {
 		return err
@@ -129,8 +128,8 @@ func (p *Processes) gatherFromPS(fields map[string]interface{}) error {
 }
 
 // get process states from /proc/(pid)/stat files
-func (p *Processes) gatherFromProc(fields map[string]interface{}) error {
-	filenames, err := filepath.Glob(linux_sysctl_fs.GetHostProc() + "/[0-9]*/stat")
+func (p *Processes) gatherFromProc(fields map[string]any) error {
+	filenames, err := filepath.Glob(internal.GetProcPath() + "/[0-9]*/stat")
 	if err != nil {
 		return err
 	}
@@ -220,7 +219,7 @@ func execPS(useSudo bool) ([]byte, error) {
 
 	cmd := []string{bin, "axo", "state"}
 	if useSudo {
-		cmd = append([]string{"sudo", "-n"}, cmd...)
+		cmd = append([]string{sudo.Binary(), "-n"}, cmd...)
 	}
 
 	out, err := exec.Command(cmd[0], cmd[1:]...).Output()

@@ -1,19 +1,42 @@
 # OpenSearch Output Plugin
 
-This plugin writes to [OpenSearch](https://opensearch.org/) via HTTP
+This plugin writes metrics to a [OpenSearch][opensearch] instance via HTTP.
+It supports OpenSearch releases v1 and v2 but future comparability with 1.x is
+not guaranteed and instead will focus on 2.x support.
 
-It supports OpenSearch releases from 1 and 2. Future comparability with 1.x is
-not guaranteed and instead will focus on 2.x support. Consider using the
-existing Elasticsearch plugin for 1.x.
+> [!TIP]
+> Consider using the existing Elasticsearch plugin for 1.x.
+
+⭐ Telegraf v1.29.0
+🏷️ datastore, logging
+💻 all
+
+[opensearch]: https://opensearch.org/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
+
+## Startup error behavior options <!-- @/docs/includes/startup_error_behavior.md -->
+
+In addition to the plugin-specific and global configuration settings the plugin
+supports options for specifying the behavior when experiencing startup errors
+using the `startup_error_behavior` setting. Available values are:
+
+- `error`:  Telegraf with stop and exit in case of startup errors. This is the
+            default behavior.
+- `ignore`: Telegraf will ignore startup errors for this plugin and disables it
+            but continues processing for all other plugins.
+- `retry`:  Telegraf will try to startup the plugin in every gather or write
+            cycle in case of startup errors. The plugin is disabled until
+            the startup succeeds.
+- `probe`:  Telegraf will probe the plugin's function (if possible) and disables
+            the plugin in case probing fails. If the plugin does not support
+            probing, Telegraf will behave as if `ignore` was set instead.
 
 ## Configuration
 
@@ -123,9 +146,9 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 ### Required parameters
 
-* `urls`: A list containing the full HTTP URL of one or more nodes from your
+- `urls`: A list containing the full HTTP URL of one or more nodes from your
   OpenSearch instance.
-* `index_name`: The target index for metrics. You can use the date format
+- `index_name`: The target index for metrics. You can use the date format
 
 For example: "telegraf-{{.Time.Format \"2006-01-02\"}}" would set it to
 "telegraf-2023-07-27". You can also specify metric name (`{{ .Name }}`), tag

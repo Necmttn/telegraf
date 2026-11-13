@@ -10,13 +10,13 @@ import (
 	"time"
 
 	ws "github.com/gorilla/websocket"
+	"golang.org/x/net/proxy"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/plugins/common/proxy"
+	common_proxy "github.com/influxdata/telegraf/plugins/common/proxy"
 	"github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/outputs"
-	"github.com/influxdata/telegraf/plugins/serializers"
 )
 
 //go:embed sample.conf
@@ -30,19 +30,19 @@ const (
 
 // WebSocket can output to WebSocket endpoint.
 type WebSocket struct {
-	URL            string            `toml:"url"`
-	ConnectTimeout config.Duration   `toml:"connect_timeout"`
-	WriteTimeout   config.Duration   `toml:"write_timeout"`
-	ReadTimeout    config.Duration   `toml:"read_timeout"`
-	Headers        map[string]string `toml:"headers"`
-	UseTextFrames  bool              `toml:"use_text_frames"`
-	Log            telegraf.Logger   `toml:"-"`
-	proxy.HTTPProxy
-	proxy.Socks5ProxyConfig
+	URL            string                    `toml:"url"`
+	ConnectTimeout config.Duration           `toml:"connect_timeout"`
+	WriteTimeout   config.Duration           `toml:"write_timeout"`
+	ReadTimeout    config.Duration           `toml:"read_timeout"`
+	Headers        map[string]*config.Secret `toml:"headers"`
+	UseTextFrames  bool                      `toml:"use_text_frames"`
+	Log            telegraf.Logger           `toml:"-"`
+	common_proxy.HTTPProxy
+	common_proxy.Socks5ProxyConfig
 	tls.ClientConfig
 
 	conn       *ws.Conn
-	serializer serializers.Serializer
+	serializer telegraf.Serializer
 }
 
 func (*WebSocket) SampleConfig() string {
@@ -50,7 +50,7 @@ func (*WebSocket) SampleConfig() string {
 }
 
 // SetSerializer implements serializers.SerializerOutput.
-func (w *WebSocket) SetSerializer(serializer serializers.Serializer) {
+func (w *WebSocket) SetSerializer(serializer telegraf.Serializer) {
 	w.serializer = serializer
 }
 
@@ -83,7 +83,7 @@ func (w *WebSocket) Connect() error {
 	}
 
 	if w.Socks5ProxyEnabled {
-		netDialer, err := w.Socks5ProxyConfig.GetDialer()
+		netDialer, err := w.Socks5ProxyConfig.GetDialer(proxy.Direct)
 		if err != nil {
 			return fmt.Errorf("error connecting to socks5 proxy: %w", err)
 		}
@@ -92,7 +92,13 @@ func (w *WebSocket) Connect() error {
 
 	headers := http.Header{}
 	for k, v := range w.Headers {
-		headers.Set(k, v)
+		secret, err := v.Get()
+		if err != nil {
+			return fmt.Errorf("getting header secret %q failed: %w", k, err)
+		}
+
+		headers.Set(k, secret.String())
+		secret.Destroy()
 	}
 
 	conn, resp, err := dialer.Dial(w.URL, headers)

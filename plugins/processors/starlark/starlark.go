@@ -3,7 +3,9 @@ package starlark
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
+	"slices"
 
 	"go.starlark.net/starlark"
 
@@ -26,14 +28,12 @@ func (*Starlark) SampleConfig() string {
 }
 
 func (s *Starlark) Init() error {
-	err := s.Common.Init()
-	if err != nil {
+	if err := s.Common.Init(); err != nil {
 		return err
 	}
 
 	// The source should define an apply function.
-	err = s.AddFunction("apply", &common.Metric{})
-	if err != nil {
+	if err := s.AddFunction("apply", &common.Metric{}); err != nil {
 		return err
 	}
 
@@ -43,14 +43,14 @@ func (s *Starlark) Init() error {
 	return nil
 }
 
-func (s *Starlark) Start(_ telegraf.Accumulator) error {
+func (*Starlark) Start(telegraf.Accumulator) error {
 	return nil
 }
 
 func (s *Starlark) Add(origMetric telegraf.Metric, acc telegraf.Accumulator) error {
 	parameters, found := s.GetParameters("apply")
 	if !found {
-		return fmt.Errorf("the parameters of the apply function could not be found")
+		return errors.New("the parameters of the apply function could not be found")
 	}
 	parameters[0].(*common.Metric).Wrap(origMetric)
 
@@ -70,7 +70,7 @@ func (s *Starlark) Add(origMetric telegraf.Metric, acc telegraf.Accumulator) err
 			switch v := v.(type) {
 			case *common.Metric:
 				m := v.Unwrap()
-				if containsMetric(s.results, m) {
+				if slices.Contains(s.results, m) {
 					s.Log.Errorf("Duplicate metric reference detected")
 					continue
 				}
@@ -117,27 +117,16 @@ func (s *Starlark) Add(origMetric telegraf.Metric, acc telegraf.Accumulator) err
 	default:
 		return fmt.Errorf("invalid type returned: %T", rv)
 	}
+
 	return nil
 }
 
-func (s *Starlark) Stop() {
-}
-
-func containsMetric(metrics []telegraf.Metric, target telegraf.Metric) bool {
-	for _, m := range metrics {
-		if m == target {
-			return true
-		}
-	}
-	return false
-}
+func (*Starlark) Stop() {}
 
 func init() {
 	processors.AddStreaming("starlark", func() telegraf.StreamingProcessor {
 		return &Starlark{
-			Common: common.Common{
-				StarlarkLoadFunc: common.LoadFunc,
-			},
+			StarlarkLoadFunc: common.LoadFunc,
 		}
 	})
 }

@@ -16,7 +16,7 @@ func TestNewMetric(t *testing.T) {
 		"host":       "localhost",
 		"datacenter": "us-east-1",
 	}
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"usage_idle": float64(99),
 		"usage_busy": float64(1),
 	}
@@ -32,7 +32,7 @@ func TestNewMetric(t *testing.T) {
 // cpu value=1
 func baseMetric() telegraf.Metric {
 	tags := map[string]string{}
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"value": float64(1),
 	}
 	now := time.Now()
@@ -112,7 +112,7 @@ func TestAddFieldOverwrites(t *testing.T) {
 
 	value, ok := m.GetField("value")
 	require.True(t, ok)
-	require.Equal(t, 42.0, value)
+	require.InDelta(t, 42.0, value, 0.001)
 }
 
 func TestAddFieldChangesType(t *testing.T) {
@@ -126,6 +126,24 @@ func TestAddFieldChangesType(t *testing.T) {
 	value, ok := m.GetField("value")
 	require.True(t, ok)
 	require.Equal(t, "xyzzy", value)
+}
+
+func TestAddFieldIgnoresUnsupportedValue(t *testing.T) {
+	m := baseMetric()
+
+	m.AddField("list", []any{1, 2})
+
+	require.False(t, m.HasField("list"))
+}
+
+func TestAddFieldKeepsCurrentValueOverUnsupportedValue(t *testing.T) {
+	m := baseMetric()
+
+	m.AddField("value", map[string]any{"nested": int64(1)})
+
+	value, ok := m.GetField("value")
+	require.True(t, ok)
+	require.EqualValues(t, 1, value)
 }
 
 func TestRemoveFieldNoEffectOnMissingFields(t *testing.T) {
@@ -176,7 +194,7 @@ func TestEquals(t *testing.T) {
 		map[string]string{
 			"host": "localhost",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 42.0,
 		},
 		now,
@@ -186,7 +204,7 @@ func TestEquals(t *testing.T) {
 		map[string]string{
 			"host": "localhost",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 42.0,
 		},
 		now,
@@ -209,7 +227,7 @@ func TestHashID(t *testing.T) {
 			"mytag":      "foo",
 			"another":    "tag",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": float64(1),
 		},
 		time.Now(),
@@ -242,7 +260,7 @@ func TestHashID_Consistency(t *testing.T) {
 			"mytag":      "foo",
 			"another":    "tag",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": float64(1),
 		},
 		time.Now(),
@@ -256,7 +274,7 @@ func TestHashID_Consistency(t *testing.T) {
 			"mytag":      "foo",
 			"another":    "tag",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": float64(1),
 		},
 		time.Now(),
@@ -275,7 +293,7 @@ func TestHashID_Delimiting(t *testing.T) {
 			"b": "y",
 			"c": "z",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": float64(1),
 		},
 		time.Now(),
@@ -285,7 +303,7 @@ func TestHashID_Delimiting(t *testing.T) {
 		map[string]string{
 			"a": "xbycz",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": float64(1),
 		},
 		time.Now(),
@@ -319,7 +337,7 @@ func TestValueType(t *testing.T) {
 	now := time.Now()
 
 	tags := map[string]string{}
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"value": float64(42),
 	}
 	m := New("cpu", tags, fields, now, telegraf.Gauge)

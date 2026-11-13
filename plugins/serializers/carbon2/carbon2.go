@@ -90,7 +90,7 @@ func (s *Serializer) createObject(metric telegraf.Metric) []byte {
 			}
 		}
 
-		m.WriteString(fmt.Sprintf(s.template, strings.ReplaceAll(name, " ", "_"), strings.ReplaceAll(fieldName, " ", "_")))
+		fmt.Fprintf(&m, s.template, strings.ReplaceAll(name, " ", "_"), strings.ReplaceAll(fieldName, " ", "_"))
 		for _, tag := range metric.TagList() {
 			m.WriteString(strings.ReplaceAll(tag.Key, " ", "_"))
 			m.WriteString("=")
@@ -112,16 +112,8 @@ func (s *Serializer) createObject(metric telegraf.Metric) []byte {
 
 func init() {
 	serializers.Add("carbon2",
-		func() serializers.Serializer {
+		func() telegraf.Serializer {
 			return &Serializer{}
 		},
 	)
-}
-
-// InitFromConfig is a compatibility function to construct the parser the old way
-func (s *Serializer) InitFromConfig(cfg *serializers.Config) error {
-	s.Format = cfg.Carbon2Format
-	s.SanitizeReplaceChar = cfg.Carbon2SanitizeReplaceChar
-
-	return nil
 }

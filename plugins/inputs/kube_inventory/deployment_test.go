@@ -6,18 +6,17 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	v1 "k8s.io/api/apps/v1"
+	"k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestDeployment(t *testing.T) {
 	cli := &client{}
-	selectInclude := []string{}
-	selectExclude := []string{}
 	now := time.Now()
 	now = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 1, 36, 0, now.Location())
 
@@ -30,7 +29,7 @@ func TestDeployment(t *testing.T) {
 		{
 			name: "no deployments",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/deployments/": &v1.DeploymentList{},
 				},
 			},
@@ -39,7 +38,7 @@ func TestDeployment(t *testing.T) {
 		{
 			name: "collect deployments",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/deployments/": &v1.DeploymentList{
 						Items: []v1.Deployment{
 							{
@@ -61,7 +60,7 @@ func TestDeployment(t *testing.T) {
 											},
 										},
 									},
-									Replicas: toInt32Ptr(4),
+									Replicas: new(int32(4)),
 									Selector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"select1": "s1",
@@ -69,23 +68,21 @@ func TestDeployment(t *testing.T) {
 										},
 									},
 								},
-								ObjectMeta: metav1.ObjectMeta{
-									Generation: 11221,
-									Namespace:  "ns1",
-									Name:       "deploy1",
-									Labels: map[string]string{
-										"lab1": "v1",
-										"lab2": "v2",
-									},
-									CreationTimestamp: metav1.Time{Time: now},
+								Generation: 11221,
+								Namespace:  "ns1",
+								Name:       "deploy1",
+								Labels: map[string]string{
+									"lab1": "v1",
+									"lab2": "v2",
 								},
+								CreationTimestamp: metav1.Time{Time: now},
 							},
 						},
 					},
 				},
 			},
 			output: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"kubernetes_deployment",
 					map[string]string{
 						"namespace":        "ns1",
@@ -93,7 +90,7 @@ func TestDeployment(t *testing.T) {
 						"selector_select1": "s1",
 						"selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"replicas_available":   int32(1),
 						"replicas_unavailable": int32(4),
 						"created":              now.UnixNano(),
@@ -107,9 +104,7 @@ func TestDeployment(t *testing.T) {
 
 	for _, v := range tests {
 		ks := &KubernetesInventory{
-			client:          cli,
-			SelectorInclude: selectInclude,
-			SelectorExclude: selectExclude,
+			client: cli,
 		}
 		require.NoError(t, ks.createSelectorFilters())
 		acc := new(testutil.Accumulator)
@@ -137,7 +132,7 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 	now := time.Now()
 	now = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 1, 36, 0, now.Location())
 
-	responseMap := map[string]interface{}{
+	responseMap := map[string]any{
 		"/deployments/": &v1.DeploymentList{
 			Items: []v1.Deployment{
 				{
@@ -159,7 +154,7 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 								},
 							},
 						},
-						Replicas: toInt32Ptr(4),
+						Replicas: new(int32(4)),
 						Selector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"select1": "s1",
@@ -167,16 +162,14 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 							},
 						},
 					},
-					ObjectMeta: metav1.ObjectMeta{
-						Generation: 11221,
-						Namespace:  "ns1",
-						Name:       "deploy1",
-						Labels: map[string]string{
-							"lab1": "v1",
-							"lab2": "v2",
-						},
-						CreationTimestamp: metav1.Time{Time: now},
+					Generation: 11221,
+					Namespace:  "ns1",
+					Name:       "deploy1",
+					Labels: map[string]string{
+						"lab1": "v1",
+						"lab2": "v2",
 					},
+					CreationTimestamp: metav1.Time{Time: now},
 				},
 			},
 		},
@@ -209,8 +202,6 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
-			exclude:  []string{},
 			expected: map[string]string{
 				"selector_select1": "s1",
 				"selector_select2": "s2",
@@ -223,7 +214,6 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 			},
 			hasError: false,
 			include:  []string{"select1"},
-			exclude:  []string{},
 			expected: map[string]string{
 				"selector_select1": "s1",
 			},
@@ -234,7 +224,6 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"select2"},
 			expected: map[string]string{
 				"selector_select1": "s1",
@@ -247,7 +236,6 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 			},
 			hasError: false,
 			include:  []string{"*1"},
-			exclude:  []string{},
 			expected: map[string]string{
 				"selector_select1": "s1",
 			},
@@ -258,7 +246,6 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"*2"},
 			expected: map[string]string{
 				"selector_select1": "s1",
@@ -270,7 +257,6 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"*2"},
 			expected: map[string]string{
 				"selector_select1": "s1",
@@ -292,8 +278,8 @@ func TestDeploymentSelectorFilter(t *testing.T) {
 
 		// Grab selector tags
 		actual := map[string]string{}
-		for _, metric := range acc.Metrics {
-			for key, val := range metric.Tags {
+		for _, m := range acc.Metrics {
+			for key, val := range m.Tags {
 				if strings.Contains(key, "selector_") {
 					actual[key] = val
 				}

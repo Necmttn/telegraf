@@ -43,7 +43,7 @@ func TestCases(t *testing.T) {
 			parser := plugin.Parser.(*models.RunningParser).Parser.(*Parser)
 			parser.MetricVersion = 1
 			if raw, found := plugin.AdditionalParams["headers"]; found {
-				headers, ok := raw.(map[string]interface{})
+				headers, ok := raw.(map[string]any)
 				require.Truef(t, ok, "unknown header type %T", raw)
 				parser.Header = make(http.Header)
 				for k, rv := range headers {
@@ -104,7 +104,7 @@ func TestCases(t *testing.T) {
 			parser := plugin.Parser.(*models.RunningParser).Parser.(*Parser)
 			parser.MetricVersion = 2
 			if raw, found := plugin.AdditionalParams["headers"]; found {
-				headers, ok := raw.(map[string]interface{})
+				headers, ok := raw.(map[string]any)
 				require.Truef(t, ok, "unknown header type %T", raw)
 				parser.Header = make(http.Header)
 				for k, rv := range headers {
@@ -153,24 +153,28 @@ func TestCases(t *testing.T) {
 
 func BenchmarkParsingMetricVersion1(b *testing.B) {
 	plugin := &Parser{MetricVersion: 1}
+	require.NoError(b, plugin.Init())
 
 	benchmarkData, err := os.ReadFile(filepath.FromSlash("testcases/benchmark/input.txt"))
 	require.NoError(b, err)
 	require.NotEmpty(b, benchmarkData)
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse(benchmarkData)
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse(benchmarkData)
 	}
 }
 
 func BenchmarkParsingMetricVersion2(b *testing.B) {
 	plugin := &Parser{MetricVersion: 2}
+	require.NoError(b, plugin.Init())
 
 	benchmarkData, err := os.ReadFile(filepath.FromSlash("testcases/benchmark/input.txt"))
 	require.NoError(b, err)
 	require.NotEmpty(b, benchmarkData)
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse(benchmarkData)
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse(benchmarkData)
 	}
 }

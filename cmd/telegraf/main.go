@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/awnumar/memguard"
+	"github.com/fatih/color"
 	"github.com/urfave/cli/v2"
 
 	"github.com/influxdata/telegraf/config"
@@ -99,7 +101,16 @@ func deleteEmpty(s []string) []string {
 // runApp defines all the subcommands and flags for Telegraf
 // this abstraction is used for testing, so outputBuffer and args can be changed
 func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfig, m App) error {
-	pluginFilterFlags := []cli.Flag{
+	//nolint:prealloc // False positive as this has a fixed, known-in-advance size
+	configHandlingFlags := []cli.Flag{
+		&cli.StringSliceFlag{
+			Name:  "config",
+			Usage: "configuration file to load",
+		},
+		&cli.StringSliceFlag{
+			Name:  "config-directory",
+			Usage: "directory containing additional *.conf files",
+		},
 		&cli.StringFlag{
 			Name: "section-filter",
 			Usage: "filter the sections to print, separator is ':'. " +
@@ -123,11 +134,19 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 		},
 		&cli.StringFlag{
 			Name:  "secretstore-filter",
-			Usage: "filter the secret-stores to enable, separator is ':'",
+			Usage: "filter the secret stores to enable, separator is ':'",
+		},
+		&cli.BoolFlag{
+			Name:  "strict-env-handling",
+			Usage: "enforces strict and secure handling of environment variables; will not work with non-string settings",
+		},
+		&cli.BoolFlag{
+			Name:  "non-strict-env-handling",
+			Usage: "allow unsafe non-strict handling of environment variables to replace non-string settings",
 		},
 	}
 
-	extraFlags := append(pluginFilterFlags, cliFlags()...)
+	mainFlags := append(configHandlingFlags, cliFlags()...)
 
 	// This function is used when Telegraf is run with only flags
 	action := func(cCtx *cli.Context) error {
@@ -135,11 +154,6 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 		// a command...
 		if cCtx.NArg() > 0 {
 			return fmt.Errorf("unknown command %q", cCtx.Args().First())
-		}
-
-		err := logger.SetupLogging(logger.LogConfig{})
-		if err != nil {
-			return err
 		}
 
 		// Deprecated: Use execd instead
@@ -218,22 +232,42 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 			pprof.Start(cCtx.String("pprof-addr"))
 		}
 
+		if cCtx.Bool("strict-env-handling") && cCtx.Bool("non-strict-env-handling") {
+			return errors.New("flags --strict-env-handling and --non-strict-env-handling cannot be used together")
+		}
+		if !cCtx.Bool("strict-env-handling") && !cCtx.Bool("non-strict-env-handling") {
+			msg := "Strict environment variable handling is the new default starting with v1.38.0! " +
+				"If your configuration does not work with strict handling please explicitly add " +
+				"the --non-strict-env-handling flag to switch to the previous behavior!"
+			log.Println("W! " + color.YellowString(msg))
+		}
+
+		if err := config.SetPluginLabelSelections(cCtx.StringSlice("select")); err != nil {
+			return err
+		}
+
 		filters := processFilterFlags(cCtx)
 
 		g := GlobalFlags{
-			config:         cCtx.StringSlice("config"),
-			configDir:      cCtx.StringSlice("config-directory"),
-			testWait:       cCtx.Int("test-wait"),
-			watchConfig:    cCtx.String("watch-config"),
-			pidFile:        cCtx.String("pidfile"),
-			plugindDir:     cCtx.String("plugin-directory"),
-			password:       cCtx.String("password"),
-			oldEnvBehavior: cCtx.Bool("old-env-behavior"),
-			test:           cCtx.Bool("test"),
-			debug:          cCtx.Bool("debug"),
-			once:           cCtx.Bool("once"),
-			quiet:          cCtx.Bool("quiet"),
-			unprotected:    cCtx.Bool("unprotected"),
+			config:                  cCtx.StringSlice("config"),
+			configDir:               cCtx.StringSlice("config-directory"),
+			testWait:                cCtx.Int("test-wait"),
+			configURLRetryAttempts:  cCtx.Int("config-url-retry-attempts"),
+			configURLWatchInterval:  cCtx.Duration("config-url-watch-interval"),
+			watchConfig:             cCtx.String("watch-config"),
+			watchInterval:           cCtx.Duration("watch-interval"),
+			watchDebounceInterval:   cCtx.Duration("watch-debounce-interval"),
+			pidFile:                 cCtx.String("pidfile"),
+			plugindDir:              cCtx.String("plugin-directory"),
+			password:                cCtx.String("password"),
+			oldEnvBehavior:          cCtx.Bool("old-env-behavior"),
+			nonStrictEnvVars:        cCtx.Bool("non-strict-env-handling"),
+			printPluginConfigSource: cCtx.Bool("print-plugin-config-source"),
+			test:                    cCtx.Bool("test"),
+			debug:                   cCtx.Bool("debug"),
+			once:                    cCtx.Bool("once"),
+			quiet:                   cCtx.Bool("quiet"),
+			unprotected:             cCtx.Bool("unprotected"),
 		}
 
 		w := WindowFlags{
@@ -250,10 +284,11 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 	}
 
 	commands := append(
-		getConfigCommands(pluginFilterFlags, outputBuffer),
+		getConfigCommands(configHandlingFlags, outputBuffer),
 		getSecretStoreCommands(m)...,
 	)
 	commands = append(commands, getPluginCommands(outputBuffer)...)
+	commands = append(commands, getServiceCommands(outputBuffer)...)
 
 	app := &cli.App{
 		Name:   "Telegraf",
@@ -261,19 +296,16 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 		Writer: outputBuffer,
 		Flags: append(
 			[]cli.Flag{
-				// String slice flags
-				&cli.StringSliceFlag{
-					Name:  "config",
-					Usage: "configuration file to load",
-				},
-				&cli.StringSliceFlag{
-					Name:  "config-directory",
-					Usage: "directory containing additional *.conf files",
-				},
 				// Int flags
 				&cli.IntFlag{
 					Name:  "test-wait",
 					Usage: "wait up to this many seconds for service inputs to complete in test mode",
+				},
+				&cli.IntFlag{
+					Name: "config-url-retry-attempts",
+					Usage: "Number of attempts to obtain a remote configuration via a URL during startup. " +
+						"Set to -1 for unlimited attempts.",
+					DefaultText: "3",
 				},
 				//
 				// String flags
@@ -286,8 +318,15 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 					Usage: "pprof host/IP and port to listen on (e.g. 'localhost:6060')",
 				},
 				&cli.StringFlag{
-					Name:  "watch-config",
-					Usage: "monitoring config changes [notify, poll] of --config and --config-directory options",
+					Name: "watch-config",
+					Usage: "monitoring config changes [notify, poll] of --config and --config-directory options. " +
+						"Notify supports linux, *bsd, and macOS. Poll is required for Windows and checks every 250ms.",
+				},
+				&cli.DurationFlag{
+					Name:        "watch-debounce-interval",
+					Usage:       "Time duration to wait after a config change before reloading",
+					DefaultText: "0s",
+					Value:       0,
 				},
 				&cli.StringFlag{
 					Name:  "pidfile",
@@ -295,13 +334,17 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 				},
 				&cli.StringFlag{
 					Name:  "password",
-					Usage: "password to unlock secret-stores",
+					Usage: "password to unlock secret stores",
 				},
 				//
 				// Bool flags
 				&cli.BoolFlag{
 					Name:  "old-env-behavior",
 					Usage: "switch back to pre v1.27 environment replacement behavior",
+				},
+				&cli.BoolFlag{
+					Name:  "print-plugin-config-source",
+					Usage: "print the source for a given plugin",
 				},
 				&cli.BoolFlag{
 					Name:  "once",
@@ -322,7 +365,28 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 				&cli.BoolFlag{
 					Name: "test",
 					Usage: "enable test mode: gather metrics, print them out, and exit. " +
-						"Note: Test mode only runs inputs, not processors, aggregators, or outputs",
+						"Note: Test mode only runs inputs, processors, and aggregators, but not outputs",
+				},
+				&cli.StringSliceFlag{
+					Name: "select",
+					Usage: "enable only plugins with labels matching the given key-value selection. " +
+						"If no selectors are provided, all plugins are enabled. Multiple key-value pairs " +
+						"in an option will be combined by AND, multiple options are combined by OR. " +
+						"Key and value are separated by an equal sign, multiple pairs are separated by " +
+						"semi-colon, values do accept wildcards.",
+				},
+				//
+				// Duration flags
+				&cli.DurationFlag{
+					Name: "watch-interval",
+					Usage: "Time duration to check for updates to config files specified by --config and " +
+						"--config-directory options. Use with '--watch-config poll'",
+					DefaultText: "disabled",
+				},
+				&cli.DurationFlag{
+					Name:        "config-url-watch-interval",
+					Usage:       "Time duration to check for updates to URL based configuration files",
+					DefaultText: "disabled",
 				},
 				// TODO: Change "deprecation-list, input-list, output-list" flags to become a subcommand "list" that takes
 				// "input,output,aggregator,processor, deprecated" as parameters
@@ -356,13 +420,13 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 					Usage: "DEPRECATED: path to directory containing external plugins",
 				},
 				// !!!
-			}, extraFlags...),
+			}, mainFlags...),
 		Action: action,
 		Commands: append([]*cli.Command{
 			{
 				Name:  "version",
 				Usage: "print current version to stdout",
-				Action: func(cCtx *cli.Context) error {
+				Action: func(*cli.Context) error {
 					fmt.Fprintf(outputBuffer, "%s\n", internal.FormatFullVersion())
 					return nil
 				},
@@ -372,8 +436,13 @@ func runApp(args []string, outputBuffer io.Writer, pprof Server, c TelegrafConfi
 
 	// Make sure we safely erase secrets
 	defer memguard.Purge()
+	defer logger.CloseLogging()
 
-	return app.Run(args)
+	if err := app.Run(args); err != nil {
+		log.Printf("E! %s", err)
+		return err
+	}
+	return nil
 }
 
 func main() {
@@ -383,8 +452,7 @@ func main() {
 	agent := Telegraf{}
 	pprof := NewPprofServer()
 	c := config.NewConfig()
-	err := runApp(os.Args, os.Stdout, pprof, c, &agent)
-	if err != nil {
-		log.Fatalf("E! %s", err)
+	if err := runApp(os.Args, os.Stdout, pprof, c, &agent); err != nil {
+		os.Exit(1)
 	}
 }

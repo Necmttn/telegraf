@@ -21,7 +21,7 @@ func TestSocketstat_Gather(t *testing.T) {
 		proto    []string
 		filename string
 		tags     []map[string]string
-		fields   [][]map[string]interface{}
+		fields   [][]map[string]any
 		err      error
 	}{
 		{
@@ -43,9 +43,9 @@ func TestSocketstat_Gather(t *testing.T) {
 				{"proto": "tcp", "local_addr": "192.168.122.1", "local_port": "55194", "remote_addr": "192.168.122.1", "remote_port": "6514"},
 				{"proto": "tcp", "local_addr": "127.0.0.1", "local_port": "7778", "remote_addr": "127.0.0.1", "remote_port": "50378"},
 			},
-			fields: [][]map[string]interface{}{
+			fields: [][]map[string]any{
 				{
-					map[string]interface{}{
+					map[string]any{
 						"state":          "ESTAB",
 						"bytes_acked":    uint64(1126),
 						"bytes_received": uint64(532644751),
@@ -58,7 +58,7 @@ func TestSocketstat_Gather(t *testing.T) {
 					},
 				},
 				{
-					map[string]interface{}{
+					map[string]any{
 						"state":          "ESTAB",
 						"bytes_acked":    uint64(790782896),
 						"bytes_received": uint64(1126),
@@ -71,7 +71,7 @@ func TestSocketstat_Gather(t *testing.T) {
 					},
 				},
 				{
-					map[string]interface{}{
+					map[string]any{
 						"state":          "ESTAB",
 						"bytes_acked":    uint64(19983121),
 						"bytes_received": uint64(266383),
@@ -94,10 +94,10 @@ func TestSocketstat_Gather(t *testing.T) {
 				{"proto": "udp", "local_addr": "10.10.0.4", "local_port": "54276", "remote_addr": "10.10.0.6", "remote_port": "53"},
 				{"proto": "udp", "local_addr": "10.10.0.4", "local_port": "38312", "remote_addr": "10.10.0.7", "remote_port": "53"},
 			},
-			fields: [][]map[string]interface{}{
-				{map[string]interface{}{"recv_q": uint64(0), "send_q": uint64(0)}},
-				{map[string]interface{}{"recv_q": uint64(0), "send_q": uint64(0)}},
-				{map[string]interface{}{"recv_q": uint64(0), "send_q": uint64(0)}},
+			fields: [][]map[string]any{
+				{map[string]any{"recv_q": uint64(0), "send_q": uint64(0)}},
+				{map[string]any{"recv_q": uint64(0), "send_q": uint64(0)}},
+				{map[string]any{"recv_q": uint64(0), "send_q": uint64(0)}},
 			},
 		},
 	}
@@ -116,7 +116,7 @@ func TestSocketstat_Gather(t *testing.T) {
 			if err != nil {
 				require.EqualError(t, err, "exec: \"ss\": executable file not found in $PATH")
 			}
-			ss.lister = func(cmdName string, proto string, timeout config.Duration) (*bytes.Buffer, error) {
+			ss.lister = func(string, string, config.Duration) (*bytes.Buffer, error) {
 				return bytes.NewBuffer(octets), nil
 			}
 
@@ -153,7 +153,7 @@ func TestSocketstat_Gather_listerError(t *testing.T) {
 	ss := &Socketstat{
 		SocketProto: []string{"foobar"},
 	}
-	ss.lister = func(cmdName string, proto string, timeout config.Duration) (*bytes.Buffer, error) {
+	ss.lister = func(string, string, config.Duration) (*bytes.Buffer, error) {
 		return new(bytes.Buffer), errFoo
 	}
 	acc := new(testutil.Accumulator)

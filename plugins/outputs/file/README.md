@@ -1,13 +1,19 @@
 # File Output Plugin
 
-This plugin writes telegraf metrics to files
+This plugin writes metrics to one or more local files in one of the supported
+[data formats][data_formats].
+
+⭐ Telegraf v0.10.3
+🏷️ system
+💻 all
+
+[data_formats]: /docs/DATA_FORMATS_OUTPUT.md
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

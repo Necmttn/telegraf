@@ -5,19 +5,20 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
+	common_gcp "github.com/influxdata/telegraf/plugins/common/gcp"
 	"github.com/influxdata/telegraf/plugins/outputs"
-	"github.com/influxdata/telegraf/plugins/serializers"
 )
 
 //go:embed sample.conf
@@ -44,7 +45,7 @@ type PubSub struct {
 
 	stubTopic func(id string) topic
 
-	serializer     serializers.Serializer
+	serializer     telegraf.Serializer
 	publishResults []publishResult
 	encoder        internal.ContentEncoder
 }
@@ -53,7 +54,7 @@ func (*PubSub) SampleConfig() string {
 	return sampleConfig
 }
 
-func (ps *PubSub) SetSerializer(serializer serializers.Serializer) {
+func (ps *PubSub) SetSerializer(serializer telegraf.Serializer) {
 	ps.serializer = serializer
 }
 
@@ -99,7 +100,11 @@ func (ps *PubSub) Write(metrics []telegraf.Metric) error {
 func (ps *PubSub) initPubSubClient() error {
 	var credsOpt option.ClientOption
 	if ps.CredentialsFile != "" {
-		credsOpt = option.WithCredentialsFile(ps.CredentialsFile)
+		credType, err := common_gcp.ParseCredentialType(ps.CredentialsFile)
+		if err != nil {
+			return fmt.Errorf("unable to parse credentials file type: %w", err)
+		}
+		credsOpt = option.WithAuthCredentialsFile(option.CredentialsType(credType), ps.CredentialsFile)
 	} else {
 		creds, err := google.FindDefaultCredentials(context.Background(), pubsub.ScopeCloudPlatform)
 		if err != nil {
@@ -127,7 +132,7 @@ func (ps *PubSub) refreshTopic() {
 	if ps.stubTopic != nil {
 		ps.t = ps.stubTopic(ps.Topic)
 	} else {
-		t := ps.c.Topic(ps.Topic)
+		t := ps.c.Publisher(ps.Topic)
 		ps.t = &topicWrapper{t}
 	}
 	ps.t.SetPublishSettings(ps.publishSettings())
@@ -258,11 +263,11 @@ func (ps *PubSub) waitForResults(ctx context.Context, cancel context.CancelFunc)
 
 func (ps *PubSub) Init() error {
 	if ps.Topic == "" {
-		return fmt.Errorf(`"topic" is required`)
+		return errors.New(`"topic" is required`)
 	}
 
 	if ps.Project == "" {
-		return fmt.Errorf(`"project" is required`)
+		return errors.New(`"project" is required`)
 	}
 
 	switch ps.ContentEncoding {

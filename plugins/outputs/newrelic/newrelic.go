@@ -4,9 +4,12 @@ package newrelic
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/newrelic/newrelic-telemetry-sdk-go/cumulative"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/plugins/outputs"
 )
 
@@ -27,10 +31,11 @@ type NewRelic struct {
 	Timeout      config.Duration `toml:"timeout"`
 	HTTPProxy    string          `toml:"http_proxy"`
 	MetricURL    string          `toml:"metric_url"`
+	LocalAddress string          `toml:"local_address"`
 
 	harvestor   *telemetry.Harvester
 	dc          *cumulative.DeltaCalculator
-	savedErrors map[int]interface{}
+	savedErrors map[int]any
 	errorCount  int
 	client      http.Client
 }
@@ -42,7 +47,7 @@ func (*NewRelic) SampleConfig() string {
 // Connect to the Output
 func (nr *NewRelic) Connect() error {
 	if nr.InsightsKey == "" {
-		return fmt.Errorf("InsightKey is a required for newrelic")
+		return errors.New("'insights_key' is a required for newrelic")
 	}
 	err := nr.initClient()
 	if err != nil {
@@ -56,13 +61,13 @@ func (nr *NewRelic) Connect() error {
 			cfg.ProductVersion = "1.0"
 			cfg.HarvestTimeout = time.Duration(nr.Timeout)
 			cfg.Client = &nr.client
-			cfg.ErrorLogger = func(e map[string]interface{}) {
-				var errorString string
+			cfg.ErrorLogger = func(e map[string]any) {
+				var b strings.Builder
 				for k, v := range e {
-					errorString += fmt.Sprintf("%s = %s ", k, v)
+					fmt.Fprintf(&b, "%s = %s ", k, v)
 				}
 				nr.errorCount++
-				nr.savedErrors[nr.errorCount] = errorString
+				nr.savedErrors[nr.errorCount] = b.String()
 			}
 			if nr.MetricURL != "" {
 				cfg.MetricsURLOverride = nr.MetricURL
@@ -86,11 +91,11 @@ func (nr *NewRelic) Close() error {
 // Write takes in group of points to be written to the Output
 func (nr *NewRelic) Write(metrics []telegraf.Metric) error {
 	nr.errorCount = 0
-	nr.savedErrors = make(map[int]interface{})
+	nr.savedErrors = make(map[int]any)
 
 	for _, metric := range metrics {
 		// create tag map
-		tags := make(map[string]interface{})
+		tags := make(map[string]any)
 		for _, tag := range metric.TagList() {
 			tags[tag.Key] = tag.Value
 		}
@@ -141,7 +146,7 @@ func (nr *NewRelic) Write(metrics []telegraf.Metric) error {
 	// using HarvestNow.
 	nr.harvestor.HarvestNow(context.Background())
 
-	//Check if we encountered errors
+	// Check if we encountered errors
 	if nr.errorCount != 0 {
 		return fmt.Errorf("unable to harvest metrics  %s ", nr.savedErrors[nr.errorCount])
 	}
@@ -157,18 +162,30 @@ func init() {
 }
 
 func (nr *NewRelic) initClient() error {
-	if nr.HTTPProxy == "" {
+	if nr.HTTPProxy == "" && nr.LocalAddress == "" {
 		nr.client = http.Client{}
 		return nil
 	}
 
-	proxyURL, err := url.Parse(nr.HTTPProxy)
-	if err != nil {
-		return err
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
 	}
 
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
+	if nr.HTTPProxy != "" {
+		proxyURL, err := url.Parse(nr.HTTPProxy)
+		if err != nil {
+			return err
+		}
+		transport.Proxy = http.ProxyURL(proxyURL)
+	}
+
+	if nr.LocalAddress != "" {
+		localAddr, err := internal.ResolveLocalTCPAddress(nr.LocalAddress)
+		if err != nil {
+			return err
+		}
+		dialer := &net.Dialer{LocalAddr: localAddr}
+		transport.DialContext = dialer.DialContext
 	}
 
 	nr.client = http.Client{

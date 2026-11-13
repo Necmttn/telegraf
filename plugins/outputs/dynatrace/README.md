@@ -1,19 +1,27 @@
 # Dynatrace Output Plugin
 
-This plugin sends Telegraf metrics to [Dynatrace](https://www.dynatrace.com) via
-the [Dynatrace Metrics API V2][api-v2]. It may be run alongside the Dynatrace
+This plugin writes metrics to [Dynatrace][dynatrace] via the
+[Dynatrace Metrics API V2][api-v2]. It may be run alongside the Dynatrace
 OneAgent for automatic authentication or it may be run standalone on a host
-without a OneAgent by specifying a URL and API Token.  More information on the
-plugin can be found in the [Dynatrace documentation][docs].  All metrics are
-reported as gauges, unless they are specified to be delta counters using the
-`additional_counters` config option (see below).  See the [Dynatrace Metrics
-ingestion protocol documentation][proto-docs] for details on the types defined
-there.
+without OneAgent by specifying a URL and API Token.
+
+ More information on the plugin can be found in the
+ [Dynatrace documentation][docs].
+
+ > [!NOTE]
+ > All metrics are reported as gauges, unless they are specified to be delta
+ > counters using the `additional_counters` or `additional_counters_patterns`
+ > config option (see below).
+ > See the [Dynatrace Metrics ingestion protocol documentation][proto-docs]
+ > for details on the types defined there.
+
+⭐ Telegraf v1.16.0
+🏷️ cloud, datastore
+💻 all
 
 [api-v2]: https://docs.dynatrace.com/docs/shortlink/api-metrics-v2
-
 [docs]: https://docs.dynatrace.com/docs/shortlink/telegraf
-
+[dynatrace]: https://www.dynatrace.com
 [proto-docs]: https://docs.dynatrace.com/docs/shortlink/metric-ingestion-protocol
 
 ## Requirements
@@ -83,27 +91,26 @@ The endpoint for the Dynatrace Metrics API v2 is
   url = "https://{your-environment-id}.live.dynatrace.com/api/v2/metrics/ingest"
 
   ## API token is required if a URL is specified and should be restricted to the 'Ingest metrics' scope
-  api_token = "your API token here" // hard-coded for illustration only, should be read from environment
+  api_token = "your API token here" # hard-coded for illustration only, should be read from environment
 ```
 
-You can learn more about how to use the Dynatrace API
-[here](https://docs.dynatrace.com/docs/shortlink/section-api).
+You can learn more about how to use the [Dynatrace API][api].
 
+[api]: https://docs.dynatrace.com/docs/shortlink/section-api
 [api-auth]: https://docs.dynatrace.com/docs/shortlink/api-authentication
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `api_token` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+This plugin supports secrets from secret stores for the `api_token` option.
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -143,6 +150,10 @@ to use them.
 
   ## If you want metrics to be treated and reported as delta counters, add the metric names here
   additional_counters = [ ]
+
+  ## In addition or as an alternative to additional_counters, if you want metrics to be treated and
+  ## reported as delta counters using regular expression pattern matching
+  additional_counters_patterns = [ ]
 
   ## NOTE: Due to the way TOML is parsed, tables must be at the END of the
   ## plugin definition, otherwise additional config options are read as part of
@@ -214,6 +225,18 @@ to this list.
 
 ```toml
 additional_counters = [ ]
+```
+
+### `additional_counters_patterns`
+
+*required*: `false`
+
+In addition or as an alternative to additional_counters, if you want a metric
+to be treated and reported as a delta counter using regular expression,
+add its pattern to this list.
+
+```toml
+additional_counters_patterns = [ ]
 ```
 
 ### `default_dimensions`

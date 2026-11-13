@@ -5,28 +5,31 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
+	common_gcp "github.com/influxdata/telegraf/plugins/common/gcp"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-type empty struct{}
-type semaphore chan empty
+var once sync.Once
 
-const defaultMaxUndeliveredMessages = 1000
-const defaultRetryDelaySeconds = 5
+const (
+	defaultMaxUndeliveredMessages = 1000
+	defaultRetryDelaySeconds      = 5
+)
 
 type PubSub struct {
 	sync.Mutex
@@ -67,16 +70,44 @@ type PubSub struct {
 	decoderMutex sync.Mutex
 }
 
+type (
+	empty     struct{}
+	semaphore chan empty
+)
+
 func (*PubSub) SampleConfig() string {
 	return sampleConfig
 }
 
-// Gather does nothing for this service input.
-func (ps *PubSub) Gather(_ telegraf.Accumulator) error {
+func (ps *PubSub) Init() error {
+	if ps.Subscription == "" {
+		return errors.New(`"subscription" is required`)
+	}
+
+	if ps.Project == "" {
+		return errors.New(`"project" is required`)
+	}
+
+	switch ps.ContentEncoding {
+	case "", "identity":
+		ps.ContentEncoding = "identity"
+	case "gzip":
+		var err error
+		var options []internal.DecodingOption
+		if ps.MaxDecompressionSize > 0 {
+			options = append(options, internal.WithMaxDecompressionSize(int64(ps.MaxDecompressionSize)))
+		}
+		ps.decoder, err = internal.NewContentDecoder(ps.ContentEncoding, options...)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("invalid value %q for content_encoding", ps.ContentEncoding)
+	}
+
 	return nil
 }
 
-// SetParser implements ParserInput interface.
 func (ps *PubSub) SetParser(parser telegraf.Parser) {
 	ps.parser = parser
 }
@@ -104,19 +135,20 @@ func (ps *PubSub) Start(ac telegraf.Accumulator) error {
 
 	ps.wg = &sync.WaitGroup{}
 	// Start goroutine to handle delivery notifications from accumulator.
-	ps.wg.Add(1)
-	go func() {
-		defer ps.wg.Done()
+	ps.wg.Go(func() {
 		ps.waitForDelivery(ctx)
-	}()
+	})
 
 	// Start goroutine for subscription receiver.
-	ps.wg.Add(1)
-	go func() {
-		defer ps.wg.Done()
+	ps.wg.Go(func() {
 		ps.receiveWithRetry(ctx)
-	}()
+	})
 
+	return nil
+}
+
+// Gather does nothing for this service input.
+func (*PubSub) Gather(telegraf.Accumulator) error {
 	return nil
 }
 
@@ -189,6 +221,11 @@ func (ps *PubSub) onMessage(ctx context.Context, msg message) error {
 
 	if len(metrics) == 0 {
 		msg.Ack()
+
+		once.Do(func() {
+			ps.Log.Debug(internal.NoMetricsCreatedMsg)
+		})
+
 		return nil
 	}
 
@@ -269,7 +306,11 @@ func (ps *PubSub) removeDelivered(id telegraf.TrackingID) message {
 func (ps *PubSub) getPubSubClient() (*pubsub.Client, error) {
 	var credsOpt option.ClientOption
 	if ps.CredentialsFile != "" {
-		credsOpt = option.WithCredentialsFile(ps.CredentialsFile)
+		credType, err := common_gcp.ParseCredentialType(ps.CredentialsFile)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse credential file type: %w", err)
+		}
+		credsOpt = option.WithAuthCredentialsFile(option.CredentialsType(credType), ps.CredentialsFile)
 	} else {
 		creds, err := google.FindDefaultCredentials(context.Background(), pubsub.ScopeCloudPlatform)
 		if err != nil {
@@ -297,7 +338,7 @@ func (ps *PubSub) getGCPSubscription(subID string) (subscription, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := client.Subscription(subID)
+	s := client.Subscriber(subID)
 	s.ReceiveSettings = pubsub.ReceiveSettings{
 		NumGoroutines:          ps.MaxReceiverGoRoutines,
 		MaxExtension:           time.Duration(ps.MaxExtension),
@@ -305,35 +346,6 @@ func (ps *PubSub) getGCPSubscription(subID string) (subscription, error) {
 		MaxOutstandingBytes:    ps.MaxOutstandingBytes,
 	}
 	return &gcpSubscription{s}, nil
-}
-
-func (ps *PubSub) Init() error {
-	if ps.Subscription == "" {
-		return fmt.Errorf(`"subscription" is required`)
-	}
-
-	if ps.Project == "" {
-		return fmt.Errorf(`"project" is required`)
-	}
-
-	switch ps.ContentEncoding {
-	case "", "identity":
-		ps.ContentEncoding = "identity"
-	case "gzip":
-		var err error
-		var options []internal.DecodingOption
-		if ps.MaxDecompressionSize > 0 {
-			options = append(options, internal.WithMaxDecompressionSize(int64(ps.MaxDecompressionSize)))
-		}
-		ps.decoder, err = internal.NewContentDecoder(ps.ContentEncoding, options...)
-		if err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("invalid value %q for content_encoding", ps.ContentEncoding)
-	}
-
-	return nil
 }
 
 func init() {

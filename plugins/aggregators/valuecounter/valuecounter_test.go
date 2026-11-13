@@ -9,8 +9,8 @@ import (
 	"github.com/influxdata/telegraf/testutil"
 )
 
-// Create a valuecounter with config
-func NewTestValueCounter(fields []string) telegraf.Aggregator {
+// Create a ValueCounter with config
+func newTestValueCounter(fields []string) telegraf.Aggregator {
 	vc := &ValueCounter{
 		Fields: fields,
 	}
@@ -21,7 +21,7 @@ func NewTestValueCounter(fields []string) telegraf.Aggregator {
 
 var m1 = metric.New("m1",
 	map[string]string{"foo": "bar"},
-	map[string]interface{}{
+	map[string]any{
 		"status": 200,
 		"foobar": "bar",
 	},
@@ -30,7 +30,7 @@ var m1 = metric.New("m1",
 
 var m2 = metric.New("m1",
 	map[string]string{"foo": "bar"},
-	map[string]interface{}{
+	map[string]any{
 		"status":    "OK",
 		"ignoreme":  "string",
 		"andme":     true,
@@ -40,7 +40,7 @@ var m2 = metric.New("m1",
 )
 
 func BenchmarkApply(b *testing.B) {
-	vc := NewTestValueCounter([]string{"status"})
+	vc := newTestValueCounter([]string{"status"})
 
 	for n := 0; n < b.N; n++ {
 		vc.Add(m1)
@@ -50,7 +50,7 @@ func BenchmarkApply(b *testing.B) {
 
 // Test basic functionality
 func TestBasic(t *testing.T) {
-	vc := NewTestValueCounter([]string{"status"})
+	vc := newTestValueCounter([]string{"status"})
 	acc := testutil.Accumulator{}
 
 	vc.Add(m1)
@@ -58,7 +58,7 @@ func TestBasic(t *testing.T) {
 	vc.Add(m1)
 	vc.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"status_200": 2,
 		"status_OK":  1,
 	}
@@ -70,7 +70,7 @@ func TestBasic(t *testing.T) {
 
 // Test with multiple fields to count
 func TestMultipleFields(t *testing.T) {
-	vc := NewTestValueCounter([]string{"status", "somefield", "boolfield"})
+	vc := newTestValueCounter([]string{"status", "somefield", "boolfield"})
 	acc := testutil.Accumulator{}
 
 	vc.Add(m1)
@@ -79,7 +79,7 @@ func TestMultipleFields(t *testing.T) {
 	vc.Add(m1)
 	vc.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"status_200":      2,
 		"status_OK":       2,
 		"boolfield_false": 2,
@@ -92,7 +92,7 @@ func TestMultipleFields(t *testing.T) {
 
 // Test with a reset between two runs
 func TestWithReset(t *testing.T) {
-	vc := NewTestValueCounter([]string{"status"})
+	vc := newTestValueCounter([]string{"status"})
 	acc := testutil.Accumulator{}
 
 	vc.Add(m1)
@@ -100,7 +100,7 @@ func TestWithReset(t *testing.T) {
 	vc.Add(m2)
 	vc.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"status_200": 2,
 		"status_OK":  1,
 	}
@@ -117,7 +117,7 @@ func TestWithReset(t *testing.T) {
 	vc.Add(m1)
 	vc.Push(&acc)
 
-	expectedFields = map[string]interface{}{
+	expectedFields = map[string]any{
 		"status_200": 1,
 		"status_OK":  2,
 	}

@@ -14,29 +14,16 @@ import (
 	"github.com/influxdata/telegraf/internal/choice"
 	"github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/inputs"
-	jsonparser "github.com/influxdata/telegraf/plugins/parsers/json"
+	parsers_json "github.com/influxdata/telegraf/plugins/parsers/json"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-const suffixInfo = "/"
-const suffixStats = "/stats"
-
-type Info struct {
-	Beat     string `json:"beat"`
-	Hostname string `json:"hostname"`
-	Name     string `json:"name"`
-	UUID     string `json:"uuid"`
-	Version  string `json:"version"`
-}
-
-type Stats struct {
-	Beat     map[string]interface{} `json:"beat"`
-	FileBeat interface{}            `json:"filebeat"`
-	Libbeat  interface{}            `json:"libbeat"`
-	System   interface{}            `json:"system"`
-}
+const (
+	suffixInfo  = "/"
+	suffixStats = "/stats"
+)
 
 type Beat struct {
 	URL string `toml:"url"`
@@ -54,14 +41,19 @@ type Beat struct {
 	client *http.Client
 }
 
-func NewBeat() *Beat {
-	return &Beat{
-		URL:      "http://127.0.0.1:5066",
-		Includes: []string{"beat", "libbeat", "filebeat"},
-		Method:   "GET",
-		Headers:  make(map[string]string),
-		Timeout:  config.Duration(time.Second * 5),
-	}
+type info struct {
+	Beat     string `json:"beat"`
+	Hostname string `json:"hostname"`
+	Name     string `json:"name"`
+	UUID     string `json:"uuid"`
+	Version  string `json:"version"`
+}
+
+type stats struct {
+	Beat     map[string]any `json:"beat"`
+	FileBeat any            `json:"filebeat"`
+	LibBeat  any            `json:"libbeat"`
+	System   any            `json:"system"`
 }
 
 func (*Beat) SampleConfig() string {
@@ -86,53 +78,9 @@ func (beat *Beat) Init() error {
 	return nil
 }
 
-// createHTTPClient create a clients to access API
-func (beat *Beat) createHTTPClient() (*http.Client, error) {
-	tlsConfig, err := beat.ClientConfig.TLSConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-		Timeout: time.Duration(beat.Timeout),
-	}
-
-	return client, nil
-}
-
-// gatherJSONData query the data source and parse the response JSON
-func (beat *Beat) gatherJSONData(address string, value interface{}) error {
-	request, err := http.NewRequest(beat.Method, address, nil)
-	if err != nil {
-		return err
-	}
-
-	if beat.Username != "" {
-		request.SetBasicAuth(beat.Username, beat.Password)
-	}
-	for k, v := range beat.Headers {
-		request.Header.Add(k, v)
-	}
-	if beat.HostHeader != "" {
-		request.Host = beat.HostHeader
-	}
-
-	response, err := beat.client.Do(request)
-	if err != nil {
-		return err
-	}
-
-	defer response.Body.Close()
-
-	return json.NewDecoder(response.Body).Decode(value)
-}
-
 func (beat *Beat) Gather(accumulator telegraf.Accumulator) error {
-	beatStats := &Stats{}
-	beatInfo := &Info{}
+	beatStats := &stats{}
+	beatInfo := &info{}
 
 	infoURL, err := url.Parse(beat.URL + suffixInfo)
 	if err != nil {
@@ -161,7 +109,7 @@ func (beat *Beat) Gather(accumulator telegraf.Accumulator) error {
 	}
 
 	for _, name := range beat.Includes {
-		var stats interface{}
+		var stats any
 		var metric string
 
 		switch name {
@@ -175,12 +123,12 @@ func (beat *Beat) Gather(accumulator telegraf.Accumulator) error {
 			stats = beatStats.System
 			metric = "beat_system"
 		case "libbeat":
-			stats = beatStats.Libbeat
+			stats = beatStats.LibBeat
 			metric = "beat_libbeat"
 		default:
 			return fmt.Errorf("unknown stats-type %q", name)
 		}
-		flattener := jsonparser.JSONFlattener{}
+		flattener := parsers_json.JSONFlattener{}
 		err := flattener.FullFlattenJSON("", stats, true, true)
 		if err != nil {
 			return err
@@ -191,8 +139,62 @@ func (beat *Beat) Gather(accumulator telegraf.Accumulator) error {
 	return nil
 }
 
+// createHTTPClient create a clients to access API
+func (beat *Beat) createHTTPClient() (*http.Client, error) {
+	tlsConfig, err := beat.ClientConfig.TLSConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+		Timeout: time.Duration(beat.Timeout),
+	}
+
+	return client, nil
+}
+
+// gatherJSONData query the data source and parse the response JSON
+func (beat *Beat) gatherJSONData(address string, value any) error {
+	request, err := http.NewRequest(beat.Method, address, nil)
+	if err != nil {
+		return err
+	}
+
+	if beat.Username != "" {
+		request.SetBasicAuth(beat.Username, beat.Password)
+	}
+	for k, v := range beat.Headers {
+		request.Header.Add(k, v)
+	}
+	if beat.HostHeader != "" {
+		request.Host = beat.HostHeader
+	}
+
+	response, err := beat.client.Do(request)
+	if err != nil {
+		return err
+	}
+
+	defer response.Body.Close()
+
+	return json.NewDecoder(response.Body).Decode(value)
+}
+
+func newBeat() *Beat {
+	return &Beat{
+		URL:      "http://127.0.0.1:5066",
+		Includes: []string{"beat", "libbeat", "filebeat"},
+		Method:   "GET",
+		Headers:  make(map[string]string),
+		Timeout:  config.Duration(time.Second * 5),
+	}
+}
+
 func init() {
 	inputs.Add("beat", func() telegraf.Input {
-		return NewBeat()
+		return newBeat()
 	})
 }

@@ -19,13 +19,12 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
+const defaultTimeout = 5 * time.Second
+
 type Powerdns struct {
-	UnixSockets []string
-
-	Log telegraf.Logger `toml:"-"`
+	UnixSockets []string        `toml:"unix_sockets"`
+	Log         telegraf.Logger `toml:"-"`
 }
-
-var defaultTimeout = 5 * time.Second
 
 func (*Powerdns) SampleConfig() string {
 	return sampleConfig
@@ -96,8 +95,8 @@ func (p *Powerdns) gatherServer(address string, acc telegraf.Accumulator) error 
 	return nil
 }
 
-func (p *Powerdns) parseResponse(metrics string) map[string]interface{} {
-	values := make(map[string]interface{})
+func (p *Powerdns) parseResponse(metrics string) map[string]any {
+	values := make(map[string]any)
 
 	s := strings.Split(metrics, ",")
 

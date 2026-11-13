@@ -2,19 +2,22 @@
 package exec
 
 import (
+	"bufio"
 	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/kballard/go-shellquote"
+
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/models"
 	"github.com/influxdata/telegraf/plugins/inputs"
 	"github.com/influxdata/telegraf/plugins/parsers/nagios"
@@ -23,44 +26,237 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-const MaxStderrBytes int = 512
+var once sync.Once
 
-type exitcodeHandlerFunc func([]telegraf.Metric, error, []byte) []telegraf.Metric
+const maxStderrBytes int = 512
 
 type Exec struct {
-	Commands    []string        `toml:"commands"`
+	Commands    []any           `toml:"commands"`
 	Command     string          `toml:"command"`
 	Environment []string        `toml:"environment"`
+	IgnoreError bool            `toml:"ignore_error"`
+	LogStdErr   bool            `toml:"log_stderr"`
 	Timeout     config.Duration `toml:"timeout"`
 	Log         telegraf.Logger `toml:"-"`
 
 	parser telegraf.Parser
 
-	runner Runner
+	runner runner
+	cmds   [][]string
 
-	// Allow post processing of command exit codes
-	exitcodeHandler   exitcodeHandlerFunc
+	// Allow post-processing of command exit codes
+	exitCodeHandler   exitCodeHandlerFunc
 	parseDespiteError bool
 }
 
-func NewExec() *Exec {
-	return &Exec{
-		runner:  CommandRunner{},
-		Timeout: config.Duration(time.Second * 5),
+type exitCodeHandlerFunc func([]telegraf.Metric, error, []byte) []telegraf.Metric
+
+type runner interface {
+	run([]string) ([]byte, []byte, error)
+}
+
+type commandRunner struct {
+	environment []string
+	timeout     time.Duration
+	debug       bool
+}
+
+func (*Exec) SampleConfig() string {
+	return sampleConfig
+}
+
+func (e *Exec) Init() error {
+	// Legacy single command support
+	if e.Command != "" {
+		e.Commands = append(e.Commands, e.Command)
+	}
+
+	if len(e.Commands) == 0 {
+		return errors.New("no command specified")
+	}
+
+	e.cmds = make([][]string, 0, len(e.Commands))
+	for _, raw := range e.Commands {
+		switch c := raw.(type) {
+		case string:
+			// Legacy single string command setting
+			if c == "" {
+				return errors.New("command string cannot be empty")
+			}
+
+			// Convert the legacy command string to a string list and output
+			// deprecation notice
+			cmd, err := shellquote.Split(c)
+			if err != nil {
+				return fmt.Errorf("unable to parse command %q: %w", c, err)
+			}
+			if len(cmd) == 0 {
+				return errors.New("command cannot be empty")
+			}
+			// Create the corresponding command in the new syntax to ease migration
+			suggestion := make([]string, 0, len(cmd))
+			for _, a := range cmd {
+				suggestion = append(suggestion, strconv.Quote(a))
+			}
+			config.PrintOptionValueDeprecationNotice("inputs.exec", "command", c, telegraf.DeprecationInfo{
+				Since:     "1.39.0",
+				RemovalIn: "1.45.0",
+				Notice:    fmt.Sprintf("Use array syntax instead: [%s]", strings.Join(suggestion, ",")),
+			})
+			e.cmds = append(e.cmds, cmd)
+		case []string:
+			if len(c) == 0 {
+				return errors.New("command cannot be empty")
+			}
+			e.cmds = append(e.cmds, c)
+		case []any:
+			if len(c) == 0 {
+				return errors.New("command cannot be empty")
+			}
+
+			// Convert the entries to a string list
+			converted := make([]string, 0, len(c))
+			for _, r := range c {
+				v, ok := r.(string)
+				if !ok {
+					return fmt.Errorf("command %v has invalid entry %v of type %T, expected string", raw, r, r)
+				}
+				converted = append(converted, v)
+			}
+			e.cmds = append(e.cmds, converted)
+		default:
+			return fmt.Errorf("command %v has invalid type %T, expected string list", raw, raw)
+		}
+	}
+
+	e.runner = &commandRunner{
+		environment: e.Environment,
+		timeout:     time.Duration(e.Timeout),
+		debug:       e.Log.Level().Includes(telegraf.Debug),
+	}
+
+	return nil
+}
+
+func (e *Exec) SetParser(parser telegraf.Parser) {
+	e.parser = parser
+	unwrapped, ok := parser.(*models.RunningParser)
+	if ok {
+		if _, ok := unwrapped.Parser.(*nagios.Parser); ok {
+			e.exitCodeHandler = func(metrics []telegraf.Metric, err error, msg []byte) []telegraf.Metric {
+				return nagios.AddState(err, msg, metrics)
+			}
+			e.parseDespiteError = true
+		}
 	}
 }
 
-type Runner interface {
-	Run(string, []string, time.Duration) ([]byte, []byte, error)
+func (e *Exec) Gather(acc telegraf.Accumulator) error {
+	commands := e.updateRunners()
+
+	var wg sync.WaitGroup
+	for _, item := range commands {
+		wg.Add(1)
+		go func(c []string) {
+			defer wg.Done()
+			acc.AddError(e.processCommand(acc, c))
+		}(item)
+	}
+	wg.Wait()
+	return nil
 }
 
-type CommandRunner struct{}
+func (e *Exec) updateRunners() [][]string {
+	commands := make([][]string, 0, len(e.cmds))
+	for _, cmd := range e.cmds {
+		// Try to expand globbing expressions
+		matches, err := filepath.Glob(cmd[0])
+		if err != nil {
+			e.Log.Errorf("Matching command %q failed: %v", cmd[0], err)
+			continue
+		}
 
-func (c CommandRunner) truncate(buf bytes.Buffer) bytes.Buffer {
+		if len(matches) == 0 {
+			// There were no matches with the glob pattern, so let's assume
+			// the command is in PATH and just run it as it is
+			commands = append(commands, cmd)
+		} else {
+			// There were matches, so we'll append each match together with
+			// the arguments to the commands slice
+			for _, match := range matches {
+				expanded := make([]string, 0, len(cmd))
+				expanded = append(expanded, match)
+				expanded = append(expanded, cmd[1:]...)
+				commands = append(commands, expanded)
+			}
+		}
+	}
+
+	return commands
+}
+
+func (e *Exec) processCommand(acc telegraf.Accumulator, cmd []string) error {
+	out, errBuf, runErr := e.runner.run(cmd)
+	if !e.IgnoreError && !e.parseDespiteError && runErr != nil {
+		return fmt.Errorf("exec: %w for command %q: %s", runErr, strings.Join(cmd, " "), string(errBuf))
+	}
+
+	// Log output in stderr
+	if e.LogStdErr && len(errBuf) > 0 {
+		scanner := bufio.NewScanner(bytes.NewBuffer(errBuf))
+
+		for scanner.Scan() {
+			msg := scanner.Text()
+			switch {
+			case strings.TrimSpace(msg) == "":
+				continue
+			case strings.HasPrefix(msg, "E! "):
+				e.Log.Error(msg[3:])
+			case strings.HasPrefix(msg, "W! "):
+				e.Log.Warn(msg[3:])
+			case strings.HasPrefix(msg, "I! "):
+				e.Log.Info(msg[3:])
+			case strings.HasPrefix(msg, "D! "):
+				e.Log.Debug(msg[3:])
+			case strings.HasPrefix(msg, "T! "):
+				e.Log.Trace(msg[3:])
+			default:
+				e.Log.Error(msg)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			acc.AddError(fmt.Errorf("error reading stderr: %w", err))
+		}
+	}
+
+	metrics, err := e.parser.Parse(out)
+	if err != nil {
+		return err
+	}
+
+	if len(metrics) == 0 {
+		once.Do(func() {
+			e.Log.Debug(internal.NoMetricsCreatedMsg)
+		})
+	}
+
+	if e.exitCodeHandler != nil {
+		metrics = e.exitCodeHandler(metrics, runErr, errBuf)
+	}
+
+	for _, m := range metrics {
+		acc.AddMetric(m)
+	}
+
+	return nil
+}
+
+func truncate(buf *bytes.Buffer) {
 	// Limit the number of bytes.
 	didTruncate := false
-	if buf.Len() > MaxStderrBytes {
-		buf.Truncate(MaxStderrBytes)
+	if buf.Len() > maxStderrBytes {
+		buf.Truncate(maxStderrBytes)
 		didTruncate = true
 	}
 	if i := bytes.IndexByte(buf.Bytes(), '\n'); i > 0 {
@@ -73,125 +269,12 @@ func (c CommandRunner) truncate(buf bytes.Buffer) bytes.Buffer {
 	if didTruncate {
 		buf.WriteString("...")
 	}
-	return buf
-}
-
-// removeWindowsCarriageReturns removes all carriage returns from the input if the
-// OS is Windows. It does not return any errors.
-func removeWindowsCarriageReturns(b bytes.Buffer) bytes.Buffer {
-	if runtime.GOOS == "windows" {
-		var buf bytes.Buffer
-		for {
-			byt, err := b.ReadBytes(0x0D)
-			byt = bytes.TrimRight(byt, "\x0d")
-			if len(byt) > 0 {
-				buf.Write(byt)
-			}
-			if errors.Is(err, io.EOF) {
-				return buf
-			}
-		}
-	}
-	return b
-}
-
-func (*Exec) SampleConfig() string {
-	return sampleConfig
-}
-
-func (e *Exec) ProcessCommand(command string, acc telegraf.Accumulator, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	out, errBuf, runErr := e.runner.Run(command, e.Environment, time.Duration(e.Timeout))
-	if !e.parseDespiteError && runErr != nil {
-		err := fmt.Errorf("exec: %w for command %q: %s", runErr, command, string(errBuf))
-		acc.AddError(err)
-		return
-	}
-
-	metrics, err := e.parser.Parse(out)
-	if err != nil {
-		acc.AddError(err)
-		return
-	}
-
-	if e.exitcodeHandler != nil {
-		metrics = e.exitcodeHandler(metrics, runErr, errBuf)
-	}
-
-	for _, m := range metrics {
-		acc.AddMetric(m)
-	}
-}
-
-func (e *Exec) SetParser(parser telegraf.Parser) {
-	e.parser = parser
-	unwrapped, ok := parser.(*models.RunningParser)
-	if ok {
-		if _, ok := unwrapped.Parser.(*nagios.Parser); ok {
-			e.exitcodeHandler = nagiosHandler
-			e.parseDespiteError = true
-		}
-	}
-}
-
-func (e *Exec) Gather(acc telegraf.Accumulator) error {
-	var wg sync.WaitGroup
-	// Legacy single command support
-	if e.Command != "" {
-		e.Commands = append(e.Commands, e.Command)
-		e.Command = ""
-	}
-
-	commands := make([]string, 0, len(e.Commands))
-	for _, pattern := range e.Commands {
-		cmdAndArgs := strings.SplitN(pattern, " ", 2)
-		if len(cmdAndArgs) == 0 {
-			continue
-		}
-
-		matches, err := filepath.Glob(cmdAndArgs[0])
-		if err != nil {
-			acc.AddError(err)
-			continue
-		}
-
-		if len(matches) == 0 {
-			// There were no matches with the glob pattern, so let's assume
-			// that the command is in PATH and just run it as it is
-			commands = append(commands, pattern)
-		} else {
-			// There were matches, so we'll append each match together with
-			// the arguments to the commands slice
-			for _, match := range matches {
-				if len(cmdAndArgs) == 1 {
-					commands = append(commands, match)
-				} else {
-					commands = append(commands,
-						strings.Join([]string{match, cmdAndArgs[1]}, " "))
-				}
-			}
-		}
-	}
-
-	wg.Add(len(commands))
-	for _, command := range commands {
-		go e.ProcessCommand(command, acc, &wg)
-	}
-	wg.Wait()
-	return nil
-}
-
-func (e *Exec) Init() error {
-	return nil
-}
-
-func nagiosHandler(metrics []telegraf.Metric, err error, msg []byte) []telegraf.Metric {
-	return nagios.AddState(err, msg, metrics)
 }
 
 func init() {
 	inputs.Add("exec", func() telegraf.Input {
-		return NewExec()
+		return &Exec{
+			Timeout: config.Duration(5 * time.Second),
+		}
 	})
 }

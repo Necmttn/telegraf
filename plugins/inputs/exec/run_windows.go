@@ -4,50 +4,50 @@ package exec
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
+	"io"
 	"os"
-	osExec "os/exec"
+	"os/exec"
 	"syscall"
-	"time"
 
-	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/internal"
-	"github.com/kballard/go-shellquote"
 )
 
-func (c CommandRunner) Run(
-	command string,
-	environments []string,
-	timeout time.Duration,
-) ([]byte, []byte, error) {
-	splitCmd, err := shellquote.Split(command)
-	if err != nil || len(splitCmd) == 0 {
-		return nil, nil, fmt.Errorf("exec: unable to parse command: %w", err)
-	}
-
-	cmd := osExec.Command(splitCmd[0], splitCmd[1:]...)
+func (c *commandRunner) run(splitCmd []string) (out, errout []byte, err error) {
+	cmd := exec.Command(splitCmd[0], splitCmd[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
 
-	if len(environments) > 0 {
-		cmd.Env = append(os.Environ(), environments...)
+	if len(c.environment) > 0 {
+		cmd.Env = append(os.Environ(), c.environment...)
 	}
 
-	var (
-		out    bytes.Buffer
-		stderr bytes.Buffer
-	)
-	cmd.Stdout = &out
+	var outbuf, stderr bytes.Buffer
+	cmd.Stdout = &outbuf
 	cmd.Stderr = &stderr
 
-	runErr := internal.RunTimeout(cmd, timeout)
+	runErr := internal.RunTimeout(cmd, c.timeout)
 
-	out = removeWindowsCarriageReturns(out)
-	if stderr.Len() > 0 && !telegraf.Debug {
-		stderr = removeWindowsCarriageReturns(stderr)
-		stderr = c.truncate(stderr)
+	outbuf = removeWindowsCarriageReturns(outbuf)
+	stderr = removeWindowsCarriageReturns(stderr)
+	if stderr.Len() > 0 && !c.debug {
+		truncate(&stderr)
 	}
 
-	return out.Bytes(), stderr.Bytes(), runErr
+	return outbuf.Bytes(), stderr.Bytes(), runErr
+}
+
+func removeWindowsCarriageReturns(b bytes.Buffer) bytes.Buffer {
+	var buf bytes.Buffer
+	for {
+		byt, err := b.ReadBytes(0x0D)
+		byt = bytes.TrimRight(byt, "\x0d")
+		if len(byt) > 0 {
+			buf.Write(byt)
+		}
+		if errors.Is(err, io.EOF) {
+			return buf
+		}
+	}
 }

@@ -1,6 +1,12 @@
 # Amazon CloudWatch Output Plugin
 
-This plugin will send metrics to Amazon CloudWatch.
+This plugin writes metrics to the [Amazon CloudWatch][cloudwatch] service.
+
+⭐ Telegraf v0.10.1
+🏷️ cloud
+💻 all
+
+[cloudwatch]: https://aws.amazon.com/cloudwatch
 
 ## Amazon Authentication
 
@@ -29,10 +35,9 @@ The IAM user needs only the `cloudwatch:PutMetricData` permission.
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -46,25 +51,24 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
   ## Amazon Credentials
   ## Credentials are loaded in the following order
-  ## 1) Web identity provider credentials via STS if role_arn and web_identity_token_file are specified
+  ## 1) Web identity provider credentials via STS if role_arn and
+  ##    web_identity_token_file are specified
   ## 2) Assumed credentials via STS if role_arn is specified
   ## 3) explicit credentials from 'access_key' and 'secret_key'
   ## 4) shared profile from 'profile'
   ## 5) environment variables
   ## 6) shared credentials file
   ## 7) EC2 Instance Profile
-  #access_key = ""
-  #secret_key = ""
-  #token = ""
-  #role_arn = ""
-  #web_identity_token_file = ""
-  #role_session_name = ""
-  #profile = ""
-  #shared_credential_file = ""
+  # access_key = ""
+  # secret_key = ""
+  # token = ""
+  # role_arn = ""
+  # web_identity_token_file = ""
+  # role_session_name = ""
+  # profile = ""
+  # shared_credential_file = ""
 
-  ## Endpoint to make request against, the correct endpoint is automatically
-  ## determined and this option should only be set if you wish to override the
-  ## default.
+  ## Override the auto-detected endpoint to make request against
   ##   ex: endpoint_url = "http://localhost:8000"
   # endpoint_url = ""
 
@@ -72,19 +76,31 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   # use_system_proxy = false
   # http_proxy_url = "http://localhost:8888"
 
+  ## Local address to bind when connecting to the server
+  ## If empty or not set, the local address is automatically chosen.
+  # local_address = ""
+
   ## Namespace for the CloudWatch MetricDatums
   namespace = "InfluxData/Telegraf"
 
-  ## If you have a large amount of metrics, you should consider to send statistic
-  ## values instead of raw metrics which could not only improve performance but
-  ## also save AWS API cost. If enable this flag, this plugin would parse the required
-  ## CloudWatch statistic fields (count, min, max, and sum) and send them to CloudWatch.
-  ## You could use basicstats aggregator to calculate those fields. If not all statistic
-  ## fields are available, all fields would still be sent as raw metrics.
+  ## If you have a large amount of metrics, you should consider to send
+  ## statistic values instead of raw metrics which could not only improve
+  ## performance but also save AWS API cost. If enable this flag, this plugin
+  ## would parse the required CloudWatch statistic fields (count, min, max, and
+  ## sum) and send them to CloudWatch. You could use basicstats aggregator to
+  ## calculate those fields. If not all statistic fields are available, all
+  ## fields would still be sent as raw metrics.
   # write_statistics = false
 
-  ## Enable high resolution metrics of 1 second (if not enabled, standard resolution are of 60 seconds precision)
+  ## Enable high resolution metrics of 1 second (if not enabled, standard
+  ## resolution are of 60 seconds precision)
   # high_resolution_metrics = false
+
+  ## Maximum number of dimensions to include in the metric
+  ## The default is ten for backward compatibility but Cloudwatch supports
+  ## up to 30 dimensions in a metric according to
+  ## https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/publishingMetrics.html#usingDimensions
+  # max_dimensions = 10
 ```
 
 For this output plugin to function correctly the following variables must be

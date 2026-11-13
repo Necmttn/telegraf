@@ -1,28 +1,20 @@
 # Tail Input Plugin
 
-The tail plugin "tails" a logfile and parses each log message.
+This service plugin continuously reads a file and parses new data as it arrives
+similar to the [tail -f command][tail]. The incoming messages are expected to be
+in one of the supported [data formats][data_formats].
 
-By default, the tail plugin acts like the following unix tail command:
+⭐ Telegraf v1.1.2
+🏷️ logging
+💻 all
 
-```shell
-tail -F --lines=0 myfile.log
-```
-
-- `-F` means that it will follow the _name_ of the given file, so
-that it will be compatible with log-rotated files, and that it will retry on
-inaccessible files.
-- `--lines=0` means that it will start at the end of the file (unless
-the `from_beginning` option is set).
-
-see <http://man7.org/linux/man-pages/man1/tail.1.html> for more details.
-
-The plugin expects messages in one of the [Telegraf Input Data
-Formats](../../../docs/DATA_FORMATS_INPUT.md).
+[tail]: https://man7.org/linux/man-pages/man1/tail.1.html
+[data_formats]: /docs/DATA_FORMATS_INPUT.md
 
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -30,12 +22,19 @@ normal plugins:
 2. The CLI options of `--test`, `--test-wait`, and `--once` may not produce
    output for this plugin
 
+## Tracking metric support <!-- @/docs/includes/plugin_tracking_metrics.md -->
+
+This plugin supports [tracking metrics][METRICS.md], which allows the plugin
+to be notified when metrics have been delivered to all outputs, enabling proper
+acknowledgment back to the source.
+
+[METRICS.md]: ../../../docs/METRICS.md#tracking-metrics
+
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -56,13 +55,20 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ##
   files = ["/var/mymetrics.out"]
 
-  ## Read file from beginning.
-  # from_beginning = false
+  ## Offset to start reading at
+  ## The following methods are available:
+  ##   beginning          -- start reading from the beginning of the file ignoring any persisted offset
+  ##   end                -- start reading from the end of the file ignoring any persisted offset
+  ##   saved-or-beginning -- use the persisted offset of the file or, if no offset persisted, start from the beginning of the file
+  ##   saved-or-end       -- use the persisted offset of the file or, if no offset persisted, start from the end of the file
+  # initial_read_offset = "saved-or-end"
 
   ## Whether file is a named pipe
   # pipe = false
 
   ## Method used to watch for file updates.  Can be either "inotify" or "poll".
+  ## inotify is supported on linux, *bsd, and macOS, while Windows requires
+  ## using poll. Poll checks for changes every 250ms.
   # watch_method = "inotify"
 
   ## Maximum lines of the file to process that have not yet be written by the

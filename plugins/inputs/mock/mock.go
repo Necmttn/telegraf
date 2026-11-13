@@ -3,6 +3,7 @@ package mock
 
 import (
 	_ "embed"
+	"maps"
 	"math"
 	"math/rand"
 	"time"
@@ -29,8 +30,8 @@ type Mock struct {
 }
 
 type constant struct {
-	Name  string      `toml:"name"`
-	Value interface{} `toml:"value"`
+	Name  string `toml:"name"`
+	Value any    `toml:"value"`
 }
 
 type random struct {
@@ -43,25 +44,27 @@ type sineWave struct {
 	Name      string  `toml:"name"`
 	Amplitude float64 `toml:"amplitude"`
 	Period    float64 `toml:"period"`
+	Phase     float64 `toml:"phase"`
+	BaseLine  float64 `toml:"base_line"`
 }
 
 type step struct {
-	latest float64
-
 	Name  string  `toml:"name"`
 	Start float64 `toml:"start"`
 	Step  float64 `toml:"step"`
 
-	Min float64 `toml:"min" deprecated:"1.28.2;use 'start' instead"`
-	Max float64 `toml:"max" deprecated:"1.28.2;use 'step' instead"`
+	Min float64 `toml:"min" deprecated:"1.28.2;1.35.0;use 'start' instead"`
+	Max float64 `toml:"max" deprecated:"1.28.2;1.35.0;use 'step' instead"`
+
+	latest float64
 }
 
 type stock struct {
-	latest float64
-
 	Name       string  `toml:"name"`
 	Price      float64 `toml:"price"`
 	Volatility float64 `toml:"volatility"`
+
+	latest float64
 }
 
 func (*Mock) SampleConfig() string {
@@ -85,7 +88,7 @@ func (m *Mock) Init() error {
 }
 
 func (m *Mock) Gather(acc telegraf.Accumulator) error {
-	fields := make(map[string]interface{})
+	fields := make(map[string]any)
 	m.generateRandomFloat64(fields)
 	m.generateStockPrice(fields)
 	m.generateSineWave(fields)
@@ -95,10 +98,7 @@ func (m *Mock) Gather(acc telegraf.Accumulator) error {
 		fields[c.Name] = c.Value
 	}
 
-	tags := make(map[string]string)
-	for key, value := range m.Tags {
-		tags[key] = value
-	}
+	tags := maps.Clone(m.Tags)
 
 	acc.AddFields(m.MetricName, fields, tags)
 
@@ -108,21 +108,21 @@ func (m *Mock) Gather(acc telegraf.Accumulator) error {
 }
 
 // Generate random value between min and max, inclusively
-func (m *Mock) generateRandomFloat64(fields map[string]interface{}) {
+func (m *Mock) generateRandomFloat64(fields map[string]any) {
 	for _, random := range m.Random {
 		fields[random.Name] = random.Min + m.rand.Float64()*(random.Max-random.Min)
 	}
 }
 
 // Create sine waves
-func (m *Mock) generateSineWave(fields map[string]interface{}) {
+func (m *Mock) generateSineWave(fields map[string]any) {
 	for _, field := range m.SineWave {
-		fields[field.Name] = math.Sin(float64(m.counter)*field.Period*math.Pi) * field.Amplitude
+		fields[field.Name] = math.Sin((float64(m.counter)+field.Phase)*field.Period*math.Pi)*field.Amplitude + field.BaseLine
 	}
 }
 
 // Begin at start value and then add step value every tick
-func (m *Mock) generateStep(fields map[string]interface{}) {
+func (m *Mock) generateStep(fields map[string]any) {
 	for _, step := range m.Step {
 		if m.counter == 0 {
 			step.latest = step.Start
@@ -135,7 +135,7 @@ func (m *Mock) generateStep(fields map[string]interface{}) {
 }
 
 // Begin at start price and then generate random value
-func (m *Mock) generateStockPrice(fields map[string]interface{}) {
+func (m *Mock) generateStockPrice(fields map[string]any) {
 	for _, stock := range m.Stock {
 		if stock.latest == 0.0 {
 			stock.latest = stock.Price

@@ -15,7 +15,7 @@ new features are held for the next minor release. Users can view what
 [GitHub milestones][] a PR belongs to to determine the release it will go out
 with.
 
-[Google Calendar]: https://calendar.google.com/calendar/embed?src=c_1ikq7u4f5c4o6mh9ep4duo3avk%40group.calendar.google.com
+[Google Calendar]: https://calendar.google.com/calendar/embed?src=c_03d981cefd8d6432894cb162da5c6186e393bc0f970ca6c371201aa05d30d763%40group.calendar.google.com
 [GitHub milestones]: https://github.com/influxdata/telegraf/milestones
 
 ## How can I filter or select specific metrics?
@@ -129,7 +129,7 @@ You can use the following techniques to avoid cardinality issues:
 
 [series cardinality]: https://docs.influxdata.com/influxdb/v1.7/concepts/glossary/#series-cardinality
 [metric filtering]: https://github.com/influxdata/telegraf/blob/master/docs/CONFIGURATION.md#metric-filtering
-[retention policy]: https://docs.influxdata.com/influxdb/latest/guides/downsampling_and_retention/
+[retention policy]: https://docs.influxdata.com/influxdb/v1/guides/downsampling_and_retention/
 [tsi]: https://docs.influxdata.com/influxdb/latest/concepts/time-series-index/
 [show cardinality]: https://docs.influxdata.com/influxdb/latest/query_language/spec/#show-cardinality
 [influx docs]: https://docs.influxdata.com/influxdb/latest/

@@ -58,10 +58,7 @@ type openConfigTelemetryServer struct {
 	telemetry.UnimplementedOpenConfigTelemetryServer
 }
 
-func (s *openConfigTelemetryServer) TelemetrySubscribe(
-	req *telemetry.SubscriptionRequest,
-	stream telemetry.OpenConfigTelemetry_TelemetrySubscribeServer,
-) error {
+func (*openConfigTelemetryServer) TelemetrySubscribe(req *telemetry.SubscriptionRequest, stream telemetry.OpenConfigTelemetry_TelemetrySubscribeServer) error {
 	path := req.PathList[0].Path
 	switch path {
 	case "/sensor":
@@ -78,28 +75,28 @@ func (s *openConfigTelemetryServer) TelemetrySubscribe(
 	return nil
 }
 
-func (s *openConfigTelemetryServer) CancelTelemetrySubscription(
-	_ context.Context,
-	_ *telemetry.CancelSubscriptionRequest,
+func (*openConfigTelemetryServer) CancelTelemetrySubscription(
+	context.Context,
+	*telemetry.CancelSubscriptionRequest,
 ) (*telemetry.CancelSubscriptionReply, error) {
 	return nil, nil
 }
 
-func (s *openConfigTelemetryServer) GetTelemetrySubscriptions(
-	_ context.Context,
-	_ *telemetry.GetSubscriptionsRequest,
+func (*openConfigTelemetryServer) GetTelemetrySubscriptions(
+	context.Context,
+	*telemetry.GetSubscriptionsRequest,
 ) (*telemetry.GetSubscriptionsReply, error) {
 	return nil, nil
 }
 
-func (s *openConfigTelemetryServer) GetTelemetryOperationalState(
-	_ context.Context,
-	_ *telemetry.GetOperationalStateRequest,
+func (*openConfigTelemetryServer) GetTelemetryOperationalState(
+	context.Context,
+	*telemetry.GetOperationalStateRequest,
 ) (*telemetry.GetOperationalStateReply, error) {
 	return nil, nil
 }
 
-func (s *openConfigTelemetryServer) GetDataEncodings(_ context.Context, _ *telemetry.DataEncodingRequest) (*telemetry.DataEncodingReply, error) {
+func (*openConfigTelemetryServer) GetDataEncodings(context.Context, *telemetry.DataEncodingRequest) (*telemetry.DataEncodingReply, error) {
 	return nil, nil
 }
 
@@ -122,7 +119,7 @@ func TestOpenConfigTelemetryData(t *testing.T) {
 		"path":         "/sensor",
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"/sensor/intKey":   int64(10),
 		"_sequence":        uint64(0),
 		"_timestamp":       uint64(0),
@@ -146,7 +143,7 @@ func TestOpenConfigTelemetryData_timestamp(t *testing.T) {
 		"system_id":    "",
 		"path":         "/sensor_with_timestamp",
 	}
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"/sensor/intKey":   int64(10),
 		"_sequence":        uint64(0),
 		"_timestamp":       uint64(timestamp),
@@ -170,7 +167,7 @@ func TestOpenConfigTelemetryDataWithPrefix(t *testing.T) {
 		"path":      "/sensor_with_prefix",
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"/sensor/prefix/intKey": int64(10),
 		"_sequence":             uint64(0),
 		"_timestamp":            uint64(0),
@@ -195,7 +192,7 @@ func TestOpenConfigTelemetryDataWithMultipleTags(t *testing.T) {
 		"path":                       "/sensor_with_multiple_tags",
 	}
 
-	fields1 := map[string]interface{}{
+	fields1 := map[string]any{
 		"/sensor/prefix/tagKey/boolKey": false,
 		"_sequence":                     uint64(0),
 		"_timestamp":                    uint64(0),
@@ -209,7 +206,7 @@ func TestOpenConfigTelemetryDataWithMultipleTags(t *testing.T) {
 		"path":      "/sensor_with_multiple_tags",
 	}
 
-	fields2 := map[string]interface{}{
+	fields2 := map[string]any{
 		"/sensor/prefix/intKey": int64(10),
 		"_sequence":             uint64(0),
 		"_timestamp":            uint64(0),
@@ -235,7 +232,7 @@ func TestOpenConfigTelemetryDataWithStringValues(t *testing.T) {
 		"path":                       "/sensor_with_string_values",
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"/sensor/prefix/strKey/strValue": "10",
 		"_sequence":                      uint64(0),
 		"_timestamp":                     uint64(0),

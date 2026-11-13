@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"gopkg.in/yaml.v2"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/inputs"
@@ -17,17 +17,22 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-// PuppetAgent is a PuppetAgent plugin
 type PuppetAgent struct {
-	Location string
+	Location         string          `toml:"location"`
+	IncludeResources []string        `toml:"include_resources"`
+	Log              telegraf.Logger `toml:"-"`
 }
 
-type State struct {
+type state struct {
 	Events    event
 	Resources resource
 	Changes   change
 	Time      time
 	Version   version
+}
+
+type additionalState struct {
+	Time map[string]any `yaml:"time"`
 }
 
 type event struct {
@@ -86,7 +91,27 @@ func (*PuppetAgent) SampleConfig() string {
 	return sampleConfig
 }
 
-// Gather reads stats from all configured servers accumulates stats
+func (pa *PuppetAgent) Init() error {
+	// Drop resources the time struct already collects so they are not
+	// emitted a second time under their YAML key.
+	builtin := make(map[string]bool)
+	for field := range reflect.TypeFor[time]().Fields() {
+		builtin[field.Tag.Get("yaml")] = true
+	}
+
+	resources := make([]string, 0, len(pa.IncludeResources))
+	for _, resource := range pa.IncludeResources {
+		if builtin[resource] {
+			pa.Log.Warnf("Resource %q is collected by default, ignoring it", resource)
+			continue
+		}
+		resources = append(resources, resource)
+	}
+	pa.IncludeResources = resources
+
+	return nil
+}
+
 func (pa *PuppetAgent) Gather(acc telegraf.Accumulator) error {
 	if len(pa.Location) == 0 {
 		pa.Location = "/var/lib/puppet/state/last_run_summary.yaml"
@@ -96,33 +121,48 @@ func (pa *PuppetAgent) Gather(acc telegraf.Accumulator) error {
 		return err
 	}
 
-	fh, err := os.ReadFile(pa.Location)
+	contents, err := os.ReadFile(pa.Location)
 	if err != nil {
 		return err
 	}
 
-	var puppetState State
+	var puppetState state
 
-	err = yaml.Unmarshal(fh, &puppetState)
+	err = yaml.Unmarshal(contents, &puppetState)
 	if err != nil {
 		return err
+	}
+
+	fields := structFields(&puppetState)
+
+	if len(pa.IncludeResources) > 0 {
+		var additional additionalState
+		if err := yaml.Unmarshal(contents, &additional); err != nil {
+			return err
+		}
+
+		for _, resource := range pa.IncludeResources {
+			if value, exists := additional.Time[resource]; exists {
+				fields["time_"+strings.ToLower(resource)] = value
+			}
+		}
 	}
 
 	tags := map[string]string{"location": pa.Location}
-	structPrinter(&puppetState, acc, tags)
+	acc.AddFields("puppetagent", fields, tags)
 
 	return nil
 }
 
-func structPrinter(s *State, acc telegraf.Accumulator, tags map[string]string) {
+func structFields(s *state) map[string]any {
 	e := reflect.ValueOf(s).Elem()
 
-	fields := make(map[string]interface{})
+	fields := make(map[string]any)
 	for tLevelFNum := 0; tLevelFNum < e.NumField(); tLevelFNum++ {
 		name := e.Type().Field(tLevelFNum).Name
 		nameNumField := e.FieldByName(name).NumField()
 
-		for sLevelFNum := 0; sLevelFNum < nameNumField; sLevelFNum++ {
+		for sLevelFNum := range nameNumField {
 			sName := e.FieldByName(name).Type().Field(sLevelFNum).Name
 			sValue := e.FieldByName(name).Field(sLevelFNum).Interface()
 
@@ -131,7 +171,7 @@ func structPrinter(s *State, acc telegraf.Accumulator, tags map[string]string) {
 			fields[fmt.Sprintf("%s_%s", lname, lsName)] = sValue
 		}
 	}
-	acc.AddFields("puppetagent", fields, tags)
+	return fields
 }
 
 func init() {

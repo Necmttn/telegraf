@@ -1,20 +1,29 @@
 # Redfish Input Plugin
 
-The `redfish` plugin gathers metrics and status information about CPU
-temperature, fanspeed, Powersupply, voltage, hostname and Location details
-(datacenter, placement, rack and room) of hardware servers for which [DMTF's
-Redfish](https://redfish.dmtf.org/) is enabled.
+This plugin gathers metrics and status information of server hardware with
+enabled [DMTF's Redfish][redfish] support.
 
-Telegraf minimum version: Telegraf 1.15.0
+⭐ Telegraf v1.15.0
+🏷️ server
+💻 all
+
+[redfish]: https://redfish.dmtf.org/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
+
+## Secret store support
+
+This plugin supports secrets from secret stores for the `username` and
+`password` options. See the [secret store documentation][SECRETSTORE] for more
+details on how to use them.
+
+[SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
 
 ## Configuration
 
@@ -24,7 +33,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## Redfish API Base URL.
   address = "https://127.0.0.1:5000"
 
-  ## Credentials for the Redfish API.
+  ## Credentials for the Redfish API. Can also use secrets.
   username = "root"
   password = "password123456"
 
@@ -41,6 +50,11 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## For more info see the Redfish Resource and Schema Guide at DMTFs website.
   ## Available sets are: "chassis.location" and "chassis"
   # include_tag_sets = ["chassis.location"]
+
+  ## Workarounds
+  ## Defines workarounds for certain hardware vendors. Choose from:
+  ## * ilo4-thermal - Do not pass 0Data-Version header to Thermal endpoint
+  # workarounds = []
 
   ## Amount of time allowed to complete the HTTP request
   # timeout = "5s"
@@ -115,7 +129,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
     - lower_threshold_critical
     - lower_threshold_fatal
 
-## Tag Sets
+### Tag Sets
 
 - chassis.location
   - tags:

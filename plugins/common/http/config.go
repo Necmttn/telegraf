@@ -1,8 +1,11 @@
+//go:generate ../../../tools/config_includer/generator "common.http" "transport.conf.in"
+//go:generate ../../../tools/config_includer/generator "common.http" "client.conf.in"
 package httpconfig
 
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -11,35 +14,33 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/plugins/common/cookie"
-	oauthConfig "github.com/influxdata/telegraf/plugins/common/oauth"
+	"github.com/influxdata/telegraf/plugins/common/oauth"
 	"github.com/influxdata/telegraf/plugins/common/proxy"
 	"github.com/influxdata/telegraf/plugins/common/tls"
 )
 
-// Common HTTP client struct.
-type HTTPClientConfig struct {
-	Timeout               config.Duration `toml:"timeout"`
+// TransportConfig is configuration structure for HTTP transports
+type TransportConfig struct {
 	IdleConnTimeout       config.Duration `toml:"idle_conn_timeout"`
 	MaxIdleConns          int             `toml:"max_idle_conn"`
 	MaxIdleConnsPerHost   int             `toml:"max_idle_conn_per_host"`
 	ResponseHeaderTimeout config.Duration `toml:"response_timeout"`
-
+	LocalAddress          string          `toml:"local_address"`
 	proxy.HTTPProxy
 	tls.ClientConfig
-	oauthConfig.OAuth2Config
-	cookie.CookieAuthConfig
 }
 
-func (h *HTTPClientConfig) CreateClient(ctx context.Context, log telegraf.Logger) (*http.Client, error) {
+func (h *TransportConfig) CreateTransport() (*http.Transport, error) {
 	tlsCfg, err := h.ClientConfig.TLSConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to set TLS config: %w", err)
+		return nil, fmt.Errorf("creating TLS configuration failed: %w", err)
 	}
 
 	prox, err := h.HTTPProxy.Proxy()
 	if err != nil {
-		return nil, fmt.Errorf("failed to set proxy: %w", err)
+		return nil, fmt.Errorf("setting up proxy failed: %w", err)
 	}
 
 	transport := &http.Transport{
@@ -51,19 +52,41 @@ func (h *HTTPClientConfig) CreateClient(ctx context.Context, log telegraf.Logger
 		ResponseHeaderTimeout: time.Duration(h.ResponseHeaderTimeout),
 	}
 
+	if h.LocalAddress != "" {
+		localAddr, err := internal.ResolveLocalTCPAddress(h.LocalAddress)
+		if err != nil {
+			return nil, err
+		}
+		dialer := &net.Dialer{LocalAddr: localAddr}
+		transport.DialContext = dialer.DialContext
+	}
+
+	return transport, nil
+}
+
+// HTTPClientConfig is a common HTTP client struct.
+type HTTPClientConfig struct {
+	Timeout config.Duration `toml:"timeout"`
+	TransportConfig
+	oauth.OAuth2Config
+	cookie.CookieAuthConfig
+}
+
+func (h *HTTPClientConfig) CreateClient(ctx context.Context, log telegraf.Logger) (*http.Client, error) {
+	transport, err := h.TransportConfig.CreateTransport()
+	if err != nil {
+		return nil, fmt.Errorf("setting up transport failed: %w", err)
+	}
+
 	// Register "http+unix" and "https+unix" protocol handler.
 	unixtransport.Register(transport)
 
-	timeout := h.Timeout
-	if timeout == 0 {
-		timeout = config.Duration(time.Second * 5)
-	}
-
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   time.Duration(timeout),
 	}
 
+	// While CreateOauth2Client returns a http.Client keeping the Transport configuration,
+	// it does not keep other http.Client parameters (e.g. Timeout).
 	client = h.OAuth2Config.CreateOauth2Client(ctx, client)
 
 	if h.CookieAuthConfig.URL != "" {
@@ -71,6 +94,12 @@ func (h *HTTPClientConfig) CreateClient(ctx context.Context, log telegraf.Logger
 			return nil, err
 		}
 	}
+
+	timeout := h.Timeout
+	if timeout == 0 {
+		timeout = config.Duration(time.Second * 5)
+	}
+	client.Timeout = time.Duration(timeout)
 
 	return client, nil
 }

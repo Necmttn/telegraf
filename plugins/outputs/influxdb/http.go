@@ -8,17 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/plugins/serializers/influx"
+	"github.com/influxdata/telegraf/selfstat"
 )
 
 const (
@@ -60,33 +63,34 @@ type DatabaseNotFoundError struct {
 	Database string
 }
 
-// QueryResponseError is the response body from the /query endpoint
-type QueryResponseError struct {
-	Results []QueryResult `json:"results"`
+// queryResponseError is the response body from the /query endpoint
+type queryResponseError struct {
+	Results []queryResult `json:"results"`
 }
 
-type QueryResult struct {
+type queryResult struct {
 	Err string `json:"error,omitempty"`
 }
 
-func (r QueryResponseError) Error() string {
+func (r queryResponseError) Error() string {
 	if len(r.Results) > 0 {
 		return r.Results[0].Err
 	}
 	return ""
 }
 
-// WriteResponseError is the response body from the /write endpoint
-type WriteResponseError struct {
+// writeResponseError is the response body from the /write endpoint
+type writeResponseError struct {
 	Err string `json:"error,omitempty"`
 }
 
-func (r WriteResponseError) Error() string {
+func (r writeResponseError) Error() string {
 	return r.Err
 }
 
 type HTTPConfig struct {
 	URL                       *url.URL
+	LocalAddr                 *net.TCPAddr
 	UserAgent                 string
 	Timeout                   time.Duration
 	Username                  config.Secret
@@ -107,6 +111,8 @@ type HTTPConfig struct {
 	InfluxUintSupport bool `toml:"influx_uint_support"`
 	Serializer        *influx.Serializer
 	Log               telegraf.Logger
+
+	BytesWritten selfstat.Stat
 }
 
 type httpClient struct {
@@ -143,9 +149,7 @@ func NewHTTPClient(cfg HTTPConfig) (*httpClient, error) {
 		cfg.Headers = make(map[string]string)
 	}
 	cfg.Headers["User-Agent"] = userAgent
-	for k, v := range cfg.Headers {
-		cfg.Headers[k] = v
-	}
+	maps.Copy(cfg.Headers, cfg.Headers)
 
 	var proxy func(*http.Request) (*url.URL, error)
 	if cfg.Proxy != nil {
@@ -164,13 +168,19 @@ func NewHTTPClient(cfg HTTPConfig) (*httpClient, error) {
 	var transport *http.Transport
 	switch cfg.URL.Scheme {
 	case "http", "https":
+		var dialerFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+		if cfg.LocalAddr != nil {
+			dialer := &net.Dialer{LocalAddr: cfg.LocalAddr}
+			dialerFunc = dialer.DialContext
+		}
 		transport = &http.Transport{
 			Proxy:           proxy,
 			TLSClientConfig: cfg.TLSConfig,
+			DialContext:     dialerFunc,
 		}
 	case "unix":
 		transport = &http.Transport{
-			Dial: func(_, _ string) (net.Conn, error) {
+			DialContext: func(context.Context, string, string) (net.Conn, error) {
 				return net.DialTimeout(
 					cfg.URL.Scheme,
 					cfg.URL.Path,
@@ -223,7 +233,7 @@ func (c *httpClient) CreateDatabase(ctx context.Context, database string) error 
 	}
 	defer resp.Body.Close()
 
-	body, err := c.validateResponse(resp.Body)
+	body, err := validateResponse(resp.Body)
 
 	// Check for poorly formatted response (can't be decoded)
 	if err != nil {
@@ -234,7 +244,7 @@ func (c *httpClient) CreateDatabase(ctx context.Context, database string) error 
 		}
 	}
 
-	queryResp := &QueryResponseError{}
+	queryResp := &queryResponseError{}
 	dec := json.NewDecoder(body)
 	err = dec.Decode(queryResp)
 
@@ -339,6 +349,7 @@ func (c *httpClient) writeBatch(ctx context.Context, db, rp string, metrics []te
 
 	reader := c.requestBodyReader(metrics)
 	defer reader.Close()
+	defer func() { c.config.BytesWritten.Incr(reader.bytesWritten.Load()) }()
 
 	req, err := c.makeWriteRequest(loc, reader)
 	if err != nil {
@@ -356,7 +367,7 @@ func (c *httpClient) writeBatch(ctx context.Context, db, rp string, metrics []te
 		return nil
 	}
 
-	body, err := c.validateResponse(resp.Body)
+	body, err := validateResponse(resp.Body)
 
 	// Check for poorly formatted response that can't be decoded
 	if err != nil {
@@ -367,7 +378,7 @@ func (c *httpClient) writeBatch(ctx context.Context, db, rp string, metrics []te
 		}
 	}
 
-	writeResp := &WriteResponseError{}
+	writeResp := &writeResponseError{}
 	dec := json.NewDecoder(body)
 
 	var desc string
@@ -377,16 +388,14 @@ func (c *httpClient) writeBatch(ctx context.Context, db, rp string, metrics []te
 	}
 	if strings.Contains(desc, errStringDatabaseNotFound) {
 		return &DatabaseNotFoundError{
-			APIError: APIError{
-				StatusCode:  resp.StatusCode,
-				Title:       resp.Status,
-				Description: desc,
-			},
-			Database: db,
+			StatusCode:  resp.StatusCode,
+			Title:       resp.Status,
+			Description: desc,
+			Database:    db,
 		}
 	}
 
-	//checks for any 4xx code and drops metric and retrying will not make the request work
+	// checks for any 4xx code and drops metric and retrying will not make the request work
 	if len(resp.Status) > 0 && resp.Status[0] == '4' {
 		c.log.Errorf("E! [outputs.influxdb] Failed to write metric (will be dropped: %s): %s\n", resp.Status, desc)
 		return nil
@@ -482,14 +491,17 @@ func (c *httpClient) makeWriteRequest(address string, body io.Reader) (*http.Req
 
 // requestBodyReader warp io.Reader from influx.NewReader to io.ReadCloser, which is useful to fast close the write
 // side of the connection in case of error
-func (c *httpClient) requestBodyReader(metrics []telegraf.Metric) io.ReadCloser {
+func (c *httpClient) requestBodyReader(metrics []telegraf.Metric) *wrappedReader {
 	reader := influx.NewReader(metrics, c.config.Serializer)
-
+	var rc io.ReadCloser
 	if c.config.ContentEncoding == "gzip" {
-		return internal.CompressWithGzip(reader)
+		rc = internal.CompressWithGzip(reader)
+	} else {
+		rc = io.NopCloser(reader)
 	}
 
-	return io.NopCloser(reader)
+	// Create a wrapper to be able to able to extract the number of bytes written
+	return &wrappedReader{r: rc}
 }
 
 func (c *httpClient) addHeaders(req *http.Request) error {
@@ -519,7 +531,7 @@ func (c *httpClient) addHeaders(req *http.Request) error {
 	return nil
 }
 
-func (c *httpClient) validateResponse(response io.ReadCloser) (io.ReadCloser, error) {
+func validateResponse(response io.ReadCloser) (io.ReadCloser, error) {
 	bodyBytes, err := io.ReadAll(response)
 	if err != nil {
 		return nil, err
@@ -584,4 +596,23 @@ func makeQueryURL(loc *url.URL) (string, error) {
 
 func (c *httpClient) Close() {
 	c.client.CloseIdleConnections()
+}
+
+type wrappedReader struct {
+	r            io.ReadCloser
+	bytesWritten atomic.Int64
+}
+
+func (r *wrappedReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+
+	// Atomically update bytesWritten to ensure thread-safe tracking during
+	// concurrent reads
+	r.bytesWritten.Add(int64(n))
+
+	return n, err
+}
+
+func (r *wrappedReader) Close() error {
+	return r.r.Close()
 }

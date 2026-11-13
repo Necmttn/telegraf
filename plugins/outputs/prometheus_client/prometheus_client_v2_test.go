@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	inputs "github.com/influxdata/telegraf/plugins/inputs/prometheus"
 	"github.com/influxdata/telegraf/plugins/serializers/prometheus"
+	"github.com/influxdata/telegraf/selfstat"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -23,6 +26,7 @@ func TestMetricVersion2(t *testing.T) {
 		name     string
 		output   *PrometheusClient
 		metrics  []telegraf.Metric
+		accept   string
 		expected []byte
 	}{
 		{
@@ -35,12 +39,12 @@ func TestMetricVersion2(t *testing.T) {
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"host": "example.org",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"time_idle": 42.0,
 					},
 					time.Unix(0, 0),
@@ -62,10 +66,10 @@ cpu_time_idle{host="example.org"} 42
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"prometheus",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"rpc_duration_seconds_sum":   1.7560473e+07,
 						"rpc_duration_seconds_count": 2693,
 					},
@@ -91,12 +95,12 @@ rpc_duration_seconds_count 2693
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"host": "example.org",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"time_idle": 42.0,
 					},
 					time.Unix(0, 0),
@@ -119,10 +123,10 @@ cpu_time_idle{host="example.org"} 42 0
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"time_idle": 42.0,
 						"host":      "example.org",
 					},
@@ -146,10 +150,10 @@ cpu_time_idle{host="example.org"} 42
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"time_idle": 42.0,
 						"host":      "example.org",
 					},
@@ -163,6 +167,35 @@ cpu_time_idle 42
 `),
 		},
 		{
+			name: "utf8 name sanitization supports utf8 metric and label names",
+			output: &PrometheusClient{
+				Listen:            ":0",
+				MetricVersion:     2,
+				CollectorsExclude: []string{"gocollector", "process"},
+				Path:              "/metrics",
+				NameSanitization:  "utf8",
+				Log:               logger,
+			},
+			metrics: []telegraf.Metric{
+				metric.New(
+					"温度-指标",
+					map[string]string{
+						"主机-名": "example.org",
+					},
+					map[string]any{
+						"数值-值": 42.0,
+					},
+					time.Unix(0, 0),
+				),
+			},
+			accept: "text/plain; version=0.0.4; escaping=allow-utf-8",
+			expected: []byte(`
+# HELP "温度-指标_数值-值" Telegraf collected metric
+# TYPE "温度-指标_数值-值" untyped
+{"温度-指标_数值-值","主机-名"="example.org"} 42
+`),
+		},
+		{
 			name: "untype prometheus metric",
 			output: &PrometheusClient{
 				Listen:            ":0",
@@ -172,12 +205,12 @@ cpu_time_idle 42
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"prometheus",
 					map[string]string{
 						"host": "example.org",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"cpu_time_idle": 42.0,
 					},
 					time.Unix(0, 0),
@@ -199,61 +232,61 @@ cpu_time_idle{host="example.org"} 42
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"cpu": "cpu1",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"usage_idle_sum":   2000.0,
 						"usage_idle_count": 20.0,
 					},
 					time.Unix(0, 0),
 					telegraf.Histogram,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"cpu": "cpu1",
 						"le":  "0.0",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"usage_idle_bucket": 0.0,
 					},
 					time.Unix(0, 0),
 					telegraf.Histogram,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"cpu": "cpu1",
 						"le":  "50.0",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"usage_idle_bucket": 7.0,
 					},
 					time.Unix(0, 0),
 					telegraf.Histogram,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"cpu": "cpu1",
 						"le":  "100.0",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"usage_idle_bucket": 20.0,
 					},
 					time.Unix(0, 0),
 					telegraf.Histogram,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"cpu": "cpu1",
 						"le":  "+Inf",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"usage_idle_bucket": 20.0,
 					},
 					time.Unix(0, 0),
@@ -281,12 +314,12 @@ cpu_usage_idle_count{cpu="cpu1"} 20
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"cpu": "cpu1",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"usage_idle_sum":   2000.0,
 						"usage_idle_count": 20.0,
 					},
@@ -313,12 +346,12 @@ cpu_usage_idle_count{cpu="cpu1"} 20
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"prometheus",
 					map[string]string{
 						"host": "example.org",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"cpu_time_idle": 42,
 					},
 					time.Unix(0, 0),
@@ -341,12 +374,12 @@ cpu_time_idle{host="example.org"} 42
 				Log:               logger,
 			},
 			metrics: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"prometheus",
 					map[string]string{
 						"host": "example.org",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"cpu_time_idle": 42.0,
 					},
 					time.Unix(0, 0),
@@ -370,7 +403,13 @@ cpu_time_idle{host="example.org"} 42
 
 			require.NoError(t, tt.output.Write(tt.metrics))
 
-			resp, err := http.Get(tt.output.URL())
+			req, err := http.NewRequest(http.MethodGet, tt.output.URL(), nil)
+			require.NoError(t, err)
+			if tt.accept != "" {
+				req.Header.Set("Accept", tt.accept)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 			defer resp.Body.Close()
@@ -386,6 +425,7 @@ cpu_time_idle{host="example.org"} 42
 
 func TestRoundTripMetricVersion2(t *testing.T) {
 	logger := testutil.Logger{Name: "outputs.prometheus_client"}
+	regxPattern := regexp.MustCompile(`.*prometheus_request_.*`)
 	tests := []struct {
 		name string
 		data []byte
@@ -465,10 +505,13 @@ rpc_duration_seconds_count 2693
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				_, err := w.Write(tt.data)
-				require.NoError(t, err)
+				if _, err := w.Write(tt.data); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			})
 
 			input := &inputs.Prometheus{
@@ -476,6 +519,7 @@ rpc_duration_seconds_count 2693
 				URLs:          []string{url},
 				URLTag:        "",
 				MetricVersion: 2,
+				Statistics:    selfstat.NewCollector(make(map[string]string)),
 			}
 			err := input.Init()
 			require.NoError(t, err)
@@ -514,9 +558,10 @@ rpc_duration_seconds_count 2693
 			actual, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
 
+			current := regxPattern.ReplaceAllLiteralString(string(actual), "")
 			require.Equal(t,
 				strings.TrimSpace(string(tt.data)),
-				strings.TrimSpace(string(actual)))
+				strings.TrimSpace(current))
 		})
 	}
 }

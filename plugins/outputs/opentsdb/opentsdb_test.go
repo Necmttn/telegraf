@@ -129,11 +129,11 @@ func BenchmarkHttpSend(b *testing.B) {
 	const batchSize = 50
 	const metricsCount = 4 * batchSize
 	metrics := make([]telegraf.Metric, 0, metricsCount)
-	for i := 0; i < metricsCount; i++ {
+	for range metricsCount {
 		metrics = append(metrics, testutil.TestMetric(1.0))
 	}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, "{}")
 	}))
@@ -144,7 +144,8 @@ func BenchmarkHttpSend(b *testing.B) {
 		panic(err)
 	}
 
-	_, p, _ := net.SplitHostPort(u.Host)
+	_, p, err := net.SplitHostPort(u.Host)
+	require.NoError(b, err)
 
 	port, err := strconv.Atoi(p)
 	if err != nil {
@@ -161,7 +162,8 @@ func BenchmarkHttpSend(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = o.Write(metrics)
+		//nolint:errcheck // skip error check for benchmarking
+		o.Write(metrics)
 	}
 }
 func TestWriteIntegration(t *testing.T) {

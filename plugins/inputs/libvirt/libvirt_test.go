@@ -1,7 +1,7 @@
 package libvirt
 
 import (
-	"fmt"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -35,10 +36,10 @@ func TestLibvirt_Init(t *testing.T) {
 	})
 
 	t.Run("throw error when user provided invalid uri", func(t *testing.T) {
-		mockLibvirtUtils := MockLibvirtUtils{}
+		mockUtils := mockLibvirtUtils{}
 		l := Libvirt{
 			LibvirtURI: "this/is/wrong/uri",
-			utils:      &mockLibvirtUtils,
+			utils:      &mockUtils,
 			Log:        testutil.Logger{},
 		}
 		err := l.Init()
@@ -47,10 +48,10 @@ func TestLibvirt_Init(t *testing.T) {
 	})
 
 	t.Run("successfully initialize libvirt on correct user input", func(t *testing.T) {
-		mockLibvirtUtils := MockLibvirtUtils{}
+		mockUtils := mockLibvirtUtils{}
 		l := Libvirt{
 			StatisticsGroups: []string{"state", "cpu_total", "vcpu", "interface"},
-			utils:            &mockLibvirtUtils,
+			utils:            &mockUtils,
 			LibvirtURI:       defaultLibvirtURI,
 			Log:              testutil.Logger{},
 		}
@@ -62,66 +63,66 @@ func TestLibvirt_Init(t *testing.T) {
 func TestLibvirt_Gather(t *testing.T) {
 	t.Run("wrong uri throws error", func(t *testing.T) {
 		var acc testutil.Accumulator
-		mockLibvirtUtils := MockLibvirtUtils{}
+		mockUtils := mockLibvirtUtils{}
 		l := Libvirt{
 			LibvirtURI: "this/is/wrong/uri",
 			Log:        testutil.Logger{},
-			utils:      &mockLibvirtUtils,
+			utils:      &mockUtils,
 		}
-		mockLibvirtUtils.On("EnsureConnected", mock.Anything).Return(fmt.Errorf("failed to connect")).Once()
+		mockUtils.On("ensureConnected", mock.Anything).Return(errors.New("failed to connect")).Once()
 		err := l.Gather(&acc)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to connect")
-		mockLibvirtUtils.AssertExpectations(t)
+		mockUtils.AssertExpectations(t)
 	})
 
 	t.Run("error when read error happened in gathering domains", func(t *testing.T) {
 		var acc testutil.Accumulator
-		mockLibvirtUtils := MockLibvirtUtils{}
+		mockUtils := mockLibvirtUtils{}
 		l := Libvirt{
-			utils:            &mockLibvirtUtils,
+			utils:            &mockUtils,
 			Log:              testutil.Logger{},
 			StatisticsGroups: []string{"state"},
 		}
-		mockLibvirtUtils.On("EnsureConnected", mock.Anything).Return(nil).Once().
-			On("GatherAllDomains", mock.Anything).Return(nil, fmt.Errorf("gather domain error")).Once().
-			On("Disconnect").Return(nil).Once()
+		mockUtils.On("ensureConnected", mock.Anything).Return(nil).Once().
+			On("gatherAllDomains", mock.Anything).Return(nil, errors.New("gather domain error")).Once().
+			On("disconnect").Return(nil).Once()
 
 		err := l.Gather(&acc)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "gather domain error")
-		mockLibvirtUtils.AssertExpectations(t)
+		mockUtils.AssertExpectations(t)
 	})
 
 	t.Run("no error when empty list of domains is returned", func(t *testing.T) {
 		var acc testutil.Accumulator
-		mockLibvirtUtils := MockLibvirtUtils{}
+		mockUtils := mockLibvirtUtils{}
 		l := Libvirt{
-			utils:            &mockLibvirtUtils,
+			utils:            &mockUtils,
 			Log:              testutil.Logger{},
 			StatisticsGroups: []string{"state"},
 		}
-		mockLibvirtUtils.On("EnsureConnected", mock.Anything).Return(nil).Once().
-			On("GatherAllDomains", mock.Anything).Return([]golibvirt.Domain{}, nil).Once()
+		mockUtils.On("ensureConnected", mock.Anything).Return(nil).Once().
+			On("gatherAllDomains", mock.Anything).Return(nil, nil).Once()
 
 		err := l.Gather(&acc)
 		require.NoError(t, err)
-		mockLibvirtUtils.AssertExpectations(t)
+		mockUtils.AssertExpectations(t)
 	})
 
 	t.Run("error when gathering metrics by number", func(t *testing.T) {
 		var acc testutil.Accumulator
-		mockLibvirtUtils := MockLibvirtUtils{}
+		mockUtils := mockLibvirtUtils{}
 		l := Libvirt{
-			utils:            &mockLibvirtUtils,
+			utils:            &mockUtils,
 			Log:              testutil.Logger{},
 			StatisticsGroups: []string{"state"},
 		}
-		mockLibvirtUtils.On("EnsureConnected", mock.Anything).Return(nil).Once().
-			On("GatherAllDomains", mock.Anything).Return(domains, nil).Once().
-			On("GatherStatsForDomains", mock.Anything, mock.Anything).
-			Return(nil, fmt.Errorf("gathering metric by number error")).Once().
-			On("Disconnect").Return(nil).Once()
+		mockUtils.On("ensureConnected", mock.Anything).Return(nil).Once().
+			On("gatherAllDomains", mock.Anything).Return(domains, nil).Once().
+			On("gatherStatsForDomains", mock.Anything, mock.Anything).
+			Return(nil, errors.New("gathering metric by number error")).Once().
+			On("disconnect").Return(nil).Once()
 
 		err := l.Init()
 		require.NoError(t, err)
@@ -129,14 +130,14 @@ func TestLibvirt_Gather(t *testing.T) {
 		err = l.Gather(&acc)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "gathering metric by number error")
-		mockLibvirtUtils.AssertExpectations(t)
+		mockUtils.AssertExpectations(t)
 	})
 
 	var successfulTests = []struct {
 		testName        string
-		allDomains      interface{}
+		allDomains      any
 		excludeDomains  []string
-		statsForDomains interface{}
+		statsForDomains any
 		expectedMetrics []telegraf.Metric
 		vcpuMapping     []vcpuAffinity
 	}{
@@ -153,20 +154,20 @@ func TestLibvirt_Gather(t *testing.T) {
 	for _, test := range successfulTests {
 		t.Run(test.testName, func(t *testing.T) {
 			var acc testutil.Accumulator
-			mockLibvirtUtils := MockLibvirtUtils{}
+			mockUtils := mockLibvirtUtils{}
 			l := Libvirt{
-				utils:                &mockLibvirtUtils,
+				utils:                &mockUtils,
 				Log:                  testutil.Logger{},
 				StatisticsGroups:     []string{"state"},
 				Domains:              test.excludeDomains,
 				AdditionalStatistics: []string{"vcpu_mapping"},
 			}
-			mockLibvirtUtils.On("EnsureConnected", mock.Anything).Return(nil).Once().
-				On("GatherAllDomains", mock.Anything).Return(test.allDomains, nil).Once().
-				On("GatherVcpuMapping", domains[0], mock.Anything, mock.Anything).Return(test.vcpuMapping, nil).Maybe().
-				On("GatherVcpuMapping", domains[1], mock.Anything, mock.Anything).Return(test.vcpuMapping, nil).Once().
-				On("GatherNumberOfPCPUs").Return(4, nil).Once().
-				On("GatherStatsForDomains", mock.Anything, mock.Anything).Return(test.statsForDomains, nil).Once()
+			mockUtils.On("ensureConnected", mock.Anything).Return(nil).Once().
+				On("gatherAllDomains", mock.Anything).Return(test.allDomains, nil).Once().
+				On("gatherVcpuMapping", domains[0], mock.Anything, mock.Anything).Return(test.vcpuMapping, nil).Maybe().
+				On("gatherVcpuMapping", domains[1], mock.Anything, mock.Anything).Return(test.vcpuMapping, nil).Once().
+				On("gatherNumberOfPCPUs").Return(4, nil).Once().
+				On("gatherStatsForDomains", mock.Anything, mock.Anything).Return(test.statsForDomains, nil).Once()
 
 			err := l.Init()
 			require.NoError(t, err)
@@ -177,7 +178,7 @@ func TestLibvirt_Gather(t *testing.T) {
 			actual := acc.GetTelegrafMetrics()
 			expected := test.expectedMetrics
 			testutil.RequireMetricsEqual(t, expected, actual, testutil.SortMetrics(), testutil.IgnoreTime())
-			mockLibvirtUtils.AssertExpectations(t)
+			mockUtils.AssertExpectations(t)
 		})
 	}
 }
@@ -185,9 +186,9 @@ func TestLibvirt_Gather(t *testing.T) {
 func TestLibvirt_GatherMetrics(t *testing.T) {
 	var successfulTests = []struct {
 		testName        string
-		allDomains      interface{}
+		allDomains      any
 		excludeDomains  []string
-		statsForDomains interface{}
+		statsForDomains any
 		expectedMetrics []telegraf.Metric
 		vcpuMapping     []vcpuAffinity
 	}{
@@ -205,25 +206,23 @@ func TestLibvirt_GatherMetrics(t *testing.T) {
 	for _, test := range successfulTests {
 		t.Run(test.testName, func(t *testing.T) {
 			var acc testutil.Accumulator
-			mockLibvirtUtils := MockLibvirtUtils{}
+			mockUtils := mockLibvirtUtils{}
 			l := Libvirt{
-				utils:                &mockLibvirtUtils,
-				Log:                  testutil.Logger{},
-				StatisticsGroups:     []string{},
-				Domains:              test.excludeDomains,
-				AdditionalStatistics: []string{},
+				utils:   &mockUtils,
+				Log:     testutil.Logger{},
+				Domains: test.excludeDomains,
 			}
 
-			mockLibvirtUtils.On("EnsureConnected", mock.Anything).Return(nil).Once().
-				On("GatherAllDomains", mock.Anything).Return(test.allDomains, nil).Once().
-				On("GatherStatsForDomains", mock.Anything, mock.Anything).Return(test.statsForDomains, nil).Once()
+			mockUtils.On("ensureConnected", mock.Anything).Return(nil).Once().
+				On("gatherAllDomains", mock.Anything).Return(test.allDomains, nil).Once().
+				On("gatherStatsForDomains", mock.Anything, mock.Anything).Return(test.statsForDomains, nil).Once()
 
 			if test.vcpuMapping != nil {
 				l.vcpuMappingEnabled = true
 				l.metricNumber = domainStatsVCPU
-				mockLibvirtUtils.On("GatherNumberOfPCPUs").Return(4, nil).Once().
-					On("GatherVcpuMapping", domains[0], mock.Anything, mock.Anything).Return(test.vcpuMapping, nil).Once().
-					On("GatherVcpuMapping", domains[1], mock.Anything, mock.Anything).Return([]vcpuAffinity{}, nil).Once()
+				mockUtils.On("gatherNumberOfPCPUs").Return(4, nil).Once().
+					On("gatherVcpuMapping", domains[0], mock.Anything, mock.Anything).Return(test.vcpuMapping, nil).Once().
+					On("gatherVcpuMapping", domains[1], mock.Anything, mock.Anything).Return(nil, nil).Once()
 			}
 
 			err := l.Gather(&acc)
@@ -232,7 +231,7 @@ func TestLibvirt_GatherMetrics(t *testing.T) {
 			actual := acc.GetTelegrafMetrics()
 			expected := test.expectedMetrics
 			testutil.RequireMetricsEqual(t, expected, actual, testutil.SortMetrics(), testutil.IgnoreTime())
-			mockLibvirtUtils.AssertExpectations(t)
+			mockUtils.AssertExpectations(t)
 		})
 	}
 }
@@ -313,10 +312,6 @@ func TestLibvirt_filterDomains(t *testing.T) {
 		result := l.filterDomains(domains)
 		require.NotEmpty(t, result)
 	})
-
-	t.Run("failed on something", func(t *testing.T) {
-
-	})
 }
 
 var (
@@ -393,6 +388,16 @@ var (
 				{Field: "cpu.cache.monitor.1.bank.0.bytes", Value: *golibvirt.NewTypedParamValueLlong(720896)},
 				{Field: "cpu.cache.monitor.1.bank.1.id", Value: *golibvirt.NewTypedParamValueLlong(1)},
 				{Field: "cpu.cache.monitor.1.bank.1.bytes", Value: *golibvirt.NewTypedParamValueLlong(8200192)},
+				{Field: "cpu.energy.monitor.count", Value: *golibvirt.NewTypedParamValueUint(1)},
+				{Field: "cpu.energy.monitor.0.name", Value: *golibvirt.NewTypedParamValueString("all_vcpus")},
+				{Field: "cpu.energy.monitor.0.vcpus", Value: *golibvirt.NewTypedParamValueString("0-9")},
+				{Field: "cpu.energy.monitor.0.pkg.count", Value: *golibvirt.NewTypedParamValueUint(2)},
+				{Field: "cpu.energy.monitor.0.pkg.0.id", Value: *golibvirt.NewTypedParamValueUint(0)},
+				{Field: "cpu.energy.monitor.0.pkg.0.core_energy", Value: *golibvirt.NewTypedParamValueDouble(1234.5)},
+				{Field: "cpu.energy.monitor.0.pkg.0.activity", Value: *golibvirt.NewTypedParamValueDouble(5678.25)},
+				{Field: "cpu.energy.monitor.0.pkg.1.id", Value: *golibvirt.NewTypedParamValueUint(1)},
+				{Field: "cpu.energy.monitor.0.pkg.1.core_energy", Value: *golibvirt.NewTypedParamValueDouble(9012.75)},
+				{Field: "cpu.energy.monitor.0.pkg.1.activity", Value: *golibvirt.NewTypedParamValueDouble(3456.5)},
 			},
 		},
 	}
@@ -568,16 +573,16 @@ var (
 	}
 
 	expectedMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_state",
+		metric.New("libvirt_state",
 			map[string]string{"domain_name": "Droplet-844329"},
-			map[string]interface{}{
+			map[string]any{
 				"reason": 2,
 				"state":  1,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_state",
+		metric.New("libvirt_state",
 			map[string]string{"domain_name": "Droplet-33436"},
-			map[string]interface{}{
+			map[string]any{
 				"reason": 1,
 				"state":  1,
 			},
@@ -585,55 +590,55 @@ var (
 	}
 
 	expectedMemoryMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_memory_bandwidth_monitor_total",
+		metric.New("libvirt_memory_bandwidth_monitor_total",
 			map[string]string{"domain_name": "Droplet-844329"},
-			map[string]interface{}{
+			map[string]any{
 				"count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_memory_bandwidth_monitor",
+		metric.New("libvirt_memory_bandwidth_monitor",
 			map[string]string{"domain_name": "Droplet-844329", "memory_bandwidth_monitor_id": "0"},
-			map[string]interface{}{
+			map[string]any{
 				"name":       "any_name_vcpus_0-4",
 				"vcpus":      "0-4",
 				"node_count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_memory_bandwidth_monitor",
+		metric.New("libvirt_memory_bandwidth_monitor",
 			map[string]string{"domain_name": "Droplet-844329", "memory_bandwidth_monitor_id": "1"},
-			map[string]interface{}{
+			map[string]any{
 				"name":       "vcpus_7",
 				"vcpus":      "7",
 				"node_count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_memory_bandwidth_monitor_node",
+		metric.New("libvirt_memory_bandwidth_monitor_node",
 			map[string]string{"domain_name": "Droplet-844329", "memory_bandwidth_monitor_id": "0", "controller_index": "0"},
-			map[string]interface{}{
+			map[string]any{
 				"id":          0,
 				"bytes_total": int64(10208067584),
 				"bytes_local": int64(4807114752),
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_memory_bandwidth_monitor_node",
+		metric.New("libvirt_memory_bandwidth_monitor_node",
 			map[string]string{"domain_name": "Droplet-844329", "memory_bandwidth_monitor_id": "0", "controller_index": "1"},
-			map[string]interface{}{
+			map[string]any{
 				"id":          1,
 				"bytes_total": int64(8693735424),
 				"bytes_local": int64(5850161152),
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_memory_bandwidth_monitor_node",
+		metric.New("libvirt_memory_bandwidth_monitor_node",
 			map[string]string{"domain_name": "Droplet-844329", "memory_bandwidth_monitor_id": "1", "controller_index": "0"},
-			map[string]interface{}{
+			map[string]any{
 				"id":          0,
 				"bytes_total": 853811200,
 				"bytes_local": 290701312,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_memory_bandwidth_monitor_node",
+		metric.New("libvirt_memory_bandwidth_monitor_node",
 			map[string]string{"domain_name": "Droplet-844329", "memory_bandwidth_monitor_id": "1", "controller_index": "1"},
-			map[string]interface{}{
+			map[string]any{
 				"id":          1,
 				"bytes_total": 406044672,
 				"bytes_local": 229425152,
@@ -642,9 +647,9 @@ var (
 	}
 
 	expectedCPUMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_cpu",
+		metric.New("libvirt_cpu",
 			map[string]string{"domain_name": "Droplet-844329"},
-			map[string]interface{}{
+			map[string]any{
 				"time":                  int64(67419144867000),
 				"user":                  int64(63886161852000),
 				"system":                int64(3532983015000),
@@ -652,99 +657,129 @@ var (
 				"haltpoll_fail_time":    int64(2727253643),
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_cache_monitor_total",
+		metric.New("libvirt_cpu_cache_monitor_total",
 			map[string]string{"domain_name": "Droplet-844329"},
-			map[string]interface{}{
+			map[string]any{
 				"count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_cache_monitor",
+		metric.New("libvirt_cpu_cache_monitor",
 			map[string]string{"domain_name": "Droplet-844329", "cache_monitor_id": "0"},
-			map[string]interface{}{
+			map[string]any{
 				"name":       "any_name_vcpus_0-3",
 				"vcpus":      "0-3",
 				"bank_count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_cache_monitor",
+		metric.New("libvirt_cpu_cache_monitor",
 			map[string]string{"domain_name": "Droplet-844329", "cache_monitor_id": "1"},
-			map[string]interface{}{
+			map[string]any{
 				"name":       "vcpus_4-9",
 				"vcpus":      "4-9",
 				"bank_count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_cache_monitor_bank",
+		metric.New("libvirt_cpu_cache_monitor_bank",
 			map[string]string{"domain_name": "Droplet-844329", "cache_monitor_id": "0", "bank_index": "0"},
-			map[string]interface{}{
+			map[string]any{
 				"id":    0,
 				"bytes": 5406720,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_cache_monitor_bank",
+		metric.New("libvirt_cpu_cache_monitor_bank",
 			map[string]string{"domain_name": "Droplet-844329", "cache_monitor_id": "0", "bank_index": "1"},
-			map[string]interface{}{
+			map[string]any{
 				"id":    1,
 				"bytes": 0,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_cache_monitor_bank",
+		metric.New("libvirt_cpu_cache_monitor_bank",
 			map[string]string{"domain_name": "Droplet-844329", "cache_monitor_id": "1", "bank_index": "0"},
-			map[string]interface{}{
+			map[string]any{
 				"id":    0,
 				"bytes": 720896,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_cache_monitor_bank",
+		metric.New("libvirt_cpu_cache_monitor_bank",
 			map[string]string{"domain_name": "Droplet-844329", "cache_monitor_id": "1", "bank_index": "1"},
-			map[string]interface{}{
+			map[string]any{
 				"id":    1,
 				"bytes": 8200192,
+			},
+			time.Now()),
+		metric.New("libvirt_cpu_energy_monitor_total",
+			map[string]string{"domain_name": "Droplet-844329"},
+			map[string]any{
+				"count": uint64(1),
+			},
+			time.Now()),
+		metric.New("libvirt_cpu_energy_monitor",
+			map[string]string{"domain_name": "Droplet-844329", "energy_monitor_id": "0"},
+			map[string]any{
+				"name":      "all_vcpus",
+				"vcpus":     "0-9",
+				"pkg_count": uint64(2),
+			},
+			time.Now()),
+		metric.New("libvirt_cpu_energy_monitor_pkg",
+			map[string]string{"domain_name": "Droplet-844329", "energy_monitor_id": "0", "pkg_index": "0"},
+			map[string]any{
+				"id":          uint64(0),
+				"core_energy": 1234.5,
+				"activity":    5678.25,
+			},
+			time.Now()),
+		metric.New("libvirt_cpu_energy_monitor_pkg",
+			map[string]string{"domain_name": "Droplet-844329", "energy_monitor_id": "0", "pkg_index": "1"},
+			map[string]any{
+				"id":          uint64(1),
+				"core_energy": 9012.75,
+				"activity":    3456.5,
 			},
 			time.Now()),
 	}
 
 	expectedVcpuAffinityMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_cpu_affinity",
+		metric.New("libvirt_cpu_affinity",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "0"},
-			map[string]interface{}{
+			map[string]any{
 				"cpu_id": "0,1,2,3",
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_affinity",
+		metric.New("libvirt_cpu_affinity",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "1"},
-			map[string]interface{}{
+			map[string]any{
 				"cpu_id": "1,2,3,4",
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_affinity",
+		metric.New("libvirt_cpu_affinity",
 			map[string]string{
 				"domain_name": "Droplet-33436",
 				"vcpu_id":     "0"},
-			map[string]interface{}{
+			map[string]any{
 				"cpu_id": "0,1,2,3",
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_affinity",
+		metric.New("libvirt_cpu_affinity",
 			map[string]string{
 				"domain_name": "Droplet-33436",
 				"vcpu_id":     "1"},
-			map[string]interface{}{
+			map[string]any{
 				"cpu_id": "1,2,3,4",
 			},
 			time.Now()),
 	}
 
 	expectedBalloonMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_balloon",
+		metric.New("libvirt_balloon",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"current":         4194304,
 				"maximum":         4194304,
 				"swap_in":         0,
@@ -764,11 +799,11 @@ var (
 	}
 
 	expectedPerfMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_perf",
+		metric.New("libvirt_perf",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"cmt":                     19087360,
 				"mbmt":                    77168640,
 				"mbml":                    67788800,
@@ -796,20 +831,20 @@ var (
 	}
 
 	expectedInterfaceMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_net_total",
+		metric.New("libvirt_net_total",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"count": 1,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_net",
+		metric.New("libvirt_net",
 			map[string]string{
 				"domain_name":  "Droplet-844329",
 				"interface_id": "0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":     "vnet0",
 				"rx_bytes": 110,
 				"rx_pkts":  1,
@@ -824,20 +859,20 @@ var (
 	}
 
 	expectedBlockMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_block_total",
+		metric.New("libvirt_block_total",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_block",
+		metric.New("libvirt_block",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"block_id":    "0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":         "vda",
 				"backingIndex": 1,
 				"path":         "/tmp/ubuntu_image.img",
@@ -856,12 +891,12 @@ var (
 				"threshold":    int64(2147483648),
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_block",
+		metric.New("libvirt_block",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"block_id":    "1",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":         "vda1",
 				"backingIndex": 1,
 				"path":         "/tmp/ubuntu_image1.img",
@@ -883,31 +918,31 @@ var (
 	}
 
 	expectedIOThreadMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_iothread_total",
+		metric.New("libvirt_iothread_total",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"count": 2,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_iothread",
+		metric.New("libvirt_iothread",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"iothread_id": "0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"poll_max_ns": 32768,
 				"poll_grow":   0,
 				"poll_shrink": 0,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_iothread",
+		metric.New("libvirt_iothread",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"iothread_id": "1",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"poll_max_ns": 32769,
 				"poll_grow":   0,
 				"poll_shrink": 0,
@@ -916,11 +951,11 @@ var (
 	}
 
 	expectedDirtyrateMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_dirtyrate",
+		metric.New("libvirt_dirtyrate",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"calc_status":          2,
 				"calc_start_time":      348414,
 				"calc_period":          1,
@@ -928,42 +963,42 @@ var (
 				"calc_mode":            "dirty-ring",
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_dirtyrate_vcpu",
+		metric.New("libvirt_dirtyrate_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"megabytes_per_second": 1,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_dirtyrate_vcpu",
+		metric.New("libvirt_dirtyrate_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "1",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"megabytes_per_second": 2,
 			},
 			time.Now()),
 	}
 
 	expectedVCPUMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_vcpu_total",
+		metric.New("libvirt_vcpu_total",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"current": 3,
 				"maximum": 3,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_vcpu",
+		metric.New("libvirt_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"state":    1,
 				"time":     int64(17943740000000),
 				"wait":     0,
@@ -972,12 +1007,12 @@ var (
 				"delay":    0,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_vcpu",
+		metric.New("libvirt_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "1",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"state":    1,
 				"time":     int64(17943740000000),
 				"wait":     0,
@@ -986,12 +1021,12 @@ var (
 				"delay":    0,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_vcpu",
+		metric.New("libvirt_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "2",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"state": 1,
 				"time":  int64(17943740000000),
 				"wait":  0,
@@ -1001,37 +1036,37 @@ var (
 	}
 
 	expectedExtendedVCPUMetrics = []telegraf.Metric{
-		testutil.MustMetric("libvirt_cpu_affinity",
+		metric.New("libvirt_cpu_affinity",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "0"},
-			map[string]interface{}{
+			map[string]any{
 				"cpu_id": "0,1,2,3",
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_cpu_affinity",
+		metric.New("libvirt_cpu_affinity",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "1"},
-			map[string]interface{}{
+			map[string]any{
 				"cpu_id": "1,2,3,4",
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_vcpu_total",
+		metric.New("libvirt_vcpu_total",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"current": 3,
 				"maximum": 3,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_vcpu",
+		metric.New("libvirt_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "0",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"state":    1,
 				"time":     int64(17943740000000),
 				"wait":     0,
@@ -1041,12 +1076,12 @@ var (
 				"cpu_id":   0,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_vcpu",
+		metric.New("libvirt_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "1",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"state":    1,
 				"time":     int64(17943740000000),
 				"wait":     0,
@@ -1056,12 +1091,12 @@ var (
 				"cpu_id":   1,
 			},
 			time.Now()),
-		testutil.MustMetric("libvirt_vcpu",
+		metric.New("libvirt_vcpu",
 			map[string]string{
 				"domain_name": "Droplet-844329",
 				"vcpu_id":     "2",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"state": 1,
 				"time":  int64(17943740000000),
 				"wait":  0,
@@ -1070,3 +1105,162 @@ var (
 			time.Now()),
 	}
 )
+
+// mockLibvirtUtils is an autogenerated mock type for the utils type
+type mockLibvirtUtils struct {
+	mock.Mock
+}
+
+// disconnect provides a mock function with given fields:
+func (_m *mockLibvirtUtils) disconnect() error {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for disconnect")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ensureConnected provides a mock function with given fields: libvirtURI
+func (_m *mockLibvirtUtils) ensureConnected(libvirtURI string) error {
+	ret := _m.Called(libvirtURI)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ensureConnected")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(libvirtURI)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// gatherAllDomains provides a mock function with given fields:
+func (_m *mockLibvirtUtils) gatherAllDomains() ([]golibvirt.Domain, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for gatherAllDomains")
+	}
+
+	var r0 []golibvirt.Domain
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]golibvirt.Domain, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []golibvirt.Domain); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]golibvirt.Domain)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// gatherNumberOfPCPUs provides a mock function with given fields:
+func (_m *mockLibvirtUtils) gatherNumberOfPCPUs() (int, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for gatherNumberOfPCPUs")
+	}
+
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (int, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// gatherStatsForDomains provides a mock function with given fields: domains, metricNumber
+func (_m *mockLibvirtUtils) gatherStatsForDomains(domains []golibvirt.Domain, metricNumber uint32) ([]golibvirt.DomainStatsRecord, error) {
+	ret := _m.Called(domains, metricNumber)
+
+	if len(ret) == 0 {
+		panic("no return value specified for gatherStatsForDomains")
+	}
+
+	var r0 []golibvirt.DomainStatsRecord
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]golibvirt.Domain, uint32) ([]golibvirt.DomainStatsRecord, error)); ok {
+		return rf(domains, metricNumber)
+	}
+	if rf, ok := ret.Get(0).(func([]golibvirt.Domain, uint32) []golibvirt.DomainStatsRecord); ok {
+		r0 = rf(domains, metricNumber)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]golibvirt.DomainStatsRecord)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]golibvirt.Domain, uint32) error); ok {
+		r1 = rf(domains, metricNumber)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// gatherVcpuMapping provides a mock function with given fields: domain, pCPUs, shouldGetCurrentPCPU
+func (_m *mockLibvirtUtils) gatherVcpuMapping(domain golibvirt.Domain, pCPUs int, shouldGetCurrentPCPU bool) ([]vcpuAffinity, error) {
+	ret := _m.Called(domain, pCPUs, shouldGetCurrentPCPU)
+
+	if len(ret) == 0 {
+		panic("no return value specified for gatherVcpuMapping")
+	}
+
+	var r0 []vcpuAffinity
+	var r1 error
+	if rf, ok := ret.Get(0).(func(golibvirt.Domain, int, bool) ([]vcpuAffinity, error)); ok {
+		return rf(domain, pCPUs, shouldGetCurrentPCPU)
+	}
+	if rf, ok := ret.Get(0).(func(golibvirt.Domain, int, bool) []vcpuAffinity); ok {
+		r0 = rf(domain, pCPUs, shouldGetCurrentPCPU)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]vcpuAffinity)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(golibvirt.Domain, int, bool) error); ok {
+		r1 = rf(domain, pCPUs, shouldGetCurrentPCPU)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}

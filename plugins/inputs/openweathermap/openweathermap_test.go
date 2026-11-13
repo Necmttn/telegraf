@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/plugins/inputs"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
 	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestFormatURL(t *testing.T) {
@@ -100,7 +101,10 @@ func TestCases(t *testing.T) {
 				key := strings.TrimPrefix(r.URL.Path, "/data/2.5/")
 				if resp, found := input[key]; found {
 					w.Header()["Content-Type"] = []string{"application/json"}
-					_, _ = w.Write(resp)
+					if _, err := w.Write(resp); err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+					}
 					return
 				}
 
@@ -114,7 +118,10 @@ func TestCases(t *testing.T) {
 					key += "_" + ids[0]
 					if resp, found := input[key]; found {
 						w.Header()["Content-Type"] = []string{"application/json"}
-						_, _ = w.Write(resp)
+						if _, err := w.Write(resp); err != nil {
+							w.WriteHeader(http.StatusInternalServerError)
+							t.Error(err)
+						}
 						return
 					}
 				}
@@ -136,7 +143,7 @@ func TestCases(t *testing.T) {
 			var acc testutil.Accumulator
 			require.NoError(t, plugin.Gather(&acc))
 			if len(acc.Errors) > 0 {
-				var actualErrorMsgs []string
+				actualErrorMsgs := make([]string, 0, len(acc.Errors))
 				for _, err := range acc.Errors {
 					actualErrorMsgs = append(actualErrorMsgs, err.Error())
 				}

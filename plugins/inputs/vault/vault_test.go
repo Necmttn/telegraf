@@ -8,55 +8,123 @@ import (
 	"testing"
 	"time"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/go-connections/nat"
-
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/testutil"
+	"github.com/moby/moby/api/types/container"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestVaultStats(t *testing.T) {
 	var applyTests = []struct {
-		name     string
-		expected []telegraf.Metric
+		name        string
+		floatValues *bool
+		expected    []telegraf.Metric
 	}{
 		{
-			name: "Metrics",
+			name: "integer values by default",
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"vault.raft.replication.appendEntries.logs",
 					map[string]string{
 						"peer_id": "clustnode-02",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"count":  int(130),
 						"rate":   float64(0.2),
-						"sum":    int(2),
-						"min":    int(0),
-						"max":    int(1),
+						"sum":    int64(2),
+						"min":    int64(0),
+						"max":    int64(1),
 						"mean":   float64(0.015384615384615385),
 						"stddev": float64(0.12355304447984486),
 					},
 					time.Unix(1638287340, 0),
 					1,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"vault.core.unsealed",
 					map[string]string{
 						"cluster": "vault-cluster-23b671c7",
 					},
-					map[string]interface{}{
-						"value": int(1),
+					map[string]any{
+						"value": int64(1),
 					},
 					time.Unix(1638287340, 0),
 					2,
 				),
-				testutil.MustMetric(
+				metric.New(
+					"vault.wal.write_controller.idle_secs",
+					map[string]string{},
+					map[string]any{
+						"value": int64(679114),
+					},
+					time.Unix(1638287340, 0),
+					2,
+				),
+				metric.New(
 					"vault.token.lookup",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
+						"count":  int(5135),
+						"max":    float64(16.22449493408203),
+						"mean":   float64(0.1698389152269865),
+						"min":    float64(0.06690400093793869),
+						"rate":   float64(87.21228296905755),
+						"stddev": float64(0.24637634000854705),
+						"sum":    float64(872.1228296905756),
+					},
+					time.Unix(1638287340, 0),
+					1,
+				),
+			},
+		},
+		{
+			name:        "float values",
+			floatValues: new(true),
+			expected: []telegraf.Metric{
+				metric.New(
+					"vault.raft.replication.appendEntries.logs",
+					map[string]string{
+						"peer_id": "clustnode-02",
+					},
+					map[string]any{
+						"count":  int(130),
+						"rate":   float64(0.2),
+						"sum":    float64(2),
+						"min":    float64(0),
+						"max":    float64(1),
+						"mean":   float64(0.015384615384615385),
+						"stddev": float64(0.12355304447984486),
+					},
+					time.Unix(1638287340, 0),
+					1,
+				),
+				metric.New(
+					"vault.core.unsealed",
+					map[string]string{
+						"cluster": "vault-cluster-23b671c7",
+					},
+					map[string]any{
+						"value": float64(1),
+					},
+					time.Unix(1638287340, 0),
+					2,
+				),
+				metric.New(
+					"vault.wal.write_controller.idle_secs",
+					map[string]string{},
+					map[string]any{
+						"value": float64(679114.3),
+					},
+					time.Unix(1638287340, 0),
+					2,
+				),
+				metric.New(
+					"vault.token.lookup",
+					map[string]string{},
+					map[string]any{
 						"count":  int(5135),
 						"max":    float64(16.22449493408203),
 						"mean":   float64(0.1698389152269865),
@@ -76,18 +144,28 @@ func TestVaultStats(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.RequestURI == "/v1/sys/metrics" {
-					w.WriteHeader(http.StatusOK)
 					responseKeyMetrics, err := os.ReadFile("testdata/response_key_metrics.json")
-					require.NoError(t, err)
-					_, err = fmt.Fprintln(w, string(responseKeyMetrics))
-					require.NoError(t, err)
+					if err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+						return
+					}
+
+					if _, err = fmt.Fprintln(w, string(responseKeyMetrics)); err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
 				}
 			}))
 			defer ts.Close()
 
 			plugin := &Vault{
-				URL:   ts.URL,
-				Token: "s.CDDrgg5zPv5ssI0Z2P4qxJj2",
+				URL:         ts.URL,
+				Token:       "s.CDDrgg5zPv5ssI0Z2P4qxJj2",
+				FloatValues: tt.floatValues,
+				Log:         testutil.Logger{},
 			}
 			err := plugin.Init()
 			require.NoError(t, err)
@@ -103,38 +181,47 @@ func TestVaultStats(t *testing.T) {
 
 func TestRedirect(t *testing.T) {
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"vault.raft.replication.appendEntries.logs",
 			map[string]string{
 				"peer_id": "clustnode-02",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"count":  int(130),
 				"rate":   float64(0.2),
-				"sum":    int(2),
-				"min":    int(0),
-				"max":    int(1),
+				"sum":    int64(2),
+				"min":    int64(0),
+				"max":    int64(1),
 				"mean":   float64(0.015384615384615385),
 				"stddev": float64(0.12355304447984486),
 			},
 			time.Unix(1638287340, 0),
 			1,
 		),
-		testutil.MustMetric(
+		metric.New(
 			"vault.core.unsealed",
 			map[string]string{
 				"cluster": "vault-cluster-23b671c7",
 			},
-			map[string]interface{}{
-				"value": int(1),
+			map[string]any{
+				"value": int64(1),
 			},
 			time.Unix(1638287340, 0),
 			2,
 		),
-		testutil.MustMetric(
+		metric.New(
+			"vault.wal.write_controller.idle_secs",
+			map[string]string{},
+			map[string]any{
+				"value": int64(679114),
+			},
+			time.Unix(1638287340, 0),
+			2,
+		),
+		metric.New(
 			"vault.token.lookup",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"count":  int(5135),
 				"max":    float64(16.22449493408203),
 				"mean":   float64(0.1698389152269865),
@@ -157,8 +244,12 @@ func TestRedirect(t *testing.T) {
 			redirectURL := "http://" + r.Host + "/custom/metrics"
 			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 		case "/custom/metrics":
+			if _, err := w.Write(response); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(response)
 		}
 	}))
 	defer server.Close()
@@ -167,6 +258,7 @@ func TestRedirect(t *testing.T) {
 	plugin := &Vault{
 		URL:   server.URL,
 		Token: "s.CDDrgg5zPv5ssI0Z2P4qxJj2",
+		Log:   testutil.Logger{},
 	}
 	require.NoError(t, plugin.Init())
 
@@ -182,28 +274,29 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// Start the docker container
-	container := testutil.Container{
+	cntnr := testutil.Container{
 		Image:        "vault:1.13.3",
 		ExposedPorts: []string{"8200"},
 		Env: map[string]string{
 			"VAULT_DEV_ROOT_TOKEN_ID": "root",
 		},
-		HostConfigModifier: func(hc *dockercontainer.HostConfig) {
+		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.CapAdd = []string{"IPC_LOCK"}
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("Root Token: root"),
-			wait.ForListeningPort(nat.Port("8200")),
+			wait.ForListeningPort("8200"),
 		),
 	}
-	require.NoError(t, container.Start(), "failed to start container")
-	defer container.Terminate()
+	require.NoError(t, cntnr.Start(), "failed to start container")
+	defer cntnr.Terminate()
 
 	// Setup the plugin
-	port := container.Ports["8200"]
+	port := cntnr.Ports["8200"]
 	plugin := &Vault{
-		URL:   "http://" + container.Address + ":" + port,
+		URL:   "http://" + cntnr.Address + ":" + port,
 		Token: "root",
+		Log:   testutil.Logger{},
 	}
 	require.NoError(t, plugin.Init())
 

@@ -1,14 +1,19 @@
 # OpenTelemetry Output Plugin
 
-This plugin sends metrics to [OpenTelemetry](https://opentelemetry.io) servers
-and agents via gRPC.
+This plugin writes metrics to [OpenTelemetry][opentelemetry] servers and agents
+via gRPC or HTTP.
+
+⭐ Telegraf v1.20.0
+🏷️ logging, messaging
+💻 all
+
+[opentelemetry]: https://opentelemetry.io
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -18,8 +23,12 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 # Send OpenTelemetry metrics over gRPC
 [[outputs.opentelemetry]]
   ## Override the default (localhost:4317) OpenTelemetry gRPC service
-  ## address:port
+  ## When the protocol is grpc, address:port
+  ## When the protocol is http, http(s)://address:port/path
   # service_address = "localhost:4317"
+  ## Override the default (protobuf) encodingType when Protocol is http
+  ## protobuf, json
+  # encoding_type = "protobuf"
 
   ## Override the default (5s) request timeout
   # timeout = "5s"
@@ -41,6 +50,14 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## Supports: "gzip", "none"
   # compression = "gzip"
 
+  ## Optional proxy settings for HTTP endpoints (service_address starts with http:// or https://)
+  # use_system_proxy = false
+  # http_proxy_url = ""
+
+  ## Optional proxy settings for gRPC endpoints (service_address is host:port)
+  # use_proxy = false
+  # proxy_url = ""
+
   ## NOTE: Due to the way TOML is parsed, tables must be at the END of the
   ## plugin definition, otherwise additional config options are read as part of
   ## the table
@@ -60,7 +77,12 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   # [outputs.opentelemetry.attributes]
   # "service.name" = "demo"
 
-  ## Additional gRPC request metadata
+  ## Optional Bearer token for authentication.
+  ## Supports secret-store references, e.g. @{<store-id>:<key>}, so tokens
+  ## fetched via the oauth2 secret store are refreshed automatically.
+  # token = ""
+
+  ## Additional gRPC request metadata / HTTP headers
   # [outputs.opentelemetry.headers]
   # key1 = "value1"
 ```
@@ -75,9 +97,12 @@ the `[output.opentelemetry.coralogix]` section.
 
 There, you can find the required setting to interact with the server.
 
-- The `private_key` is your Private Key, which you can find in Settings > Send Your Data.
-- The `application`, is your application name, which will be added to your metric attributes.
-- The `subsystem`, is your subsystem, which will be added to your metric attributes.
+- The `private_key` is your Private Key, which you can find in
+  `Settings > Send Your Data`.
+- The `application`, is your application name, which will be added to your
+  `metric attributes`.
+- The `subsystem`, is your subsystem, which will be added to your metric
+  attributes.
 
 More information in the
 [Getting Started page](https://coralogix.com/docs/guide-first-steps-coralogix/).
@@ -103,7 +128,5 @@ data is interpreted as:
 Also see the [OpenTelemetry input plugin](../../inputs/opentelemetry/README.md).
 
 [schema]: https://github.com/influxdata/influxdb-observability/blob/main/docs/index.md
-
 [implementation]: https://github.com/influxdata/influxdb-observability/tree/main/influx2otel
-
 [repo]: https://github.com/influxdata/influxdb-observability

@@ -5,13 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/coreos/go-systemd/daemon"
+	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/fatih/color"
 	"github.com/influxdata/tail/watch"
 	"gopkg.in/tomb.v1"
@@ -32,19 +34,25 @@ import (
 var stop chan struct{}
 
 type GlobalFlags struct {
-	config         []string
-	configDir      []string
-	testWait       int
-	watchConfig    string
-	pidFile        string
-	plugindDir     string
-	password       string
-	oldEnvBehavior bool
-	test           bool
-	debug          bool
-	once           bool
-	quiet          bool
-	unprotected    bool
+	config                  []string
+	configDir               []string
+	testWait                int
+	configURLRetryAttempts  int
+	configURLWatchInterval  time.Duration
+	watchConfig             string
+	watchInterval           time.Duration
+	watchDebounceInterval   time.Duration
+	pidFile                 string
+	plugindDir              string
+	password                string
+	oldEnvBehavior          bool
+	nonStrictEnvVars        bool
+	printPluginConfigSource bool
+	test                    bool
+	debug                   bool
+	once                    bool
+	quiet                   bool
+	unprotected             bool
 }
 
 type WindowFlags struct {
@@ -73,6 +81,8 @@ type Telegraf struct {
 	configFiles        []string
 	secretstoreFilters []string
 
+	cfg *config.Config
+
 	GlobalFlags
 	WindowFlags
 }
@@ -98,6 +108,8 @@ func (t *Telegraf) Init(pprofErr <-chan error, f Filters, g GlobalFlags, w Windo
 
 	// Set environment replacement behavior
 	config.OldEnvVarReplacement = g.oldEnvBehavior
+	config.NonStrictEnvVarHandling = g.nonStrictEnvVars
+	config.PrintPluginConfigSource = g.printPluginConfigSource
 }
 
 func (t *Telegraf) ListSecretStores() ([]string, error) {
@@ -130,11 +142,6 @@ func (t *Telegraf) GetSecretStore(id string) (telegraf.SecretStore, error) {
 
 func (t *Telegraf) reloadLoop() error {
 	reloadConfig := false
-	cfg, err := t.loadConfiguration()
-	if err != nil {
-		return err
-	}
-
 	reload := make(chan bool, 1)
 	reload <- true
 	for <-reload {
@@ -146,11 +153,33 @@ func (t *Telegraf) reloadLoop() error {
 			syscall.SIGTERM, syscall.SIGINT)
 		if t.watchConfig != "" {
 			for _, fConfig := range t.configFiles {
-				if _, err := os.Stat(fConfig); err == nil {
-					go t.watchLocalConfig(signals, fConfig)
-				} else {
-					log.Printf("W! Cannot watch config %s: %s", fConfig, err)
+				if isURL(fConfig) {
+					continue
 				}
+
+				if _, err := os.Stat(fConfig); err != nil {
+					log.Printf("W! Cannot watch config %s: %s", fConfig, err)
+				} else {
+					go t.watchLocalConfig(ctx, signals, fConfig)
+				}
+			}
+			for _, fConfigDirectory := range t.configDir {
+				if _, err := os.Stat(fConfigDirectory); err != nil {
+					log.Printf("W! Cannot watch config directory %s: %s", fConfigDirectory, err)
+				} else {
+					go t.watchLocalConfig(ctx, signals, fConfigDirectory)
+				}
+			}
+		}
+		if t.configURLWatchInterval > 0 {
+			remoteConfigs := make([]string, 0)
+			for _, fConfig := range t.configFiles {
+				if isURL(fConfig) {
+					remoteConfigs = append(remoteConfigs, fConfig)
+				}
+			}
+			if len(remoteConfigs) > 0 {
+				go t.watchRemoteConfigs(ctx, signals, t.configURLWatchInterval, remoteConfigs)
 			}
 		}
 		go func() {
@@ -158,6 +187,12 @@ func (t *Telegraf) reloadLoop() error {
 			case sig := <-signals:
 				if sig == syscall.SIGHUP {
 					log.Println("I! Reloading Telegraf config")
+					// May need to update the list of known config files
+					// if a delete or create occurred. That way on the reload
+					// we ensure we watch the correct files.
+					if err := t.getConfigFiles(); err != nil {
+						log.Println("E! Error loading config files: ", err)
+					}
 					<-reload
 					reload <- true
 				}
@@ -170,7 +205,7 @@ func (t *Telegraf) reloadLoop() error {
 			}
 		}()
 
-		err := t.runAgent(ctx, cfg, reloadConfig)
+		err := t.runAgent(ctx, reloadConfig)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return fmt.Errorf("[telegraf] Error running agent: %w", err)
 		}
@@ -180,61 +215,212 @@ func (t *Telegraf) reloadLoop() error {
 	return nil
 }
 
-func (t *Telegraf) watchLocalConfig(signals chan os.Signal, fConfig string) {
+func (t *Telegraf) watchLocalConfig(ctx context.Context, signals chan os.Signal, fConfig string) {
 	var mytomb tomb.Tomb
 	var watcher watch.FileWatcher
 	if t.watchConfig == "poll" {
-		watcher = watch.NewPollingFileWatcher(fConfig)
+		if t.watchInterval > 0 {
+			watcher = watch.NewPollingFileWatcherWithDuration(fConfig, t.watchInterval)
+		} else {
+			watcher = watch.NewPollingFileWatcher(fConfig)
+		}
 	} else {
 		watcher = watch.NewInotifyFileWatcher(fConfig)
 	}
 	changes, err := watcher.ChangeEvents(&mytomb, 0)
 	if err != nil {
-		log.Printf("E! Error watching config: %s\n", err)
+		log.Printf("E! Error watching config file/directory %q: %s\n", fConfig, err)
 		return
 	}
-	log.Println("I! Config watcher started")
-	select {
-	case <-changes.Modified:
-		log.Println("I! Config file modified")
-	case <-changes.Deleted:
-		// deleted can mean moved. wait a bit a check existence
-		<-time.After(time.Second)
-		if _, err := os.Stat(fConfig); err == nil {
-			log.Println("I! Config file overwritten")
-		} else {
-			log.Println("W! Config file deleted")
-			if err := watcher.BlockUntilExists(&mytomb); err != nil {
-				log.Printf("E! Cannot watch for config: %s\n", err.Error())
+	log.Printf("I! Config watcher started for %s\n", fConfig)
+
+	// Setup debounce timer
+	var reloadTimer *time.Timer
+	var reloadPending bool
+
+	if t.watchDebounceInterval > 0 {
+		reloadTimer = time.NewTimer(t.watchDebounceInterval)
+		if !reloadTimer.Stop() {
+			<-reloadTimer.C // Drain if already fired
+		}
+	}
+
+	// Update resetTimer function:
+	resetTimer := func(reason string) {
+		log.Printf("%s", reason)
+
+		if t.watchDebounceInterval == 0 {
+			// No debouncing - trigger immediately
+			select {
+			case signals <- syscall.SIGHUP:
+			case <-ctx.Done():
 				return
 			}
-			log.Println("I! Config file appeared")
+			return
 		}
-	case <-changes.Truncated:
-		log.Println("I! Config file truncated")
-	case <-mytomb.Dying():
-		log.Println("I! Config watcher ended")
-		return
+
+		if !reloadPending {
+			reloadPending = true
+		}
+
+		// Properly drain and reset timer
+		if !reloadTimer.Stop() {
+			select {
+			case <-reloadTimer.C:
+			default:
+			}
+		}
+		reloadTimer.Reset(t.watchDebounceInterval)
 	}
-	mytomb.Done()
-	signals <- syscall.SIGHUP
+
+	for {
+		select {
+		case <-ctx.Done():
+			if reloadTimer != nil {
+				reloadTimer.Stop()
+			}
+			mytomb.Done()
+			return
+
+		case <-changes.Modified:
+			resetTimer(fmt.Sprintf("I! Config file/directory %q modified\n", fConfig))
+
+		case <-changes.Deleted:
+			// Use select with timeout instead of blocking wait
+			timer := time.NewTimer(time.Second)
+			select {
+			case <-timer.C:
+				// Proceed with file existence check
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			}
+
+			var reason string
+			if _, err := os.Stat(fConfig); err == nil {
+				reason = fmt.Sprintf("I! Config file/directory %q overwritten\n", fConfig)
+			} else {
+				reason = fmt.Sprintf("W! Config file/directory %q deleted\n", fConfig)
+			}
+			resetTimer(reason)
+
+		case <-changes.Truncated:
+			resetTimer(fmt.Sprintf("I! Config file/directory %q truncated\n", fConfig))
+
+		case <-changes.Created:
+			resetTimer(fmt.Sprintf("I! Config directory %q has new file(s)\n", fConfig))
+
+		case <-func() <-chan time.Time {
+			if reloadTimer != nil {
+				return reloadTimer.C
+			}
+			// Return a channel that never fires when debouncing is disabled
+			return make(<-chan time.Time)
+		}():
+			if reloadPending {
+				log.Printf("I! Debounce period elapsed, triggering config reload for %q\n", fConfig)
+				select {
+				case signals <- syscall.SIGHUP:
+				case <-ctx.Done():
+					return
+				}
+				reloadPending = false
+			}
+
+		case <-mytomb.Dying():
+			if reloadTimer != nil {
+				reloadTimer.Stop()
+			}
+			log.Printf("I! Config watcher %q ended\n", fConfig)
+			return
+		}
+	}
+}
+
+func (*Telegraf) watchRemoteConfigs(ctx context.Context, signals chan os.Signal, interval time.Duration, remoteConfigs []string) {
+	configs := strings.Join(remoteConfigs, ", ")
+	log.Printf("I! Remote config watcher started for: %s\n", configs)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	lastModified := make(map[string]string, len(remoteConfigs))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-signals:
+			return
+		case <-ticker.C:
+			for _, configURL := range remoteConfigs {
+				req, err := http.NewRequest("HEAD", configURL, nil)
+				if err != nil {
+					log.Printf("W! Creating request for fetching config from %q failed: %v\n", configURL, err)
+					continue
+				}
+
+				if v, exists := os.LookupEnv("TELEGRAF_CONTROLLER_TOKEN"); exists {
+					req.Header.Add("Authorization", "Bearer "+v)
+				} else if v, exists := os.LookupEnv("INFLUX_TOKEN"); exists {
+					req.Header.Add("Authorization", "Token "+v)
+				}
+				req.Header.Set("User-Agent", internal.ProductToken())
+
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					log.Printf("W! Fetching config from %q failed: %v\n", configURL, err)
+					continue
+				}
+				resp.Body.Close()
+
+				modified := resp.Header.Get("Last-Modified")
+				if modified == "" {
+					log.Printf("E! Last-Modified header not found, stopping the watcher for %s\n", configURL)
+					delete(lastModified, configURL)
+				}
+
+				if lastModified[configURL] == "" {
+					lastModified[configURL] = modified
+				} else if lastModified[configURL] != modified {
+					log.Printf("I! Remote config modified: %s\n", configURL)
+					signals <- syscall.SIGHUP
+					return
+				}
+			}
+		}
+	}
 }
 
 func (t *Telegraf) loadConfiguration() (*config.Config, error) {
+	// Make sure secrets are cleared
+	config.ResetSecrets()
+
 	// If no other options are specified, load the config file and run.
 	c := config.NewConfig()
 	c.Agent.Quiet = t.quiet
+	c.Agent.ConfigURLRetryAttempts = t.configURLRetryAttempts
 	c.OutputFilters = t.outputFilters
 	c.InputFilters = t.inputFilters
 	c.SecretStoreFilters = t.secretstoreFilters
+	c.TestMode = !t.once && (t.test || t.testWait != 0)
 
+	if err := t.getConfigFiles(); err != nil {
+		return c, err
+	}
+	if err := c.LoadAll(t.configFiles...); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+func (t *Telegraf) getConfigFiles() error {
 	var configFiles []string
 
 	configFiles = append(configFiles, t.config...)
 	for _, fConfigDirectory := range t.configDir {
 		files, err := config.WalkDirectory(fConfigDirectory)
 		if err != nil {
-			return c, err
+			return fmt.Errorf("reading config directory failed: %w", err)
 		}
 		configFiles = append(configFiles, files...)
 	}
@@ -243,19 +429,17 @@ func (t *Telegraf) loadConfiguration() (*config.Config, error) {
 	if len(configFiles) == 0 {
 		defaultFiles, err := config.GetDefaultConfigPath()
 		if err != nil {
-			return nil, fmt.Errorf("unable to load default config paths: %w", err)
+			return fmt.Errorf("unable to load default config paths: %w", err)
 		}
 		configFiles = append(configFiles, defaultFiles...)
 	}
 
 	t.configFiles = configFiles
-	if err := c.LoadAll(configFiles...); err != nil {
-		return c, err
-	}
-	return c, nil
+	return nil
 }
 
-func (t *Telegraf) runAgent(ctx context.Context, c *config.Config, reloadConfig bool) error {
+func (t *Telegraf) runAgent(ctx context.Context, reloadConfig bool) error {
+	c := t.cfg
 	var err error
 	if reloadConfig {
 		if c, err = t.loadConfiguration(); err != nil {
@@ -263,11 +447,11 @@ func (t *Telegraf) runAgent(ctx context.Context, c *config.Config, reloadConfig 
 		}
 	}
 
-	if !(t.test || t.testWait != 0) && len(c.Outputs) == 0 {
-		return errors.New("no outputs found, did you provide a valid config file?")
+	if !t.test && t.testWait == 0 && len(c.Outputs) == 0 {
+		return errors.New("no outputs found, probably invalid config file provided")
 	}
 	if t.plugindDir == "" && len(c.Inputs) == 0 {
-		return errors.New("no inputs found, did you provide a valid config file?")
+		return errors.New("no inputs found, probably invalid config file provided")
 	}
 
 	if int64(c.Agent.Interval) <= 0 {
@@ -279,24 +463,25 @@ func (t *Telegraf) runAgent(ctx context.Context, c *config.Config, reloadConfig 
 	}
 
 	// Setup logging as configured.
-	telegraf.Debug = c.Agent.Debug || t.debug
-	logConfig := logger.LogConfig{
-		Debug:               telegraf.Debug,
-		Quiet:               c.Agent.Quiet || t.quiet,
-		LogTarget:           c.Agent.LogTarget,
-		Logfile:             c.Agent.Logfile,
-		RotationInterval:    c.Agent.LogfileRotationInterval,
-		RotationMaxSize:     c.Agent.LogfileRotationMaxSize,
-		RotationMaxArchives: c.Agent.LogfileRotationMaxArchives,
-		LogWithTimezone:     c.Agent.LogWithTimezone,
+	logConfig := &logger.Config{
+		Debug:                   c.Agent.Debug || t.debug,
+		Quiet:                   c.Agent.Quiet || t.quiet,
+		LogTarget:               c.Agent.LogTarget,
+		LogFormat:               c.Agent.LogFormat,
+		Logfile:                 c.Agent.Logfile,
+		StructuredLogMessageKey: c.Agent.StructuredLogMessageKey,
+		RotationInterval:        time.Duration(c.Agent.LogfileRotationInterval),
+		RotationMaxSize:         int64(c.Agent.LogfileRotationMaxSize),
+		RotationMaxArchives:     c.Agent.LogfileRotationMaxArchives,
+		LogWithTimezone:         c.Agent.LogWithTimezone,
 	}
 
 	if err := logger.SetupLogging(logConfig); err != nil {
-		return err
+		return fmt.Errorf("setting up logging failed: %w", err)
 	}
 
 	log.Printf("I! Starting Telegraf %s%s brought to you by InfluxData the makers of InfluxDB", internal.Version, internal.Customized)
-	log.Printf("I! Available plugins: %d inputs, %d aggregators, %d processors, %d parsers, %d outputs, %d secret-stores",
+	log.Printf("I! Available plugins: %d inputs, %d aggregators, %d processors, %d parsers, %d outputs, %d secret stores",
 		len(inputs.Inputs),
 		len(aggregators.Aggregators),
 		len(processors.Processors),
@@ -304,14 +489,14 @@ func (t *Telegraf) runAgent(ctx context.Context, c *config.Config, reloadConfig 
 		len(outputs.Outputs),
 		len(secretstores.SecretStores),
 	)
-	log.Printf("I! Loaded inputs: %s", strings.Join(c.InputNames(), " "))
-	log.Printf("I! Loaded aggregators: %s", strings.Join(c.AggregatorNames(), " "))
-	log.Printf("I! Loaded processors: %s", strings.Join(c.ProcessorNames(), " "))
-	log.Printf("I! Loaded secretstores: %s", strings.Join(c.SecretstoreNames(), " "))
+	log.Printf("I! Loaded inputs: %s\n%s", strings.Join(c.InputNames(), " "), c.InputNamesWithSources())
+	log.Printf("I! Loaded aggregators: %s\n%s", strings.Join(c.AggregatorNames(), " "), c.AggregatorNamesWithSources())
+	log.Printf("I! Loaded processors: %s\n%s", strings.Join(c.ProcessorNames(), " "), c.ProcessorNamesWithSources())
+	log.Printf("I! Loaded secretstores: %s\n%s", strings.Join(c.SecretstoreNames(), " "), c.SecretstoreNamesWithSources())
 	if !t.once && (t.test || t.testWait != 0) {
 		log.Print("W! " + color.RedString("Outputs are not used in testing mode!"))
 	} else {
-		log.Printf("I! Loaded outputs: %s", strings.Join(c.OutputNames(), " "))
+		log.Printf("I! Loaded outputs: %s\n%s", strings.Join(c.OutputNames(), " "), c.OutputNamesWithSources())
 	}
 	log.Printf("I! Tags enabled: %s", c.ListTags())
 
@@ -341,7 +526,7 @@ func (t *Telegraf) runAgent(ctx context.Context, c *config.Config, reloadConfig 
 			log.Printf("I! Found %d secrets...", c.NumberSecrets)
 			msg := fmt.Sprintf("Insufficient lockable memory %dkb when %dkb is required.", available, required)
 			msg += " Please increase the limit for Telegraf in your Operating System!"
-			log.Printf("W! " + color.RedString(msg))
+			log.Print("W! " + color.RedString(msg))
 		}
 	}
 	ag := agent.NewAgent(c)
@@ -350,7 +535,8 @@ func (t *Telegraf) runAgent(ctx context.Context, c *config.Config, reloadConfig 
 	// SdNotify() only tries to notify if the NOTIFY_SOCKET environment is set, so it's safe to call when systemd isn't present.
 	// Ignore the return values here because they're not valid for platforms that don't use systemd.
 	// For platforms that use systemd, telegraf doesn't log if the notification failed.
-	_, _ = daemon.SdNotify(false, daemon.SdNotifyReady)
+	//nolint:errcheck // see above
+	daemon.SdNotify(false, daemon.SdNotifyReady)
 
 	if t.once {
 		wait := time.Duration(t.testWait) * time.Second
@@ -384,4 +570,10 @@ func (t *Telegraf) runAgent(ctx context.Context, c *config.Config, reloadConfig 
 	}
 
 	return ag.Run(ctx)
+}
+
+// isURL checks if string is valid url
+func isURL(str string) bool {
+	u, err := url.Parse(str)
+	return err == nil && u.Scheme != "" && u.Host != ""
 }

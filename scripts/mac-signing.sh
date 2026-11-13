@@ -82,13 +82,13 @@ sudo security import MacCertificate.p12 -k /Library/Keychains/System.keychain -P
 base64 -D -o AppleSigningAuthorityCertificate.cer <<< "$AppleSigningAuthorityCertificate"
 sudo security import AppleSigningAuthorityCertificate.cer -k '/Library/Keychains/System.keychain' -A
 
-amdFile=$(find "$HOME/project/dist" -name "*darwin_amd64.tar*")
-armFile=$(find "$HOME/project/dist" -name "*darwin_arm64.tar*")
+amdFile=$(find "$HOME/project/dist" -name "telegraf-*darwin_amd64.tar.gz")
+armFile=$(find "$HOME/project/dist" -name "telegraf-*darwin_arm64.tar.gz")
 macFiles=("${amdFile}" "${armFile}")
 
 version=$(make version)
-plutil -insert CFBundleShortVersionString -string "$version" ~/project/info.plist
-plutil -insert CFBundleVersion -string "$version" ~/project/info.plist
+plutil -insert CFBundleShortVersionString -string "$version" ~/project/Info.plist
+plutil -insert CFBundleVersion -string "$version" ~/project/Info.plist
 
 for tarFile in "${macFiles[@]}";
 do
@@ -102,9 +102,9 @@ do
 
   DeveloperID="Developer ID Application: InfluxData Inc. (M7DN9H35QT)"
 
-  # Sign telegraf binary and the telegraf_entry_mac script
+  # Sign telegraf binary
   echo "Extract $tarFile to $RootAppDir/Resources"
-  tar -xzvf "$tarFile" --strip-components=2 -C "$RootAppDir/Resources"
+  tar -xzvf "$tarFile" --strip-components=1 -C "$RootAppDir/Resources"
   printf "\n"
   TelegrafBinPath="$RootAppDir/Resources/usr/bin/telegraf"
   codesign --force -s "$DeveloperID" --timestamp --options=runtime "$TelegrafBinPath"
@@ -113,15 +113,20 @@ do
 
   printf "\n"
 
+  # Replace the telegraf binary with the signed version in the tar archive
+  versionDir=$(basename "${tarFile}")
+  versionDir=${versionDir/_*}
+  mkdir -p "TarRepackage"
+  tar -xzvf "${tarFile}" -C "TarRepackage"
+  cp "${TelegrafBinPath}" "TarRepackage/${versionDir}/usr/bin/telegraf"
+  tar  --owner 0 --group 0 -czvf "${tarFile}" -C "TarRepackage" "${versionDir}"
+  mkdir -p "${HOME}/project/build/dist"
+  cp "${tarFile}" "${HOME}/project/build/dist"
+
+  echo "Replaced tar binary with signed version!"
+
   cp ~/project/scripts/telegraf_entry_mac "$RootAppDir"/MacOS
-  EntryMacPath="$RootAppDir/MacOS/telegraf_entry_mac"
-  codesign -s "$DeveloperID" --timestamp --options=runtime "$EntryMacPath"
-  echo "Verify if $EntryMacPath was signed"
-  codesign -dvv "$EntryMacPath"
-
-  printf "\n"
-
-  cp ~/project/info.plist "$RootAppDir"
+  cp ~/project/Info.plist "$RootAppDir"
   cp  ~/project/assets/windows/icon.icns "$RootAppDir/Resources"
 
   chmod +x "$RootAppDir/MacOS/telegraf_entry_mac"

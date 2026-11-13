@@ -1,28 +1,33 @@
 # InfluxDB v2.x Output Plugin
 
-The InfluxDB output plugin writes metrics to the [InfluxDB v2.x] HTTP service.
+This plugin writes metrics to a [InfluxDB v2.x][influxdb_v2] instance via HTTP.
+
+⭐ Telegraf v1.8.0
+🏷️ datastore
+💻 all
+
+[influxdb_v2]: https://docs.influxdata.com/influxdb/v2
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `token` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
-to use them.
+This plugin supports secrets from secret stores for the `token` and
+`http_headers` option. See the [secret store documentation][SECRETSTORE] for
+more details on how to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
 
 ## Configuration
 
 ```toml @sample.conf
-# Configuration for sending metrics to InfluxDB 2.0
+# Configuration for sending metrics to InfluxDB 2.x
 [[outputs.influxdb_v2]]
   ## The URLs of the InfluxDB cluster nodes.
   ##
@@ -30,6 +35,10 @@ to use them.
   ## urls will be written to each interval.
   ##   ex: urls = ["https://us-west-2-1.aws.cloud2.influxdata.com"]
   urls = ["http://127.0.0.1:8086"]
+
+  ## Local address to bind when connecting to the server
+  ## If empty or not set, the local address is automatically chosen.
+  # local_address = ""
 
   ## Token for authentication.
   token = ""
@@ -67,6 +76,12 @@ to use them.
   ## Enable or disable uint support for writing uints influxdb 2.0.
   # influx_uint_support = false
 
+  ## When true, Telegraf will omit the timestamp on data to allow InfluxDB
+  ## to set the timestamp of the data during ingestion. This is generally NOT
+  ## what you want as it can lead to data points captured at different times
+  ## getting omitted due to similar data.
+  # influx_omit_timestamp = false
+
   ## HTTP/2 Timeouts
   ## The following values control the HTTP/2 client's timeouts. These settings
   ## are generally not required unless a user is seeing issues with client
@@ -85,11 +100,22 @@ to use them.
   # tls_key = "/etc/telegraf/key.pem"
   ## Use TLS but skip chain & host verification
   # insecure_skip_verify = false
+
+  ## Rate limits for sending data (disabled by default)
+  ## Available, uncompressed payload size e.g. "5MB"
+  # rate_limit = "unlimited"
+  ## Fixed time-window for the available payload size e.g. "5m"
+  # rate_limit_period = "0s"
+
+  ## Number of concurrent writes to the output
+  ## When set to one sequential sending is used (default).
+  ## NOTE: When using two or more concurrent writes the sending order of
+  ##       metrics is not guaranteed!
+  # concurrent_writes = 1
 ```
 
 ## Metrics
 
 Reference the [influx serializer][] for details about metric production.
 
-[InfluxDB v2.x]: https://github.com/influxdata/influxdb
 [influx serializer]: /plugins/serializers/influx/README.md#Metrics

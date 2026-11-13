@@ -144,7 +144,7 @@ func (s *SignalFx) ConvertToSignalFx(metrics []telegraf.Metric) ([]*datapoint.Da
 				}
 
 				// We've already type checked field, so set property with value
-				metricProps := map[string]interface{}{"message": val}
+				metricProps := map[string]any{"message": val}
 				var ev = event.NewWithProperties(metricName,
 					event.AGENT,
 					metricDims,
@@ -199,7 +199,7 @@ func (s *SignalFx) isEventIncluded(name string) bool {
 }
 
 // getMetricName combines telegraf fields and tags into a full metric name
-func getMetricName(metric string, field string) string {
+func getMetricName(metric, field string) string {
 	name := metric
 
 	// Include field in metric name when it adds to the metric name

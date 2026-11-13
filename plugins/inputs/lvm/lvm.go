@@ -33,10 +33,6 @@ func (*LVM) SampleConfig() string {
 	return sampleConfig
 }
 
-func (lvm *LVM) Init() error {
-	return nil
-}
-
 func (lvm *LVM) Gather(acc telegraf.Accumulator) error {
 	if err := lvm.gatherPhysicalVolumes(acc); err != nil {
 		return err
@@ -89,7 +85,7 @@ func (lvm *LVM) gatherPhysicalVolumes(acc telegraf.Accumulator) error {
 
 			usedPercent := float64(used) / float64(size) * 100
 
-			fields := map[string]interface{}{
+			fields := map[string]any{
 				"size":         size,
 				"free":         free,
 				"used":         used,
@@ -150,7 +146,7 @@ func (lvm *LVM) gatherVolumeGroups(acc telegraf.Accumulator) error {
 
 			usedPercent := (float64(size) - float64(free)) / float64(size) * 100
 
-			fields := map[string]interface{}{
+			fields := map[string]any{
 				"size":                  size,
 				"free":                  free,
 				"used_percent":          usedPercent,
@@ -169,7 +165,7 @@ func (lvm *LVM) gatherVolumeGroups(acc telegraf.Accumulator) error {
 func (lvm *LVM) gatherLogicalVolumes(acc telegraf.Accumulator) error {
 	args := []string{
 		"--reportformat", "json", "--units", "b", "--nosuffix",
-		"-o", "lv_name,vg_name,lv_size,data_percent,metadata_percent",
+		"-o", "lv_name,vg_name,lv_size,data_percent,metadata_percent,sync_percent",
 	}
 	out, err := lvm.runCmd(lvm.LVSBinary, args)
 	if err != nil {
@@ -212,10 +208,20 @@ func (lvm *LVM) gatherLogicalVolumes(acc telegraf.Accumulator) error {
 				return err
 			}
 
-			fields := map[string]interface{}{
+			// Only provided if sync in progress, default completed
+			if lv.SyncPercent == "" {
+				lv.SyncPercent = "100.0"
+			}
+			syncPercent, err := strconv.ParseFloat(lv.SyncPercent, 32)
+			if err != nil {
+				return err
+			}
+
+			fields := map[string]any{
 				"size":             size,
 				"data_percent":     dataPercent,
 				"metadata_percent": metadataPercent,
+				"sync_percent":     syncPercent,
 			}
 
 			acc.AddFields("lvm_logical_vol", fields, tags)
@@ -277,6 +283,7 @@ type lvsReport struct {
 			Size            string `json:"lv_size"`
 			DataPercent     string `json:"data_percent"`
 			MetadataPercent string `json:"metadata_percent"`
+			SyncPercent     string `json:"sync_percent"`
 		} `json:"lv"`
 	} `json:"report"`
 }

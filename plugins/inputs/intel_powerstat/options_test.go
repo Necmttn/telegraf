@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestGenerate(t *testing.T) {
@@ -92,7 +93,7 @@ func TestGenerate(t *testing.T) {
 			cpuMetrics: []cpuMetricType{
 				cpuC7StateResidency,
 			},
-			msrReadTimeout: 0, //timeout disabled
+			msrReadTimeout: 0, // timeout disabled
 		})
 
 		require.Len(t, opts, 1)
@@ -196,11 +197,6 @@ func TestNeedsMsrCPU(t *testing.T) {
 
 		t.Run("CPUC7StateResidency", func(t *testing.T) {
 			cpuMetrics[len(cpuMetrics)-1] = cpuC7StateResidency
-			require.True(t, needsMsrCPU(cpuMetrics))
-		})
-
-		t.Run("CPUBusyCycles", func(t *testing.T) {
-			cpuMetrics[len(cpuMetrics)-1] = cpuBusyCycles
 			require.True(t, needsMsrCPU(cpuMetrics))
 		})
 

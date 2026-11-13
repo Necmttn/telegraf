@@ -3,8 +3,9 @@ package puppetagent
 import (
 	"testing"
 
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestGather(t *testing.T) {
@@ -16,7 +17,7 @@ func TestGather(t *testing.T) {
 	require.NoError(t, pa.Gather(&acc))
 
 	tags := map[string]string{"location": "last_run_summary.yaml"}
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"events_failure":             int64(0),
 		"events_noop":                int64(0),
 		"events_success":             int64(0),
@@ -57,4 +58,24 @@ func TestGather(t *testing.T) {
 	}
 
 	acc.AssertContainsTaggedFields(t, "puppetagent", fields, tags)
+}
+
+func TestGatherIncludeResources(t *testing.T) {
+	var acc testutil.Accumulator
+
+	pa := PuppetAgent{
+		Location:         "last_run_summary.yaml",
+		IncludeResources: []string{"yumrepo", "does_not_exist", "catalog_application"},
+		Log:              testutil.Logger{},
+	}
+	require.NoError(t, pa.Init())
+	require.Equal(t, []string{"yumrepo", "does_not_exist"}, pa.IncludeResources)
+	require.NoError(t, pa.Gather(&acc))
+
+	metric, ok := acc.Get("puppetagent")
+	require.True(t, ok)
+	require.InDelta(t, 0.006989, metric.Fields["time_yumrepo"], 0.0000001)
+	require.NotContains(t, metric.Fields, "time_does_not_exist")
+	require.NotContains(t, metric.Fields, "time_catalog_application")
+	require.InDelta(t, 0.010555, metric.Fields["time_catalogapplication"], 0.0000001)
 }

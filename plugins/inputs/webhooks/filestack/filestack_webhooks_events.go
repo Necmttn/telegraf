@@ -2,20 +2,20 @@ package filestack
 
 import "strconv"
 
-type FilestackEvent struct {
+type filestackEvent struct {
 	Action    string `json:"action"`
 	TimeStamp int64  `json:"timestamp"`
 	ID        int    `json:"id"`
 }
 
-func (fe *FilestackEvent) Tags() map[string]string {
+func (fe *filestackEvent) tags() map[string]string {
 	return map[string]string{
 		"action": fe.Action,
 	}
 }
 
-func (fe *FilestackEvent) Fields() map[string]interface{} {
-	return map[string]interface{}{
+func (fe *filestackEvent) fields() map[string]any {
+	return map[string]any{
 		"id": strconv.Itoa(fe.ID),
 	}
 }

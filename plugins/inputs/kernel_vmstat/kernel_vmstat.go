@@ -31,7 +31,7 @@ func (k *KernelVmstat) Gather(acc telegraf.Accumulator) error {
 		return err
 	}
 
-	fields := make(map[string]interface{})
+	fields := make(map[string]any)
 
 	dataFields := bytes.Fields(data)
 	for i, field := range dataFields {
@@ -49,7 +49,7 @@ func (k *KernelVmstat) Gather(acc telegraf.Accumulator) error {
 		}
 	}
 
-	acc.AddFields("kernel_vmstat", fields, map[string]string{})
+	acc.AddFields("kernel_vmstat", fields, make(map[string]string))
 	return nil
 }
 

@@ -6,17 +6,16 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	v1 "k8s.io/api/apps/v1"
+	"k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestStatefulSet(t *testing.T) {
 	cli := &client{}
-	selectInclude := []string{}
-	selectExclude := []string{}
 	now := time.Now()
 	now = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 1, 36, 0, now.Location())
 	tests := []struct {
@@ -28,7 +27,7 @@ func TestStatefulSet(t *testing.T) {
 		{
 			name: "no statefulsets",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/statefulsets/": &v1.StatefulSetList{},
 				},
 			},
@@ -37,7 +36,7 @@ func TestStatefulSet(t *testing.T) {
 		{
 			name: "collect statefulsets",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/statefulsets/": &v1.StatefulSetList{
 						Items: []v1.StatefulSet{
 							{
@@ -49,7 +48,7 @@ func TestStatefulSet(t *testing.T) {
 									ObservedGeneration: 119,
 								},
 								Spec: v1.StatefulSetSpec{
-									Replicas: toInt32Ptr(3),
+									Replicas: new(int32(3)),
 									Selector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"select1": "s1",
@@ -57,19 +56,17 @@ func TestStatefulSet(t *testing.T) {
 										},
 									},
 								},
-								ObjectMeta: metav1.ObjectMeta{
-									Generation:        332,
-									Namespace:         "ns1",
-									Name:              "sts1",
-									CreationTimestamp: metav1.Time{Time: now},
-								},
+								Generation:        332,
+								Namespace:         "ns1",
+								Name:              "sts1",
+								CreationTimestamp: metav1.Time{Time: now},
 							},
 						},
 					},
 				},
 			},
 			output: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"kubernetes_statefulset",
 					map[string]string{
 						"namespace":        "ns1",
@@ -77,7 +74,7 @@ func TestStatefulSet(t *testing.T) {
 						"selector_select1": "s1",
 						"selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"generation":          int64(332),
 						"observed_generation": int64(119),
 						"created":             now.UnixNano(),
@@ -95,7 +92,7 @@ func TestStatefulSet(t *testing.T) {
 		{
 			name: "no label selector",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/statefulsets/": &v1.StatefulSetList{
 						Items: []v1.StatefulSet{
 							{
@@ -107,28 +104,26 @@ func TestStatefulSet(t *testing.T) {
 									ObservedGeneration: 119,
 								},
 								Spec: v1.StatefulSetSpec{
-									Replicas: toInt32Ptr(3),
+									Replicas: new(int32(3)),
 									Selector: nil,
 								},
-								ObjectMeta: metav1.ObjectMeta{
-									Generation:        332,
-									Namespace:         "ns1",
-									Name:              "sts1",
-									CreationTimestamp: metav1.Time{Time: now},
-								},
+								Generation:        332,
+								Namespace:         "ns1",
+								Name:              "sts1",
+								CreationTimestamp: metav1.Time{Time: now},
 							},
 						},
 					},
 				},
 			},
 			output: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"kubernetes_statefulset",
 					map[string]string{
 						"namespace":        "ns1",
 						"statefulset_name": "sts1",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"generation":          int64(332),
 						"observed_generation": int64(119),
 						"created":             now.UnixNano(),
@@ -146,7 +141,7 @@ func TestStatefulSet(t *testing.T) {
 		{
 			name: "no desired number of replicas",
 			handler: &mockHandler{
-				responseMap: map[string]interface{}{
+				responseMap: map[string]any{
 					"/statefulsets/": &v1.StatefulSetList{
 						Items: []v1.StatefulSet{
 							{
@@ -166,19 +161,17 @@ func TestStatefulSet(t *testing.T) {
 										},
 									},
 								},
-								ObjectMeta: metav1.ObjectMeta{
-									Generation:        332,
-									Namespace:         "ns1",
-									Name:              "sts1",
-									CreationTimestamp: metav1.Time{Time: now},
-								},
+								Generation:        332,
+								Namespace:         "ns1",
+								Name:              "sts1",
+								CreationTimestamp: metav1.Time{Time: now},
 							},
 						},
 					},
 				},
 			},
 			output: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"kubernetes_statefulset",
 					map[string]string{
 						"namespace":        "ns1",
@@ -186,7 +179,7 @@ func TestStatefulSet(t *testing.T) {
 						"selector_select1": "s1",
 						"selector_select2": "s2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"generation":          int64(332),
 						"observed_generation": int64(119),
 						"created":             now.UnixNano(),
@@ -204,9 +197,7 @@ func TestStatefulSet(t *testing.T) {
 
 	for _, v := range tests {
 		ks := &KubernetesInventory{
-			client:          cli,
-			SelectorInclude: selectInclude,
-			SelectorExclude: selectExclude,
+			client: cli,
 		}
 		require.NoError(t, ks.createSelectorFilters())
 		acc := &testutil.Accumulator{}
@@ -234,7 +225,7 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 	now := time.Now()
 	now = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 1, 36, 0, now.Location())
 
-	responseMap := map[string]interface{}{
+	responseMap := map[string]any{
 		"/statefulsets/": &v1.StatefulSetList{
 			Items: []v1.StatefulSet{
 				{
@@ -246,7 +237,7 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 						ObservedGeneration: 119,
 					},
 					Spec: v1.StatefulSetSpec{
-						Replicas: toInt32Ptr(3),
+						Replicas: new(int32(3)),
 						Selector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
 								"select1": "s1",
@@ -254,12 +245,10 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 							},
 						},
 					},
-					ObjectMeta: metav1.ObjectMeta{
-						Generation:        332,
-						Namespace:         "ns1",
-						Name:              "sts1",
-						CreationTimestamp: metav1.Time{Time: now},
-					},
+					Generation:        332,
+					Namespace:         "ns1",
+					Name:              "sts1",
+					CreationTimestamp: metav1.Time{Time: now},
 				},
 			},
 		},
@@ -292,8 +281,6 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
-			exclude:  []string{},
 			expected: map[string]string{
 				"selector_select1": "s1",
 				"selector_select2": "s2",
@@ -306,7 +293,6 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 			},
 			hasError: false,
 			include:  []string{"select1"},
-			exclude:  []string{},
 			expected: map[string]string{
 				"selector_select1": "s1",
 			},
@@ -317,7 +303,6 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"select2"},
 			expected: map[string]string{
 				"selector_select1": "s1",
@@ -330,7 +315,6 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 			},
 			hasError: false,
 			include:  []string{"*1"},
-			exclude:  []string{},
 			expected: map[string]string{
 				"selector_select1": "s1",
 			},
@@ -341,7 +325,6 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"*2"},
 			expected: map[string]string{
 				"selector_select1": "s1",
@@ -353,7 +336,6 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 				responseMap: responseMap,
 			},
 			hasError: false,
-			include:  []string{},
 			exclude:  []string{"*2"},
 			expected: map[string]string{
 				"selector_select1": "s1",
@@ -375,8 +357,8 @@ func TestStatefulSetSelectorFilter(t *testing.T) {
 
 		// Grab selector tags
 		actual := map[string]string{}
-		for _, metric := range acc.Metrics {
-			for key, val := range metric.Tags {
+		for _, m := range acc.Metrics {
+			for key, val := range m.Tags {
 				if strings.Contains(key, "selector_") {
 					actual[key] = val
 				}

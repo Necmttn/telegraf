@@ -8,9 +8,10 @@ import (
 	"io"
 	"strings"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/exec"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -26,7 +27,8 @@ type Container struct {
 	Entrypoint         []string
 	Env                map[string]string
 	Files              map[string]string
-	HostConfigModifier func(*dockercontainer.HostConfig)
+	HostAccessPorts    []int
+	HostConfigModifier func(*container.HostConfig)
 	ExposedPorts       []string
 	Cmd                []string
 	Image              string
@@ -38,6 +40,7 @@ type Container struct {
 	Address string
 	Ports   map[string]string
 	Logs    TestLogConsumer
+	Quiet   bool
 
 	container testcontainers.Container
 	ctx       context.Context
@@ -56,41 +59,42 @@ func (c *Container) Start() error {
 	}
 
 	req := testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Entrypoint:         c.Entrypoint,
-			Env:                c.Env,
-			ExposedPorts:       c.ExposedPorts,
-			Files:              files,
-			HostConfigModifier: c.HostConfigModifier,
-			Cmd:                c.Cmd,
-			Image:              c.Image,
-			Name:               c.Name,
-			Hostname:           c.Hostname,
-			Networks:           c.Networks,
-			WaitingFor:         c.WaitingFor,
-		},
-		Started: true,
+		Entrypoint:         c.Entrypoint,
+		Env:                c.Env,
+		ExposedPorts:       c.ExposedPorts,
+		Files:              files,
+		HostAccessPorts:    c.HostAccessPorts,
+		HostConfigModifier: c.HostConfigModifier,
+		Cmd:                c.Cmd,
+		Image:              c.Image,
+		Name:               c.Name,
+		Hostname:           c.Hostname,
+		Networks:           c.Networks,
+		WaitingFor:         c.WaitingFor,
+		Started:            true,
 	}
 
-	container, err := testcontainers.GenericContainer(c.ctx, req)
+	cntnr, err := testcontainers.GenericContainer(c.ctx, req)
 	if err != nil {
 		return fmt.Errorf("container failed to start: %w", err)
 	}
-	c.container = container
+	c.container = cntnr
 
-	c.Logs = TestLogConsumer{
-		Msgs: []string{},
-	}
+	c.Logs = TestLogConsumer{}
 	c.container.FollowOutput(&c.Logs)
-	err = c.container.StartLogProducer(c.ctx)
-	if err != nil {
+	if err := c.container.StartLogProducer(c.ctx); err != nil {
 		return fmt.Errorf("log producer failed: %w", err)
 	}
 
 	c.Address = "localhost"
 
-	err = c.LookupMappedPorts()
+	info, err := c.GetInfo()
 	if err != nil {
+		return fmt.Errorf("getting info failed: %w", err)
+	}
+	fmt.Println("Started container:", info)
+
+	if err := c.LookupMappedPorts(); err != nil {
 		c.Terminate()
 		return fmt.Errorf("port lookup failed: %w", err)
 	}
@@ -114,7 +118,7 @@ func (c *Container) LookupMappedPorts() error {
 			port = strings.Split(port, ":")[1]
 		}
 
-		p, err := c.container.MappedPort(c.ctx, nat.Port(port))
+		p, err := c.container.MappedPort(c.ctx, port)
 		if err != nil {
 			return fmt.Errorf("failed to find %q: %w", port, err)
 		}
@@ -131,8 +135,8 @@ func (c *Container) LookupMappedPorts() error {
 	return nil
 }
 
-func (c *Container) Exec(cmds []string) (int, io.Reader, error) {
-	return c.container.Exec(c.ctx, cmds)
+func (c *Container) Exec(cmds []string, options ...exec.ProcessOption) (int, io.Reader, error) {
+	return c.container.Exec(c.ctx, cmds, options...)
 }
 
 func (c *Container) PrintLogs() {
@@ -144,15 +148,108 @@ func (c *Container) PrintLogs() {
 }
 
 func (c *Container) Terminate() {
-	err := c.container.StopLogProducer()
-	if err != nil {
+	if err := c.container.StopLogProducer(); err != nil {
 		fmt.Println(err)
 	}
 
-	err = c.container.Terminate(c.ctx)
-	if err != nil {
+	if err := c.container.Terminate(c.ctx); err != nil {
 		fmt.Printf("failed to terminate the container: %s", err)
 	}
 
-	c.PrintLogs()
+	if !c.Quiet {
+		c.PrintLogs()
+	}
+}
+
+func (c *Container) Pause() error {
+	provider, err := testcontainers.NewDockerProvider()
+	if err != nil {
+		return fmt.Errorf("getting provider failed: %w", err)
+	}
+
+	_, err = provider.Client().ContainerPause(c.ctx, c.container.GetContainerID(), client.ContainerPauseOptions{})
+	return err
+}
+
+func (c *Container) Resume() error {
+	provider, err := testcontainers.NewDockerProvider()
+	if err != nil {
+		return fmt.Errorf("getting provider failed: %w", err)
+	}
+
+	_, err = provider.Client().ContainerUnpause(c.ctx, c.container.GetContainerID(), client.ContainerUnpauseOptions{})
+	return err
+}
+
+// RaiseNofileLimit is a HostConfigModifier that raises the container's nofile
+// ulimit. Some services (e.g. mongo) refuse to start when the inherited soft
+// limit is below their recommended minimum, which fails tests on CI hosts.
+func RaiseNofileLimit(hc *container.HostConfig) {
+	hc.Ulimits = append(hc.Ulimits, &container.Ulimit{
+		Name: "nofile",
+		Soft: 32768,
+		Hard: 32768,
+	})
+}
+
+func (c *Container) GetInfo() (string, error) {
+	dc, ok := c.container.(*testcontainers.DockerContainer)
+	if !ok {
+		return "not a docker container", nil
+	}
+
+	ci, err := dc.Inspect(c.ctx)
+	if err != nil {
+		return "", fmt.Errorf("inspecting container failed: %w", err)
+	}
+
+	provider, err := testcontainers.NewDockerProvider()
+	if err != nil {
+		return "", fmt.Errorf("getting provider failed: %w", err)
+	}
+
+	// Try direct inspection first - much more efficient than listing all images
+	imageInfo, err := provider.Client().ImageInspect(c.ctx, ci.Image)
+	if err == nil {
+		// Process imageInfo.RepoDigests directly
+		var digests []string
+		for _, repoDigest := range imageInfo.RepoDigests {
+			if _, suffix, found := strings.Cut(repoDigest, "@"); found {
+				digests = append(digests, suffix)
+			} else {
+				digests = append(digests, repoDigest)
+			}
+		}
+
+		digestStr := "unknown"
+		if len(digests) > 0 {
+			digestStr = strings.Join(digests, ",")
+		}
+
+		return fmt.Sprintf("%s (%s)", dc.Image, digestStr), nil
+	}
+
+	// Fallback to original method if direct inspection fails
+	// This preserves backward compatibility in case the direct method fails
+	summaries, err := provider.Client().ImageList(c.ctx, client.ImageListOptions{})
+	if err != nil {
+		return "", fmt.Errorf("listing images failed: %w", err)
+	}
+
+	for _, s := range summaries.Items {
+		if s.ID != ci.Image {
+			continue
+		}
+		var digest []string
+		for _, d := range s.RepoDigests {
+			if _, suffix, found := strings.Cut(d, "@"); found {
+				digest = append(digest, suffix)
+			} else {
+				digest = append(digest, d)
+			}
+		}
+		return fmt.Sprintf("%s (%s)", dc.Image, strings.Join(digest, ",")), nil
+	}
+
+	return "unknown", nil
 }

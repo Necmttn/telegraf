@@ -1,22 +1,26 @@
 # Apache Input Plugin
 
-The Apache plugin collects server performance information using the
-[`mod_status`](https://httpd.apache.org/docs/2.4/mod/mod_status.html) module of
-the [Apache HTTP Server](https://httpd.apache.org/).
+This plugin collects performance information from [Apache HTTP Servers][apache]
+using the [`mod_status` module][mod_status_module]. Typically, this module is
+configured to expose a page at the `/server-status?auto` endpoint the server.
 
-Typically, the `mod_status` module is configured to expose a page at the
-`/server-status?auto` location of the Apache server.  The
-[ExtendedStatus](https://httpd.apache.org/docs/2.4/mod/core.html#extendedstatus)
-option must be enabled in order to collect all available fields.  For
-information about how to configure your server reference the [module
-documentation](https://httpd.apache.org/docs/2.4/mod/mod_status.html#enable).
+The [ExtendedStatus option][extended_status] must be enabled in order to collect
+all available fields. For information about configuration of your server check
+the [module documentation][mod_status_module].
+
+⭐ Telegraf v1.8.0
+🏷️ server, web
+💻 all
+
+[apache]: https://httpd.apache.org
+[extended_status]: https://httpd.apache.org/docs/current/mod/core.html#extendedstatus
+[mod_status_module]: https://httpd.apache.org/docs/current/mod/mod_status.html
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

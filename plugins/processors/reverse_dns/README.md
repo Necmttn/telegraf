@@ -1,16 +1,17 @@
 # Reverse DNS Processor Plugin
 
-The `reverse_dns` processor does a reverse-dns lookup on tags (or fields) with
-IPs in them.
+This plugin does a reverse-dns lookup on tags or fields containing IPs and
+creates a tag or field containing the corresponding DNS name.
 
-Telegraf minimum version: Telegraf 1.15.0
+⭐ Telegraf v1.15.0
+🏷️ annotation
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -28,7 +29,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## you'll want to consider memory use.
   cache_ttl = "24h"
 
-  ## lookup_timeout is how long should you wait for a single dns request to repsond.
+  ## lookup_timeout is how long should you wait for a single dns request to respond.
   ## this is also the maximum acceptable latency for a metric travelling through
   ## the reverse_dns processor. After lookup_timeout is exceeded, a metric will
   ## be passed on unaltered.

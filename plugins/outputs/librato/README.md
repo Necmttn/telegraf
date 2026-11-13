@@ -1,34 +1,33 @@
 # Librato Output Plugin
 
-This plugin writes to the [Librato Metrics API][metrics-api] and requires an
-`api_user` and `api_token` which can be obtained [here][tokens] for the account.
+This plugin writes metrics to the [Librato][librato] service. It requires an
+`api_user` and `api_token` which can be obtained on the [website][tokens] for
+your account.
 
-The `source_tag` option in the Configuration file is used to send contextual
-information from Point Tags to the API.
+> [!IMPORTANT]
+> If the point value being sent cannot be converted to a `float64`, the metric
+> is skipped.
 
-If the point value being sent cannot be converted to a float64, the metric is
-skipped.
+⭐ Telegraf v0.2.0
+🏷️ cloud, datastore
+💻 all
 
-Currently, the plugin does not send any associated Point Tags.
-
-[metrics-api]: http://dev.librato.com/v1/metrics#metrics
-
+[librato]: https://www.librato.com/
 [tokens]: https://metrics.librato.com/account/api_tokens
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `api_user` and
+This plugin supports secrets from secret stores for the `api_user` and
 `api_token` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets

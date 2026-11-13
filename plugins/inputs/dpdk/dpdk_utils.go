@@ -14,7 +14,7 @@ import (
 	"github.com/influxdata/telegraf/filter"
 )
 
-func commandWithParams(command string, params string) string {
+func commandWithParams(command, params string) string {
 	if params != "" {
 		return command + "," + params
 	}
@@ -46,7 +46,7 @@ func isInMemorySocketPath(filePath, socketPath string) bool {
 		return true
 	}
 
-	socketPathPrefix := fmt.Sprintf("%s:", socketPath)
+	socketPathPrefix := socketPath + ":"
 	if strings.HasPrefix(filePath, socketPathPrefix) {
 		suffix := filePath[len(socketPathPrefix):]
 		if number, err := strconv.Atoi(suffix); err == nil {
@@ -131,6 +131,6 @@ func uniqueValues(values []string) []string {
 	return result
 }
 
-func isEmpty(value interface{}) bool {
-	return value == nil || (reflect.ValueOf(value).Kind() == reflect.Ptr && reflect.ValueOf(value).IsNil())
+func isEmpty(value any) bool {
+	return value == nil || (reflect.ValueOf(value).Kind() == reflect.Pointer && reflect.ValueOf(value).IsNil())
 }

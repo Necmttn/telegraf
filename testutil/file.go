@@ -2,6 +2,8 @@ package testutil
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,7 +19,7 @@ type LineParser interface {
 func ParseRawLinesFrom(lines []string, header string) ([]string, error) {
 	if len(lines) < 2 {
 		// We need a line for HEADER and EMPTY TRAILING LINE
-		return nil, fmt.Errorf("expected at least two lines to parse from")
+		return nil, errors.New("expected at least two lines to parse from")
 	}
 	start := -1
 	for i := range lines {
@@ -30,10 +32,10 @@ func ParseRawLinesFrom(lines []string, header string) ([]string, error) {
 		return nil, fmt.Errorf("header %q does not exist", header)
 	}
 
-	output := make([]string, 0)
+	output := make([]string, 0, len(lines)-start)
 	for _, line := range lines[start:] {
 		if !strings.HasPrefix(strings.TrimLeft(line, "\t "), "#") {
-			return nil, fmt.Errorf("section does not end with trailing empty line")
+			return nil, errors.New("section does not end with trailing empty line")
 		}
 
 		// Stop at empty line
@@ -51,7 +53,7 @@ func ParseRawLinesFrom(lines []string, header string) ([]string, error) {
 func ParseMetricsFrom(lines []string, header string, parser LineParser) ([]telegraf.Metric, error) {
 	if len(lines) < 2 {
 		// We need a line for HEADER and EMPTY TRAILING LINE
-		return nil, fmt.Errorf("expected at least two lines to parse from")
+		return nil, errors.New("expected at least two lines to parse from")
 	}
 	start := -1
 	for i := range lines {
@@ -64,10 +66,10 @@ func ParseMetricsFrom(lines []string, header string, parser LineParser) ([]teleg
 		return nil, fmt.Errorf("header %q does not exist", header)
 	}
 
-	metrics := make([]telegraf.Metric, 0)
+	metrics := make([]telegraf.Metric, 0, len(lines)-start)
 	for _, line := range lines[start:] {
 		if !strings.HasPrefix(strings.TrimLeft(line, "\t "), "#") {
-			return nil, fmt.Errorf("section does not end with trailing empty line")
+			return nil, errors.New("section does not end with trailing empty line")
 		}
 
 		// Stop at empty line
@@ -98,7 +100,7 @@ func ParseMetricsFromFile(filename string, parser telegraf.Parser) ([]telegraf.M
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if len(line) == 0 || strings.HasPrefix(string(line), "#") {
+		if len(line) == 0 || bytes.HasPrefix(line, []byte("#")) {
 			continue
 		}
 
@@ -111,6 +113,10 @@ func ParseMetricsFromFile(filename string, parser telegraf.Parser) ([]telegraf.M
 			m.SetTime(m.Time().UTC())
 			metrics = append(metrics, m)
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("parsing file %q failed: %w", filename, err)
 	}
 
 	return metrics, nil
@@ -134,5 +140,8 @@ func ParseLinesFromFile(filename string) ([]string, error) {
 		lines = append(lines, line)
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("parsing file %q failed: %w", filename, err)
+	}
 	return lines, nil
 }

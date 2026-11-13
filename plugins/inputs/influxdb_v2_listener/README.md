@@ -1,20 +1,23 @@
 # InfluxDB V2 Listener Input Plugin
 
-InfluxDB V2 Listener is a service input plugin that listens for requests sent
-according to the [InfluxDB HTTP API][influxdb_http_api].  The intent of the
-plugin is to allow Telegraf to serve as a proxy/router for the `/api/v2/write`
-endpoint of the InfluxDB HTTP API.
+This plugin listens for requests sent according to the
+[InfluxDB HTTP v2 API][influxdb_http_api]. This allows Telegraf to serve as a
+proxy/router for the `/api/v2/write` endpoint of the InfluxDB HTTP API.
 
 The `/api/v2/write` endpoint supports the `precision` query parameter and can be
 set to one of `ns`, `us`, `ms`, `s`.  All other parameters are ignored and defer
 to the output plugins configuration.
 
-Telegraf minimum version: Telegraf 1.16.0
+⭐ Telegraf v1.16.0
+🏷️ datastore
+💻 all
+
+[influxdb_http_api]: https://docs.influxdata.com/influxdb/v2/api/
 
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -22,14 +25,29 @@ normal plugins:
 2. The CLI options of `--test`, `--test-wait`, and `--once` may not produce
    output for this plugin
 
+## Tracking metric support <!-- @/docs/includes/plugin_tracking_metrics.md -->
+
+This plugin supports [tracking metrics][METRICS.md], which allows the plugin
+to be notified when metrics have been delivered to all outputs, enabling proper
+acknowledgment back to the source.
+
+[METRICS.md]: ../../../docs/METRICS.md#tracking-metrics
+
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
+
+## Secret store support
+
+This plugin supports secrets from secret stores for the `token` option.
+See the [secret store documentation][SECRETSTORE] for more details on how
+to use them.
+
+[SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
 
 ## Configuration
 
@@ -39,6 +57,11 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## Address and port to host InfluxDB listener on
   ## (Double check the port. Could be 9999 if using OSS Beta)
   service_address = ":8086"
+
+  ## Maximum undelivered metrics before rate limit kicks in.
+  ## When the rate limit kicks in, HTTP status 429 will be returned.
+  ## 0 disables rate limiting
+  # max_undelivered_metrics = 0
 
   ## Maximum duration before timing out read of the request
   # read_timeout = "10s"
@@ -71,20 +94,25 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## 'internal' is the default. 'upstream' is a newer parser that is faster
   ## and more memory efficient.
   # parser_type = "internal"
+
+  ## Use new internal metrics. When true, it adds tag for alias if set.
+  # use_internal_statistics = false
 ```
 
 ## Metrics
 
 Metrics are created from InfluxDB Line Protocol in the request body.
 
-## Troubleshooting
+## Example Output
 
-**Example Query:**
+Using
 
 ```sh
 curl -i -XPOST 'http://localhost:8186/api/v2/write' --data-binary 'cpu_load_short,host=server01,region=us-west value=0.64 1434055562000000000'
 ```
 
-[influxdb_http_api]: https://docs.influxdata.com/influxdb/latest/api/
+will produce the following metric
 
-## Example Output
+```text
+cpu_load_short,host=server01,region=us-west value=0.64 1434055562000000000
+```

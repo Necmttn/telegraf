@@ -34,6 +34,7 @@ var tests = []SnakeTest{
 	{"LinuxMOTD", "linux_motd"},
 	{"OMGWTFBBQ", "omgwtfbbq"},
 	{"omg_wtf_bbq", "omg_wtf_bbq"},
+	{"ConsumedLCUs", "consumed_lcus"},
 }
 
 func TestSnakeCase(t *testing.T) {
@@ -44,21 +45,17 @@ func TestSnakeCase(t *testing.T) {
 	}
 }
 
-var (
-	sleepbin, _ = exec.LookPath("sleep")
-	echobin, _  = exec.LookPath("echo")
-	shell, _    = exec.LookPath("sh")
-)
-
 func TestRunTimeout(t *testing.T) {
 	t.Skip("Skipping test due to random failures & a data race when running test-all.")
 
-	if sleepbin == "" {
+	sleepbin, err := exec.LookPath("sleep")
+	if err != nil || sleepbin == "" {
 		t.Skip("'sleep' binary not available on OS, skipping.")
 	}
+
 	cmd := exec.Command(sleepbin, "10")
 	start := time.Now()
-	err := RunTimeout(cmd, time.Millisecond*20)
+	err = RunTimeout(cmd, time.Millisecond*20)
 	elapsed := time.Since(start)
 
 	require.Equal(t, ErrTimeout, err)
@@ -71,12 +68,13 @@ func TestRunTimeoutFastExit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping test due to random failures.")
 	}
-	if echobin == "" {
+	echobin, err := exec.LookPath("echo")
+	if err != nil || echobin == "" {
 		t.Skip("'echo' binary not available on OS, skipping.")
 	}
 	cmd := exec.Command(echobin)
 	start := time.Now()
-	err := RunTimeout(cmd, time.Millisecond*20)
+	err = RunTimeout(cmd, time.Millisecond*20)
 	buf := &bytes.Buffer{}
 	log.SetOutput(buf)
 	elapsed := time.Since(start)
@@ -87,18 +85,19 @@ func TestRunTimeoutFastExit(t *testing.T) {
 
 	// Verify "process already finished" log doesn't occur.
 	time.Sleep(time.Millisecond * 75)
-	require.Equal(t, "", buf.String())
+	require.Empty(t, buf.String())
 }
 
 func TestCombinedOutputTimeout(t *testing.T) {
 	// TODO: Fix this test
 	t.Skip("Test failing too often, skip for now and revisit later.")
-	if sleepbin == "" {
+	sleepbin, err := exec.LookPath("sleep")
+	if err != nil || sleepbin == "" {
 		t.Skip("'sleep' binary not available on OS, skipping.")
 	}
 	cmd := exec.Command(sleepbin, "10")
 	start := time.Now()
-	_, err := CombinedOutputTimeout(cmd, time.Millisecond*20)
+	_, err = CombinedOutputTimeout(cmd, time.Millisecond*20)
 	elapsed := time.Since(start)
 
 	require.Equal(t, ErrTimeout, err)
@@ -107,7 +106,8 @@ func TestCombinedOutputTimeout(t *testing.T) {
 }
 
 func TestCombinedOutput(t *testing.T) {
-	if echobin == "" {
+	echobin, err := exec.LookPath("echo")
+	if err != nil || echobin == "" {
 		t.Skip("'echo' binary not available on OS, skipping.")
 	}
 	cmd := exec.Command(echobin, "foo")
@@ -120,7 +120,8 @@ func TestCombinedOutput(t *testing.T) {
 // test that CombinedOutputTimeout and exec.Cmd.CombinedOutput return
 // the same output from a failed command.
 func TestCombinedOutputError(t *testing.T) {
-	if shell == "" {
+	shell, err := exec.LookPath("sh")
+	if err != nil || shell == "" {
 		t.Skip("'sh' binary not available on OS, skipping.")
 	}
 	cmd := exec.Command(shell, "-c", "false")
@@ -135,11 +136,12 @@ func TestCombinedOutputError(t *testing.T) {
 }
 
 func TestRunError(t *testing.T) {
-	if shell == "" {
+	shell, err := exec.LookPath("sh")
+	if err != nil || shell == "" {
 		t.Skip("'sh' binary not available on OS, skipping.")
 	}
 	cmd := exec.Command(shell, "-c", "false")
-	err := RunTimeout(cmd, time.Second)
+	err = RunTimeout(cmd, time.Second)
 
 	require.Error(t, err)
 }
@@ -173,7 +175,7 @@ func TestRandomSleep(t *testing.T) {
 
 func TestCompressWithGzip(t *testing.T) {
 	testData := "the quick brown fox jumps over the lazy dog"
-	inputBuffer := bytes.NewBuffer([]byte(testData))
+	inputBuffer := bytes.NewBufferString(testData)
 
 	outputBuffer := CompressWithGzip(inputBuffer)
 	gzipReader, err := gzip.NewReader(outputBuffer)
@@ -233,7 +235,7 @@ func TestCompressWithGzipErrorPropagationCopy(t *testing.T) {
 
 		rc := CompressWithGzip(r)
 		n, err := io.Copy(io.Discard, rc)
-		require.Greater(t, n, int64(0))
+		require.Positive(t, n)
 		require.ErrorIs(t, err, expected)
 		require.NoError(t, rc.Close())
 	}
@@ -306,8 +308,9 @@ func TestAlignDuration(t *testing.T) {
 
 func TestAlignTime(t *testing.T) {
 	rfc3339 := func(value string) time.Time {
-		t, _ := time.Parse(time.RFC3339, value)
-		return t
+		tt, err := time.Parse(time.RFC3339, value)
+		require.NoError(t, err)
+		return tt
 	}
 
 	tests := []struct {
@@ -401,7 +404,7 @@ func TestParseTimestamp(t *testing.T) {
 	tests := []struct {
 		name      string
 		format    string
-		timestamp interface{}
+		timestamp any
 		location  string
 		separator []string
 		expected  time.Time
@@ -538,6 +541,138 @@ func TestParseTimestamp(t *testing.T) {
 			format:    "unix_ns",
 			timestamp: "1.5683382080000005e+18",
 			expected:  rfc3339("2019-09-13T01:30:08.000000500Z"),
+		},
+		{
+			name:      "timestamp with timezone seconds without fractional",
+			format:    "timestamp_tz",
+			timestamp: "1568338208",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with fractional",
+			format:    "timestamp_tz",
+			timestamp: "1568338208.500",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with fractional and comma decimal point",
+			format:    "timestamp_tz",
+			timestamp: "1568338208,500",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds extra precision",
+			format:    "timestamp_tz",
+			timestamp: "1568338208.00000050042",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.000000500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with thousand separator only (dot)",
+			format:    "timestamp_tz",
+			timestamp: "1.568.338.208",
+			separator: []string{","},
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with thousand separator only (comma)",
+			format:    "timestamp_tz",
+			timestamp: "1,568,338,208",
+			separator: []string{"."},
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with thousand separator only (space)",
+			format:    "timestamp_tz",
+			timestamp: "1 568 338 208",
+			separator: []string{"."},
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with thousand separator only (underscore)",
+			format:    "timestamp_tz",
+			timestamp: "1_568_338_208",
+			separator: []string{"."},
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with thousand and decimal separator (US)",
+			format:    "timestamp_tz",
+			timestamp: "1,568,338,208.500",
+			separator: []string{"."},
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds with thousand and decimal separator (EU)",
+			format:    "timestamp_tz",
+			timestamp: "1.568.338.208,500",
+			separator: []string{","},
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds integer",
+			format:    "timestamp_tz",
+			timestamp: int64(1568338208),
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds float",
+			format:    "timestamp_tz",
+			timestamp: float64(1568338208.500),
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone seconds float exponential",
+			format:    "timestamp_tz",
+			timestamp: float64(1.5683382085e+9),
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone milliseconds",
+			format:    "timestamp_tz_ms",
+			timestamp: "1568338208500",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone milliseconds with fractional",
+			format:    "timestamp_tz_ms",
+			timestamp: "1568338208500.42",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.50042+12:00"),
+		},
+		{
+			name:      "timestamp with timezone microseconds",
+			format:    "timestamp_tz_us",
+			timestamp: "1568338208000500",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.000500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone nanoseconds",
+			format:    "timestamp_tz_ns",
+			timestamp: "1568338208000000500",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.000000500+12:00"),
+		},
+		{
+			name:      "timestamp with timezone nanoseconds exponential",
+			format:    "timestamp_tz_ns",
+			timestamp: "1.5683382080000005e+18",
+			location:  "Pacific/Fiji",
+			expected:  rfc3339("2019-09-13T01:30:08.000000500+12:00"),
 		},
 		{
 			name:      "rfc339 test",
@@ -680,7 +815,7 @@ func TestParseTimestampInvalid(t *testing.T) {
 	tests := []struct {
 		name      string
 		format    string
-		timestamp interface{}
+		timestamp any
 		expected  string
 	}{
 		{
@@ -759,11 +894,45 @@ func TestTimestampAbbrevWarning(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(backup)
 
-	ts, err := ParseTimestamp("RFC1123", "Mon, 02 Jan 2006 15:04:05 EST", nil)
+	// Try multiple timestamps with abbreviated timezones in case a user
+	// is actually in one of the timezones.
+	ts, err := ParseTimestamp("RFC1123", "Mon, 02 Jan 2006 15:04:05 MST", nil)
 	require.NoError(t, err)
-	require.EqualValues(t, 1136232245, ts.Unix())
+	require.EqualValues(t, 1136239445, ts.Unix())
+
+	ts2, err := ParseTimestamp("RFC1123", "Mon, 02 Jan 2006 15:04:05 EST", nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1136232245, ts2.Unix())
 
 	require.Contains(t, buf.String(), "Your config is using abbreviated timezones and parsing was changed in v1.27.0")
+}
+
+func TestGoVersion(t *testing.T) {
+	tests := []struct {
+		version  string
+		expected string
+	}{
+		{
+			version:  "go version go1.24.0 linux/amd64",
+			expected: "1.24.0",
+		},
+		{
+			version:  "go version go1.25.2 X:nodwarf5 linux/amd64",
+			expected: "1.25.2",
+		},
+		{
+			version:  "go version go1.26.1-X:nodwarf5 linux/amd64",
+			expected: "1.26.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			match := reGoVer.FindStringSubmatch(tt.version)
+			require.Len(t, match, 2)
+			require.Equal(t, tt.expected, match[1])
+		})
+	}
 }
 
 func TestProductToken(t *testing.T) {

@@ -1,6 +1,14 @@
-# Event Hub Consumer Input Plugin
+# Azure Event Hub Consumer Input Plugin
 
-This plugin provides a consumer for use with Azure Event Hubs and Azure IoT Hub.
+This plugin allows consuming messages from [Azure Event Hubs][eventhub] and
+[Azure IoT Hub][iothub] instances.
+
+⭐ Telegraf v1.14.0
+🏷️ iot, messaging
+💻 all
+
+[eventhub]: https://learn.microsoft.com/en-us/azure/event-hubs/event-hubs-about
+[iothub]: https://azure.microsoft.com/en-us/products/iot-hub
 
 ## IoT Hub Setup
 
@@ -16,7 +24,7 @@ The main focus for development of this plugin is Azure IoT hub:
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -24,12 +32,19 @@ normal plugins:
 2. The CLI options of `--test`, `--test-wait`, and `--once` may not produce
    output for this plugin
 
+## Tracking metric support <!-- @/docs/includes/plugin_tracking_metrics.md -->
+
+This plugin supports [tracking metrics][METRICS.md], which allows the plugin
+to be notified when metrics have been delivered to all outputs, enabling proper
+acknowledgment back to the source.
+
+[METRICS.md]: ../../../docs/METRICS.md#tracking-metrics
+
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

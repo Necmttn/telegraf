@@ -1,3 +1,4 @@
+//go:generate ../../../tools/config_includer/generator
 //go:generate ../../../tools/readme_config_includer/generator
 package http
 
@@ -10,18 +11,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/blues/jsonata-go"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	chttp "github.com/influxdata/telegraf/plugins/common/http"
+	common_http "github.com/influxdata/telegraf/plugins/common/http"
 	"github.com/influxdata/telegraf/plugins/secretstores"
 )
 
 //go:embed sample.conf
 var sampleConfig string
+
+const defaultIdleConnTimeoutMinutes = 5
 
 type HTTP struct {
 	URL                string            `toml:"url"`
@@ -32,21 +37,27 @@ type HTTP struct {
 	SuccessStatusCodes []int             `toml:"success_status_codes"`
 	Transformation     string            `toml:"transformation"`
 	Log                telegraf.Logger   `toml:"-"`
-	chttp.HTTPClientConfig
-	DecryptionConfig
+	common_http.HTTPClientConfig
+	decryptionConfig
 
 	client      *http.Client
 	transformer *jsonata.Expr
 	cache       map[string]string
-	decrypter   Decrypter
+	decrypter   decrypter
 }
 
-func (h *HTTP) SampleConfig() string {
+func (*HTTP) SampleConfig() string {
 	return sampleConfig
 }
 
 func (h *HTTP) Init() error {
 	ctx := context.Background()
+
+	// Prevent idle connections from hanging around forever on telegraf reload
+	if h.HTTPClientConfig.IdleConnTimeout == 0 {
+		h.HTTPClientConfig.IdleConnTimeout = config.Duration(defaultIdleConnTimeoutMinutes * time.Minute)
+	}
+
 	client, err := h.HTTPClientConfig.CreateClient(ctx, h.Log)
 	if err != nil {
 		return err
@@ -68,7 +79,7 @@ func (h *HTTP) Init() error {
 	}
 
 	// Setup the decryption infrastructure
-	h.decrypter, err = h.DecryptionConfig.CreateDecrypter()
+	h.decrypter, err = h.decryptionConfig.createDecrypter()
 	if err != nil {
 		return fmt.Errorf("creating decryptor failed: %w", err)
 	}
@@ -76,7 +87,6 @@ func (h *HTTP) Init() error {
 	return nil
 }
 
-// Get searches for the given key and return the secret
 func (h *HTTP) Get(key string) ([]byte, error) {
 	v, found := h.cache[key]
 	if !found {
@@ -90,18 +100,12 @@ func (h *HTTP) Get(key string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("base64 decoding failed: %w", err)
 		}
-		return h.decrypter.Decrypt(buf)
+		return h.decrypter.decrypt(buf)
 	}
 
 	return []byte(v), nil
 }
 
-// Set sets the given secret for the given key
-func (h *HTTP) Set(_, _ string) error {
-	return errors.New("setting secrets not supported")
-}
-
-// List lists all known secret keys
 func (h *HTTP) List() ([]string, error) {
 	keys := make([]string, 0, len(h.cache))
 	for k := range h.cache {
@@ -110,7 +114,6 @@ func (h *HTTP) List() ([]string, error) {
 	return keys, nil
 }
 
-// GetResolver returns a function to resolve the given key.
 func (h *HTTP) GetResolver(key string) (telegraf.ResolveFunc, error) {
 	// Download and parse the credentials
 	if err := h.download(); err != nil {
@@ -142,8 +145,7 @@ func (h *HTTP) download() error {
 
 	// Extract the data from the resulting data
 	if err := json.Unmarshal(data, &h.cache); err != nil {
-		var terr *json.UnmarshalTypeError
-		if errors.As(err, &terr) {
+		if _, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
 			return fmt.Errorf("%w; maybe missing or wrong data transformation", err)
 		}
 		return err
@@ -180,13 +182,7 @@ func (h *HTTP) query() ([]byte, error) {
 	request.SetBasicAuth("---", "---")
 	request.Header.Set("Authorization", "---")
 
-	responseHasSuccessCode := false
-	for _, statusCode := range h.SuccessStatusCodes {
-		if resp.StatusCode == statusCode {
-			responseHasSuccessCode = true
-			break
-		}
-	}
+	responseHasSuccessCode := slices.Contains(h.SuccessStatusCodes, resp.StatusCode)
 
 	if !responseHasSuccessCode {
 		msg := "received status code %d (%s), expected any value out of %v"
@@ -224,9 +220,8 @@ func (h *HTTP) setRequestAuth(request *http.Request) error {
 	return nil
 }
 
-// Register the secret-store on load.
 func init() {
-	secretstores.Add("http", func(id string) telegraf.SecretStore {
+	secretstores.Add("http", func(string) telegraf.SecretStore {
 		return &HTTP{}
 	})
 }

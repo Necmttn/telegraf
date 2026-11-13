@@ -28,6 +28,7 @@ func TestRefreshFilePaths(t *testing.T) {
 
 	r := File{
 		Files: []string{filepath.Join(wd, "dev", "testfiles", "**.log")},
+		Log:   testutil.Logger{},
 	}
 	err = r.Init()
 	require.NoError(t, err)
@@ -42,8 +43,10 @@ func TestFileTag(t *testing.T) {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 	r := File{
-		Files:   []string{filepath.Join(wd, "dev", "testfiles", "json_a.log")},
-		FileTag: "filename",
+		Files:       []string{filepath.Join(wd, "dev", "testfiles", "json_a.log")},
+		FileTag:     "filename",
+		FilePathTag: "filepath",
+		Log:         testutil.Logger{},
 	}
 	require.NoError(t, r.Init())
 
@@ -56,18 +59,21 @@ func TestFileTag(t *testing.T) {
 	require.NoError(t, r.Gather(&acc))
 
 	for _, m := range acc.Metrics {
-		for key, value := range m.Tags {
-			require.Equal(t, r.FileTag, key)
-			require.Equal(t, filepath.Base(r.Files[0]), value)
-		}
+		require.Contains(t, m.Tags, "filename")
+		require.Equal(t, filepath.Base(r.Files[0]), m.Tags["filename"])
+
+		require.Contains(t, m.Tags, "filepath")
+		require.True(t, filepath.IsAbs(m.Tags["filepath"]))
 	}
 }
 
 func TestJSONParserCompile(t *testing.T) {
 	var acc testutil.Accumulator
-	wd, _ := os.Getwd()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
 	r := File{
 		Files: []string{filepath.Join(wd, "dev", "testfiles", "json_a.log")},
+		Log:   testutil.Logger{},
 	}
 	require.NoError(t, r.Init())
 
@@ -83,12 +89,14 @@ func TestJSONParserCompile(t *testing.T) {
 }
 
 func TestGrokParser(t *testing.T) {
-	wd, _ := os.Getwd()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
 	var acc testutil.Accumulator
 	r := File{
 		Files: []string{filepath.Join(wd, "dev", "testfiles", "grok_a.log")},
+		Log:   testutil.Logger{},
 	}
-	err := r.Init()
+	err = r.Init()
 	require.NoError(t, err)
 
 	r.SetParserFunc(func() (telegraf.Parser, error) {
@@ -108,13 +116,13 @@ func TestGrokParser(t *testing.T) {
 
 func TestCharacterEncoding(t *testing.T) {
 	expected := []telegraf.Metric{
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "1",
 				"ip":   "12.122.114.5",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    21.55,
 				"best":   19.34,
 				"loss":   0.0,
@@ -125,13 +133,13 @@ func TestCharacterEncoding(t *testing.T) {
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "2",
 				"ip":   "192.205.32.238",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    25.11,
 				"best":   20.8,
 				"loss":   0.0,
@@ -142,13 +150,13 @@ func TestCharacterEncoding(t *testing.T) {
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "3",
 				"ip":   "152.195.85.133",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    20.18,
 				"best":   19.75,
 				"loss":   0.0,
@@ -159,13 +167,13 @@ func TestCharacterEncoding(t *testing.T) {
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "4",
 				"ip":   "93.184.216.34",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    24.02,
 				"best":   19.75,
 				"loss":   0.0,
@@ -181,7 +189,7 @@ func TestCharacterEncoding(t *testing.T) {
 	tests := []struct {
 		name   string
 		plugin *File
-		csv    csv.Parser
+		csv    *csv.Parser
 		file   string
 	}{
 		{
@@ -189,8 +197,9 @@ func TestCharacterEncoding(t *testing.T) {
 			plugin: &File{
 				Files:             []string{"testdata/mtr-utf-8.csv"},
 				CharacterEncoding: "",
+				Log:               testutil.Logger{},
 			},
-			csv: csv.Parser{
+			csv: &csv.Parser{
 				MetricName:  "file",
 				SkipRows:    1,
 				ColumnNames: []string{"", "", "status", "dest", "hop", "ip", "loss", "snt", "", "", "avg", "best", "worst", "stdev"},
@@ -202,8 +211,9 @@ func TestCharacterEncoding(t *testing.T) {
 			plugin: &File{
 				Files:             []string{"testdata/mtr-utf-8.csv"},
 				CharacterEncoding: "utf-8",
+				Log:               testutil.Logger{},
 			},
-			csv: csv.Parser{
+			csv: &csv.Parser{
 				MetricName:  "file",
 				SkipRows:    1,
 				ColumnNames: []string{"", "", "status", "dest", "hop", "ip", "loss", "snt", "", "", "avg", "best", "worst", "stdev"},
@@ -215,8 +225,9 @@ func TestCharacterEncoding(t *testing.T) {
 			plugin: &File{
 				Files:             []string{"testdata/mtr-utf-16le.csv"},
 				CharacterEncoding: "utf-16le",
+				Log:               testutil.Logger{},
 			},
-			csv: csv.Parser{
+			csv: &csv.Parser{
 				MetricName:  "file",
 				SkipRows:    1,
 				ColumnNames: []string{"", "", "status", "dest", "hop", "ip", "loss", "snt", "", "", "avg", "best", "worst", "stdev"},
@@ -228,8 +239,9 @@ func TestCharacterEncoding(t *testing.T) {
 			plugin: &File{
 				Files:             []string{"testdata/mtr-utf-16be.csv"},
 				CharacterEncoding: "utf-16be",
+				Log:               testutil.Logger{},
 			},
-			csv: csv.Parser{
+			csv: &csv.Parser{
 				MetricName:  "file",
 				SkipRows:    1,
 				ColumnNames: []string{"", "", "status", "dest", "hop", "ip", "loss", "snt", "", "", "avg", "best", "worst", "stdev"},
@@ -243,9 +255,14 @@ func TestCharacterEncoding(t *testing.T) {
 			require.NoError(t, err)
 
 			tt.plugin.SetParserFunc(func() (telegraf.Parser, error) {
-				parser := tt.csv
+				parser := &csv.Parser{
+					MetricName:  tt.csv.MetricName,
+					SkipRows:    tt.csv.SkipRows,
+					ColumnNames: tt.csv.ColumnNames,
+					TagColumns:  tt.csv.TagColumns,
+				}
 				err := parser.Init()
-				return &parser, err
+				return parser, err
 			})
 
 			var acc testutil.Accumulator
@@ -259,13 +276,13 @@ func TestCharacterEncoding(t *testing.T) {
 
 func TestStatefulParsers(t *testing.T) {
 	expected := []telegraf.Metric{
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "1",
 				"ip":   "12.122.114.5",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    21.55,
 				"best":   19.34,
 				"loss":   0.0,
@@ -276,13 +293,13 @@ func TestStatefulParsers(t *testing.T) {
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "2",
 				"ip":   "192.205.32.238",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    25.11,
 				"best":   20.8,
 				"loss":   0.0,
@@ -293,13 +310,13 @@ func TestStatefulParsers(t *testing.T) {
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "3",
 				"ip":   "152.195.85.133",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    20.18,
 				"best":   19.75,
 				"loss":   0.0,
@@ -310,13 +327,13 @@ func TestStatefulParsers(t *testing.T) {
 			},
 			time.Unix(0, 0),
 		),
-		testutil.MustMetric("file",
+		metric.New("file",
 			map[string]string{
 				"dest": "example.org",
 				"hop":  "4",
 				"ip":   "93.184.216.34",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"avg":    24.02,
 				"best":   19.75,
 				"loss":   0.0,
@@ -332,7 +349,7 @@ func TestStatefulParsers(t *testing.T) {
 	tests := []struct {
 		name   string
 		plugin *File
-		csv    csv.Parser
+		csv    *csv.Parser
 		file   string
 		count  int
 	}{
@@ -341,8 +358,9 @@ func TestStatefulParsers(t *testing.T) {
 			plugin: &File{
 				Files:             []string{"testdata/mtr-utf-8.csv"},
 				CharacterEncoding: "",
+				Log:               testutil.Logger{},
 			},
-			csv: csv.Parser{
+			csv: &csv.Parser{
 				MetricName:  "file",
 				SkipRows:    1,
 				ColumnNames: []string{"", "", "status", "dest", "hop", "ip", "loss", "snt", "", "", "avg", "best", "worst", "stdev"},
@@ -358,9 +376,14 @@ func TestStatefulParsers(t *testing.T) {
 			require.NoError(t, err)
 
 			tt.plugin.SetParserFunc(func() (telegraf.Parser, error) {
-				parser := tt.csv
+				parser := &csv.Parser{
+					MetricName:  tt.csv.MetricName,
+					SkipRows:    tt.csv.SkipRows,
+					ColumnNames: tt.csv.ColumnNames,
+					TagColumns:  tt.csv.TagColumns,
+				}
 				err := parser.Init()
-				return &parser, err
+				return parser, err
 			})
 
 			var acc testutil.Accumulator
@@ -388,6 +411,7 @@ func TestCSVBehavior(t *testing.T) {
 	// Setup the plugin
 	plugin := &File{
 		Files: []string{filepath.Join("testdata", "csv_behavior_input.csv")},
+		Log:   testutil.Logger{},
 	}
 	plugin.SetParserFunc(parserFunc)
 	require.NoError(t, plugin.Init())
@@ -396,7 +420,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"file",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(1),
 				"b": int64(2),
 			},
@@ -405,7 +429,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"file",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(3),
 				"b": int64(4),
 			},
@@ -414,7 +438,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"file",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(1),
 				"b": int64(2),
 			},
@@ -423,7 +447,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"file",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(3),
 				"b": int64(4),
 			},

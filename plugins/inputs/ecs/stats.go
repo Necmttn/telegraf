@@ -2,16 +2,17 @@ package ecs
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
+	"github.com/moby/moby/api/types/container"
 
 	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/plugins/inputs/docker"
+	"github.com/influxdata/telegraf/plugins/common/docker"
 )
 
-func parseContainerStats(c *Container, acc telegraf.Accumulator, tags map[string]string) {
+func parseContainerStats(c *ecsContainer, acc telegraf.Accumulator, tags map[string]string) {
 	id := c.ID
 	stats := &c.Stats
 	tm := stats.Read
@@ -27,8 +28,8 @@ func parseContainerStats(c *Container, acc telegraf.Accumulator, tags map[string
 	blkstats(id, stats, acc, tags, tm)
 }
 
-func metastats(id string, c *Container, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
-	metafields := map[string]interface{}{
+func metastats(id string, c *ecsContainer, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
+	metafields := map[string]any{
 		"container_id":   id,
 		"docker_name":    c.DockerName,
 		"image":          c.Image,
@@ -45,8 +46,8 @@ func metastats(id string, c *Container, acc telegraf.Accumulator, tags map[strin
 	acc.AddFields("ecs_container_meta", metafields, tags, tm)
 }
 
-func memstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
-	memfields := map[string]interface{}{
+func memstats(id string, stats *container.StatsResponse, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
+	memfields := map[string]any{
 		"container_id": id,
 	}
 
@@ -102,8 +103,8 @@ func memstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 	acc.AddFields("ecs_container_mem", memfields, tags, tm)
 }
 
-func cpustats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
-	cpufields := map[string]interface{}{
+func cpustats(id string, stats *container.StatsResponse, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
+	cpufields := map[string]any{
 		"usage_total":                  stats.CPUStats.CPUUsage.TotalUsage,
 		"usage_in_usermode":            stats.CPUStats.CPUUsage.UsageInUsermode,
 		"usage_in_kernelmode":          stats.CPUStats.CPUUsage.UsageInKernelmode,
@@ -119,7 +120,7 @@ func cpustats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 	cpuPercent := docker.CalculateCPUPercentUnix(previousCPU, previousSystem, stats)
 	cpufields["usage_percent"] = cpuPercent
 
-	cputags := copyTags(tags)
+	cputags := maps.Clone(tags)
 	cputags["cpu"] = "cpu-total"
 	acc.AddFields("ecs_container_cpu", cpufields, cputags, tm)
 
@@ -133,9 +134,9 @@ func cpustats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 	}
 
 	for i, percpu := range percpuusage {
-		percputags := copyTags(tags)
+		percputags := maps.Clone(tags)
 		percputags["cpu"] = fmt.Sprintf("cpu%d", i)
-		fields := map[string]interface{}{
+		fields := map[string]any{
 			"usage_total":  percpu,
 			"container_id": id,
 		}
@@ -143,10 +144,10 @@ func cpustats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 	}
 }
 
-func netstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
-	totalNetworkStatMap := make(map[string]interface{})
+func netstats(id string, stats *container.StatsResponse, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
+	totalNetworkStatMap := make(map[string]any)
 	for network, netstats := range stats.Networks {
-		netfields := map[string]interface{}{
+		netfields := map[string]any{
 			"rx_dropped":   netstats.RxDropped,
 			"rx_bytes":     netstats.RxBytes,
 			"rx_errors":    netstats.RxErrors,
@@ -158,7 +159,7 @@ func netstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 			"container_id": id,
 		}
 
-		nettags := copyTags(tags)
+		nettags := maps.Clone(tags)
 		nettags["network"] = network
 		acc.AddFields("ecs_container_net", netfields, nettags, tm)
 
@@ -188,26 +189,26 @@ func netstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 
 	// totalNetworkStatMap could be empty if container is running with --net=host.
 	if len(totalNetworkStatMap) != 0 {
-		nettags := copyTags(tags)
+		nettags := maps.Clone(tags)
 		nettags["network"] = "total"
 		totalNetworkStatMap["container_id"] = id
 		acc.AddFields("ecs_container_net", totalNetworkStatMap, nettags, tm)
 	}
 }
 
-func blkstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
+func blkstats(id string, stats *container.StatsResponse, acc telegraf.Accumulator, tags map[string]string, tm time.Time) {
 	blkioStats := stats.BlkioStats
 	// Make a map of devices to their block io stats
-	deviceStatMap := make(map[string]map[string]interface{})
+	deviceStatMap := make(map[string]map[string]any)
 
 	for _, metric := range blkioStats.IoServiceBytesRecursive {
 		device := fmt.Sprintf("%d:%d", metric.Major, metric.Minor)
 		_, ok := deviceStatMap[device]
 		if !ok {
-			deviceStatMap[device] = make(map[string]interface{})
+			deviceStatMap[device] = make(map[string]any)
 		}
 
-		field := fmt.Sprintf("io_service_bytes_recursive_%s", strings.ToLower(metric.Op))
+		field := "io_service_bytes_recursive_" + strings.ToLower(metric.Op)
 		deviceStatMap[device][field] = metric.Value
 	}
 
@@ -215,34 +216,34 @@ func blkstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 		device := fmt.Sprintf("%d:%d", metric.Major, metric.Minor)
 		_, ok := deviceStatMap[device]
 		if !ok {
-			deviceStatMap[device] = make(map[string]interface{})
+			deviceStatMap[device] = make(map[string]any)
 		}
 
-		field := fmt.Sprintf("io_serviced_recursive_%s", strings.ToLower(metric.Op))
+		field := "io_serviced_recursive_" + strings.ToLower(metric.Op)
 		deviceStatMap[device][field] = metric.Value
 	}
 
 	for _, metric := range blkioStats.IoQueuedRecursive {
 		device := fmt.Sprintf("%d:%d", metric.Major, metric.Minor)
-		field := fmt.Sprintf("io_queue_recursive_%s", strings.ToLower(metric.Op))
+		field := "io_queue_recursive_" + strings.ToLower(metric.Op)
 		deviceStatMap[device][field] = metric.Value
 	}
 
 	for _, metric := range blkioStats.IoServiceTimeRecursive {
 		device := fmt.Sprintf("%d:%d", metric.Major, metric.Minor)
-		field := fmt.Sprintf("io_service_time_recursive_%s", strings.ToLower(metric.Op))
+		field := "io_service_time_recursive_" + strings.ToLower(metric.Op)
 		deviceStatMap[device][field] = metric.Value
 	}
 
 	for _, metric := range blkioStats.IoWaitTimeRecursive {
 		device := fmt.Sprintf("%d:%d", metric.Major, metric.Minor)
-		field := fmt.Sprintf("io_wait_time_%s", strings.ToLower(metric.Op))
+		field := "io_wait_time_" + strings.ToLower(metric.Op)
 		deviceStatMap[device][field] = metric.Value
 	}
 
 	for _, metric := range blkioStats.IoMergedRecursive {
 		device := fmt.Sprintf("%d:%d", metric.Major, metric.Minor)
-		field := fmt.Sprintf("io_merged_recursive_%s", strings.ToLower(metric.Op))
+		field := "io_merged_recursive_" + strings.ToLower(metric.Op)
 		deviceStatMap[device][field] = metric.Value
 	}
 
@@ -256,11 +257,11 @@ func blkstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 		deviceStatMap[device]["sectors_recursive"] = metric.Value
 	}
 
-	totalStatMap := make(map[string]interface{})
+	totalStatMap := make(map[string]any)
 	for device, fields := range deviceStatMap {
 		fields["container_id"] = id
 
-		iotags := copyTags(tags)
+		iotags := maps.Clone(tags)
 		iotags["device"] = device
 		acc.AddFields("ecs_container_blkio", fields, iotags, tm)
 
@@ -289,7 +290,7 @@ func blkstats(id string, stats *types.StatsJSON, acc telegraf.Accumulator, tags 
 	}
 
 	totalStatMap["container_id"] = id
-	iotags := copyTags(tags)
+	iotags := maps.Clone(tags)
 	iotags["device"] = "total"
 	acc.AddFields("ecs_container_blkio", totalStatMap, iotags, tm)
 }

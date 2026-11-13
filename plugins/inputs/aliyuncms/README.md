@@ -1,9 +1,15 @@
-# Alibaba (Aliyun) CloudMonitor Service Statistics Input Plugin
+# Alibaba Cloud Monitor Service (Aliyun) Input Plugin
 
-Here and after we use `Aliyun` instead `Alibaba` as it is default naming
-across web console and docs.
+This plugin gathers statistics from the
+[Alibaba / Aliyun cloud monitoring service][alibaba]. In the following we will
+use `Aliyun` instead of `Alibaba` as it's the default naming across the web
+console and docs.
 
-This plugin will pull metric statistics from Aliyun CMS.
+⭐ Telegraf v1.19.0
+🏷️ cloud
+💻 all
+
+[alibaba]: https://www.alibabacloud.com
 
 ## Aliyun Authentication
 
@@ -25,10 +31,9 @@ to authenticate.
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

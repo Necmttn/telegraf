@@ -3,9 +3,9 @@
 set -eux
 
 ARCH=$(uname -m)
-GO_VERSION="1.21.6"
-GO_VERSION_SHA_arm64="0ff541fb37c38e5e5c5bcecc8f4f43c5ffd5e3a6c33a5d3e4003ded66fcfb331" # from https://golang.org/dl
-GO_VERSION_SHA_amd64="31d6ecca09010ab351e51343a5af81d678902061fee871f912bdd5ef4d778850" # from https://golang.org/dl
+GO_VERSION="1.27.3"
+GO_VERSION_SHA_arm64="dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2" # from https://go.dev/dl
+GO_VERSION_SHA_amd64="b6f8e931e4ab497fcde6da8ae4499a58f9d258e55c8a80824a516eae5950a750" # from https://go.dev/dl
 
 if [ "$ARCH" = 'arm64' ]; then
     GO_ARCH="darwin-arm64"
@@ -15,7 +15,7 @@ elif [ "$ARCH" = 'x86_64' ]; then
     GO_VERSION_SHA=${GO_VERSION_SHA_amd64}
 fi
 
-# This path is cachable. (Saving in /usr/local/ would cause issues restoring the cache.)
+# This path is cacheable. (Saving in /usr/local/ would cause issues restoring the cache.)
 path="/usr/local/Cellar"
 sudo mkdir -p ${path}
 
@@ -23,7 +23,8 @@ sudo mkdir -p ${path}
 # it is slow to update and we can't pull specific minor versions.)
 setup_go () {
     echo "installing go"
-    curl -L "https://golang.org/dl/go${GO_VERSION}.${GO_ARCH}.tar.gz" --output "go${GO_VERSION}.${GO_ARCH}.tar.gz"
+    curl -L --fail --retry 3 --retry-delay 2 --retry-all-errors \
+        "https://go.dev/dl/go${GO_VERSION}.${GO_ARCH}.tar.gz" --output "go${GO_VERSION}.${GO_ARCH}.tar.gz"
     if ! echo "${GO_VERSION_SHA}  go${GO_VERSION}.${GO_ARCH}.tar.gz" | shasum --algorithm 256 --check -; then
         echo "Checksum failed" >&2
         exit 1
@@ -38,6 +39,7 @@ setup_go () {
 
 if command -v go >/dev/null 2>&1; then
     echo "Go is already installed"
+    cd
     v=$(go version | { read -r _ _ v _; echo "${v#go}"; })
     echo "$v is installed, required version is ${GO_VERSION}"
     if [ "$v" != ${GO_VERSION} ]; then

@@ -13,20 +13,17 @@ import (
 	"strings"
 	"time"
 
-	ptel "github.com/intel/powertelemetry"
-	cpuUtil "github.com/shirou/gopsutil/v3/cpu"
-	"golang.org/x/exp/constraints"
+	"github.com/intel/powertelemetry"
+	"github.com/shirou/gopsutil/v4/cpu"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/models"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-// PowerStat plugin enables monitoring of platform metrics.
 type PowerStat struct {
 	CPUMetrics       []cpuMetricType     `toml:"cpu_metrics"`
 	PackageMetrics   []packageMetricType `toml:"package_metrics"`
@@ -58,12 +55,10 @@ type PowerStat struct {
 	logOnce map[string]struct{}
 }
 
-// SampleConfig returns a sample configuration (See sample.conf).
 func (*PowerStat) SampleConfig() string {
 	return sampleConfig
 }
 
-// Init parses config file and sets up configuration of the plugin.
 func (p *PowerStat) Init() error {
 	if err := p.disableUnsupportedMetrics(); err != nil {
 		return err
@@ -92,10 +87,9 @@ func (p *PowerStat) Start(_ telegraf.Accumulator) error {
 	})
 
 	var err error
-	var initErr *ptel.MultiError
-	p.fetcher, err = ptel.New(opts...)
+	p.fetcher, err = powertelemetry.New(opts...)
 	if err != nil {
-		if !errors.As(err, &initErr) {
+		if _, ok := errors.AsType[*powertelemetry.MultiError](err); !ok {
 			// Error caused by failing to get information about the CPU, or CPU is not supported.
 			return fmt.Errorf("failed to initialize metric fetcher interface: %w", err)
 		}
@@ -108,18 +102,6 @@ func (p *PowerStat) Start(_ telegraf.Accumulator) error {
 	return nil
 }
 
-// Stop deactivates perf events if one or more of the requested metrics rely on perf.
-func (p *PowerStat) Stop() {
-	if !p.needsPerf {
-		return
-	}
-
-	if err := p.fetcher.DeactivatePerfEvents(); err != nil {
-		p.Log.Errorf("Failed to deactivate perf events: %v", err)
-	}
-}
-
-// Gather collects the plugin's metrics.
 func (p *PowerStat) Gather(acc telegraf.Accumulator) error {
 	// gather CPU metrics relying on coreFreq and msr which share CPU IDs.
 	if p.needsCoreFreq || p.needsMsrCPU {
@@ -137,6 +119,17 @@ func (p *PowerStat) Gather(acc telegraf.Accumulator) error {
 	}
 
 	return nil
+}
+
+// Stop deactivates perf events if one or more of the requested metrics rely on perf.
+func (p *PowerStat) Stop() {
+	if !p.needsPerf {
+		return
+	}
+
+	if err := p.fetcher.DeactivatePerfEvents(); err != nil {
+		p.Log.Errorf("Failed to deactivate perf events: %v", err)
+	}
 }
 
 // parseConfig is a helper method that parses configuration fields from the receiver such as included/excluded CPU IDs.
@@ -237,16 +230,7 @@ func (p *PowerStat) parsePackageMetrics() error {
 }
 
 // parseCPUMetrics ensures there are no duplicates in 'cpu_metrics'.
-// Also, it warns if deprecated metric has been set.
 func (p *PowerStat) parseCPUMetrics() error {
-	if slices.Contains(p.CPUMetrics, cpuBusyCycles) {
-		models.PrintOptionValueDeprecationNotice(telegraf.Warn, "inputs.intel_powerstat", "cpu_metrics", cpuBusyCycles, telegraf.DeprecationInfo{
-			Since:     "1.23.0",
-			RemovalIn: "2.0.0",
-			Notice:    "'cpu_c0_state_residency' metric name should be used instead.",
-		})
-	}
-
 	if hasDuplicate(p.CPUMetrics) {
 		return errors.New("cpu metrics contains duplicates")
 	}
@@ -264,7 +248,6 @@ func (p *PowerStat) parseCPUTimeRelatedMsrMetrics() {
 		case cpuC3StateResidency:
 		case cpuC6StateResidency:
 		case cpuC7StateResidency:
-		case cpuBusyCycles:
 		case cpuBusyFrequency:
 		default:
 			continue
@@ -322,7 +305,7 @@ func (p *PowerStat) parsePackageMsrMetrics() {
 
 // hasDuplicate takes a slice of a generic type, and returns true
 // if the slice contains duplicates. Otherwise, it returns false.
-func hasDuplicate[S ~[]E, E constraints.Ordered](s S) bool {
+func hasDuplicate[S ~[]E, E comparable](s S) bool {
 	m := make(map[E]struct{}, len(s))
 	for _, v := range s {
 		if _, ok := m[v]; ok {
@@ -443,7 +426,7 @@ func (p *PowerStat) addPerCPUMsrMetrics(acc telegraf.Accumulator, cpuID, coreID,
 	}
 
 	// Read several time-related MSR offsets.
-	var moduleErr *ptel.ModuleNotInitializedError
+	var moduleErr *powertelemetry.ModuleNotInitializedError
 	err := p.fetcher.UpdatePerCPUMetrics(cpuID)
 	if err == nil {
 		// Add time-related MSR offset metrics to the accumulator
@@ -484,15 +467,13 @@ func (p *PowerStat) addCPUTimeRelatedMsrMetrics(acc telegraf.Accumulator, cpuID,
 			p.addCPUC7StateResidency(acc, cpuID, coreID, packageID)
 		case cpuBusyFrequency:
 			p.addCPUBusyFrequency(acc, cpuID, coreID, packageID)
-		case cpuBusyCycles:
-			p.addCPUBusyCycles(acc, cpuID, coreID, packageID)
 		}
 	}
 }
 
 // addCPUPerfMetrics takes an accumulator, and adds to it enabled metrics which rely on perf.
 func (p *PowerStat) addCPUPerfMetrics(acc telegraf.Accumulator) {
-	var moduleErr *ptel.ModuleNotInitializedError
+	var moduleErr *powertelemetry.ModuleNotInitializedError
 
 	// Read events related to perf-related metrics.
 	err := p.fetcher.ReadPerfEvents()
@@ -539,7 +520,7 @@ func (p *PowerStat) addPerCPUPerfMetrics(acc telegraf.Accumulator, cpuID, coreID
 }
 
 // getDataCPUID takes a topologyFetcher and CPU ID, and returns the core ID and package ID corresponding to the CPU ID.
-func getDataCPUID(t topologyFetcher, cpuID int) (coreID int, packageID int, err error) {
+func getDataCPUID(t topologyFetcher, cpuID int) (coreID, packageID int, err error) {
 	coreID, err = t.GetCPUCoreID(cpuID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to get core ID from CPU ID %v: %w", cpuID, err)
@@ -604,10 +585,8 @@ func (p *PowerStat) addCPUFrequency(acc telegraf.Accumulator, cpuID, coreID, pac
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuFrequency,
-				units:  "mhz",
-			},
+			metric:    cpuFrequency,
+			units:     "mhz",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -622,10 +601,8 @@ func (p *PowerStat) addCPUTemperature(acc telegraf.Accumulator, cpuID, coreID, p
 	addMetric(
 		acc,
 		&cpuMetric[uint64]{
-			metricCommon: metricCommon{
-				metric: cpuTemperature,
-				units:  "celsius",
-			},
+			metric:    cpuTemperature,
+			units:     "celsius",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -640,10 +617,8 @@ func (p *PowerStat) addCPUC0StateResidency(acc telegraf.Accumulator, cpuID, core
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC0StateResidency,
-				units:  "percent",
-			},
+			metric:    cpuC0StateResidency,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -658,10 +633,8 @@ func (p *PowerStat) addCPUC1StateResidency(acc telegraf.Accumulator, cpuID, core
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC1StateResidency,
-				units:  "percent",
-			},
+			metric:    cpuC1StateResidency,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -676,10 +649,8 @@ func (p *PowerStat) addCPUC3StateResidency(acc telegraf.Accumulator, cpuID, core
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC3StateResidency,
-				units:  "percent",
-			},
+			metric:    cpuC3StateResidency,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -694,10 +665,8 @@ func (p *PowerStat) addCPUC6StateResidency(acc telegraf.Accumulator, cpuID, core
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC6StateResidency,
-				units:  "percent",
-			},
+			metric:    cpuC6StateResidency,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -712,10 +681,8 @@ func (p *PowerStat) addCPUC7StateResidency(acc telegraf.Accumulator, cpuID, core
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC7StateResidency,
-				units:  "percent",
-			},
+			metric:    cpuC7StateResidency,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -730,32 +697,12 @@ func (p *PowerStat) addCPUBusyFrequency(acc telegraf.Accumulator, cpuID, coreID,
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuBusyFrequency,
-				units:  "mhz",
-			},
+			metric:    cpuBusyFrequency,
+			units:     "mhz",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
 			fetchFn:   p.fetcher.GetCPUBusyFrequencyMhz,
-		},
-		p.logOnce,
-	)
-}
-
-// addCPUBusyCycles fetches CPU busy cycles metric for a given CPU ID, and adds it to the accumulator.
-func (p *PowerStat) addCPUBusyCycles(acc telegraf.Accumulator, cpuID, coreID, packageID int) {
-	addMetric(
-		acc,
-		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuBusyCycles,
-				units:  "percent",
-			},
-			cpuID:     cpuID,
-			coreID:    coreID,
-			packageID: packageID,
-			fetchFn:   p.fetcher.GetCPUC0StateResidency,
 		},
 		p.logOnce,
 	)
@@ -767,10 +714,8 @@ func (p *PowerStat) addCPUC0SubstateC01Percent(acc telegraf.Accumulator, cpuID, 
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC0SubstateC01Percent,
-				units:  "percent",
-			},
+			metric:    cpuC0SubstateC01Percent,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -786,10 +731,8 @@ func (p *PowerStat) addCPUC0SubstateC02Percent(acc telegraf.Accumulator, cpuID, 
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC0SubstateC02Percent,
-				units:  "percent",
-			},
+			metric:    cpuC0SubstateC02Percent,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -805,10 +748,8 @@ func (p *PowerStat) addCPUC0SubstateC0WaitPercent(acc telegraf.Accumulator, cpuI
 	addMetric(
 		acc,
 		&cpuMetric[float64]{
-			metricCommon: metricCommon{
-				metric: cpuC0SubstateC0WaitPercent,
-				units:  "percent",
-			},
+			metric:    cpuC0SubstateC0WaitPercent,
+			units:     "percent",
 			cpuID:     cpuID,
 			coreID:    coreID,
 			packageID: packageID,
@@ -823,10 +764,8 @@ func (p *PowerStat) addCurrentPackagePower(acc telegraf.Accumulator, packageID i
 	addMetric(
 		acc,
 		&packageMetric[float64]{
-			metricCommon: metricCommon{
-				metric: packageCurrentPowerConsumption,
-				units:  "watts",
-			},
+			metric:    packageCurrentPowerConsumption,
+			units:     "watts",
 			packageID: packageID,
 			fetchFn:   p.fetcher.GetCurrentPackagePowerConsumptionWatts,
 		},
@@ -839,10 +778,8 @@ func (p *PowerStat) addCurrentDramPower(acc telegraf.Accumulator, packageID int)
 	addMetric(
 		acc,
 		&packageMetric[float64]{
-			metricCommon: metricCommon{
-				metric: packageCurrentDramPowerConsumption,
-				units:  "watts",
-			},
+			metric:    packageCurrentDramPowerConsumption,
+			units:     "watts",
 			packageID: packageID,
 			fetchFn:   p.fetcher.GetCurrentDramPowerConsumptionWatts,
 		},
@@ -855,10 +792,8 @@ func (p *PowerStat) addThermalDesignPower(acc telegraf.Accumulator, packageID in
 	addMetric(
 		acc,
 		&packageMetric[float64]{
-			metricCommon: metricCommon{
-				metric: packageThermalDesignPower,
-				units:  "watts",
-			},
+			metric:    packageThermalDesignPower,
+			units:     "watts",
 			packageID: packageID,
 			fetchFn:   p.fetcher.GetPackageThermalDesignPowerWatts,
 		},
@@ -871,10 +806,8 @@ func (p *PowerStat) addCPUBaseFrequency(acc telegraf.Accumulator, packageID int)
 	addMetric(
 		acc,
 		&packageMetric[uint64]{
-			metricCommon: metricCommon{
-				metric: packageCPUBaseFrequency,
-				units:  "mhz",
-			},
+			metric:    packageCPUBaseFrequency,
+			units:     "mhz",
 			packageID: packageID,
 			fetchFn:   p.fetcher.GetCPUBaseFrequency,
 		},
@@ -908,7 +841,7 @@ func (p *PowerStat) addUncoreFrequencyInitialLimits(acc telegraf.Accumulator, pa
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": round(initMin),
 				"uncore_frequency_limit_mhz_max": round(initMax),
 			},
@@ -923,7 +856,7 @@ func (p *PowerStat) addUncoreFrequencyInitialLimits(acc telegraf.Accumulator, pa
 	}
 
 	// Always add to the accumulator errors not related to module not initialized.
-	var moduleErr *ptel.ModuleNotInitializedError
+	var moduleErr *powertelemetry.ModuleNotInitializedError
 	if !errors.As(err, &moduleErr) {
 		acc.AddError(fmt.Errorf("failed to get initial uncore frequency limits for package ID %v and die ID %v: %w", packageID, dieID, err))
 		return
@@ -947,7 +880,7 @@ func (p *PowerStat) addUncoreFrequencyCurrentValues(acc telegraf.Accumulator, pa
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"uncore_frequency_limit_mhz_min": round(val.currMin),
 				"uncore_frequency_limit_mhz_max": round(val.currMax),
 				"uncore_frequency_mhz_cur":       uint64(val.curr),
@@ -963,7 +896,7 @@ func (p *PowerStat) addUncoreFrequencyCurrentValues(acc telegraf.Accumulator, pa
 	}
 
 	// Always add to the accumulator errors not related to module not initialized.
-	var moduleErr *ptel.ModuleNotInitializedError
+	var moduleErr *powertelemetry.ModuleNotInitializedError
 	if !errors.As(err, &moduleErr) {
 		acc.AddError(fmt.Errorf("failed to get current uncore frequency values for package ID %v and die ID %v: %w", packageID, dieID, err))
 		return
@@ -979,7 +912,7 @@ func (p *PowerStat) addUncoreFrequencyCurrentValues(acc telegraf.Accumulator, pa
 }
 
 // getUncoreFreqInitialLimits returns the initial uncore frequency limits of a given package ID and die ID.
-func getUncoreFreqInitialLimits(fetcher metricFetcher, packageID, dieID int) (initialMin float64, initialMax float64, err error) {
+func getUncoreFreqInitialLimits(fetcher metricFetcher, packageID, dieID int) (initialMin, initialMax float64, err error) {
 	initialMin, err = fetcher.GetInitialUncoreFrequencyMin(packageID, dieID)
 	if err != nil {
 		return 0.0, 0.0, fmt.Errorf("failed to get initial minimum uncore frequency limit: %w", err)
@@ -1026,7 +959,7 @@ func getUncoreFreqCurrentValues(fetcher metricFetcher, packageID, dieID int) (un
 
 // addMaxTurboFreqLimits fetches the max turbo frequency limits metric for a given package ID, and adds it to the accumulator.
 func (p *PowerStat) addMaxTurboFreqLimits(acc telegraf.Accumulator, packageID int) {
-	var moduleErr *ptel.ModuleNotInitializedError
+	var moduleErr *powertelemetry.ModuleNotInitializedError
 
 	turboFreqList, err := p.fetcher.GetMaxTurboFreqList(packageID)
 	if err != nil {
@@ -1067,7 +1000,7 @@ func (p *PowerStat) addMaxTurboFreqLimits(acc telegraf.Accumulator, packageID in
 			// measurement
 			"powerstat_package",
 			// fields
-			map[string]interface{}{
+			map[string]any{
 				"max_turbo_frequency_mhz": v.Value,
 			},
 			// tags
@@ -1078,7 +1011,7 @@ func (p *PowerStat) addMaxTurboFreqLimits(acc telegraf.Accumulator, packageID in
 
 // isHybridCPU is a helper function that takes a slice of MaxTurboFreq structs and returns true if the CPU where these values belong to,
 // is a hybrid CPU. Otherwise, returns false.
-func isHybridCPU(turboFreqList []ptel.MaxTurboFreq) bool {
+func isHybridCPU(turboFreqList []powertelemetry.MaxTurboFreq) bool {
 	for _, v := range turboFreqList {
 		if v.Secondary {
 			return true
@@ -1091,7 +1024,7 @@ func isHybridCPU(turboFreqList []ptel.MaxTurboFreq) bool {
 // In case it is not, disableUnsupportedMetrics will disable the option to gather those metrics.
 // Error is returned if there is an issue with retrieving processor information.
 func (p *PowerStat) disableUnsupportedMetrics() error {
-	cpus, err := cpuUtil.Info()
+	cpus, err := cpu.Info()
 	if err != nil {
 		return fmt.Errorf("error occurred while parsing CPU information: %w", err)
 	}
@@ -1106,27 +1039,27 @@ func (p *PowerStat) disableUnsupportedMetrics() error {
 		return fmt.Errorf("error occurred while parsing CPU model: %w", err)
 	}
 
-	if err := ptel.CheckIfCPUC1StateResidencySupported(cpuModel); err != nil {
+	if err := powertelemetry.CheckIfCPUC1StateResidencySupported(cpuModel); err != nil {
 		p.disableCPUMetric(cpuC1StateResidency)
 	}
 
-	if err := ptel.CheckIfCPUC3StateResidencySupported(cpuModel); err != nil {
+	if err := powertelemetry.CheckIfCPUC3StateResidencySupported(cpuModel); err != nil {
 		p.disableCPUMetric(cpuC3StateResidency)
 	}
 
-	if err := ptel.CheckIfCPUC6StateResidencySupported(cpuModel); err != nil {
+	if err := powertelemetry.CheckIfCPUC6StateResidencySupported(cpuModel); err != nil {
 		p.disableCPUMetric(cpuC6StateResidency)
 	}
 
-	if err := ptel.CheckIfCPUC7StateResidencySupported(cpuModel); err != nil {
+	if err := powertelemetry.CheckIfCPUC7StateResidencySupported(cpuModel); err != nil {
 		p.disableCPUMetric(cpuC7StateResidency)
 	}
 
-	if err := ptel.CheckIfCPUTemperatureSupported(cpuModel); err != nil {
+	if err := powertelemetry.CheckIfCPUTemperatureSupported(cpuModel); err != nil {
 		p.disableCPUMetric(cpuTemperature)
 	}
 
-	if err := ptel.CheckIfCPUBaseFrequencySupported(cpuModel); err != nil {
+	if err := powertelemetry.CheckIfCPUBaseFrequencySupported(cpuModel); err != nil {
 		p.disablePackageMetric(packageCPUBaseFrequency)
 	}
 
@@ -1146,7 +1079,6 @@ func (p *PowerStat) disableUnsupportedMetrics() error {
 		p.disableCPUMetric(cpuC3StateResidency)
 		p.disableCPUMetric(cpuC6StateResidency)
 		p.disableCPUMetric(cpuC7StateResidency)
-		p.disableCPUMetric(cpuBusyCycles)
 		p.disableCPUMetric(cpuBusyFrequency)
 		p.disableCPUMetric(cpuTemperature)
 		p.disablePackageMetric(packageCPUBaseFrequency)
@@ -1156,7 +1088,6 @@ func (p *PowerStat) disableUnsupportedMetrics() error {
 	if !slices.Contains(firstCPU.Flags, "aperfmperf") {
 		p.disableCPUMetric(cpuC0StateResidency)
 		p.disableCPUMetric(cpuC1StateResidency)
-		p.disableCPUMetric(cpuBusyCycles)
 		p.disableCPUMetric(cpuBusyFrequency)
 	}
 

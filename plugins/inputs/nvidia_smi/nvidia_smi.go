@@ -20,30 +20,31 @@ import (
 	"github.com/influxdata/telegraf/plugins/inputs"
 	"github.com/influxdata/telegraf/plugins/inputs/nvidia_smi/schema_v11"
 	"github.com/influxdata/telegraf/plugins/inputs/nvidia_smi/schema_v12"
+	"github.com/influxdata/telegraf/plugins/inputs/nvidia_smi/schema_v13"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-// NvidiaSMI holds the methods for this plugin
 type NvidiaSMI struct {
 	BinPath string          `toml:"bin_path"`
 	Timeout config.Duration `toml:"timeout"`
 	Log     telegraf.Logger `toml:"-"`
 
-	once sync.Once
+	nvidiaSMIArgs []string
+	ignorePlugin  bool
+	once          sync.Once
 }
 
 func (*NvidiaSMI) SampleConfig() string {
 	return sampleConfig
 }
 
-func (smi *NvidiaSMI) Init() error {
+func (smi *NvidiaSMI) Start(telegraf.Accumulator) error {
 	if _, err := os.Stat(smi.BinPath); os.IsNotExist(err) {
 		binPath, err := exec.LookPath("nvidia-smi")
-		// fail-fast
 		if err != nil {
-			return fmt.Errorf("nvidia-smi not found in %q and not in PATH; please make sure nvidia-smi is installed and/or is in PATH", smi.BinPath)
+			return &internal.StartupError{Err: err}
 		}
 		smi.BinPath = binPath
 	}
@@ -51,10 +52,24 @@ func (smi *NvidiaSMI) Init() error {
 	return nil
 }
 
-// Gather implements the telegraf interface
-func (smi *NvidiaSMI) Gather(acc telegraf.Accumulator) error {
+func (*NvidiaSMI) Stop() {}
+
+func (smi *NvidiaSMI) Probe() error {
 	// Construct and execute metrics query
-	data, err := internal.CombinedOutputTimeout(exec.Command(smi.BinPath, "-q", "-x"), time.Duration(smi.Timeout))
+	_, err := internal.CombinedOutputTimeout(exec.Command(smi.BinPath, smi.nvidiaSMIArgs...), time.Duration(smi.Timeout))
+	if err != nil {
+		return fmt.Errorf("calling %q failed: %w", smi.BinPath, err)
+	}
+	return nil
+}
+
+func (smi *NvidiaSMI) Gather(acc telegraf.Accumulator) error {
+	if smi.ignorePlugin {
+		return nil
+	}
+
+	// Construct and execute metrics query
+	data, err := internal.CombinedOutputTimeout(exec.Command(smi.BinPath, smi.nvidiaSMIArgs...), time.Duration(smi.Timeout))
 	if err != nil {
 		return fmt.Errorf("calling %q failed: %w", smi.BinPath, err)
 	}
@@ -100,21 +115,24 @@ func (smi *NvidiaSMI) parse(acc telegraf.Accumulator, data []byte) error {
 		return schema_v11.Parse(acc, data)
 	case "v12":
 		return schema_v12.Parse(acc, data)
+	case "v13":
+		return schema_v13.Parse(acc, data)
 	}
 
 	smi.once.Do(func() {
-		smi.Log.Warnf(`Unknown schema version %q, using latest know schema for parsing.
+		smi.Log.Warnf(`Unknown schema version %q, using latest known schema for parsing.
 		Please report this as an issue to https://github.com/influxdata/telegraf together
 		with a sample output of 'nvidia_smi -q -x'!`, schema)
 	})
-	return schema_v12.Parse(acc, data)
+	return schema_v13.Parse(acc, data)
 }
 
 func init() {
 	inputs.Add("nvidia_smi", func() telegraf.Input {
 		return &NvidiaSMI{
-			BinPath: "/usr/bin/nvidia-smi",
-			Timeout: config.Duration(5 * time.Second),
+			BinPath:       "/usr/bin/nvidia-smi",
+			Timeout:       config.Duration(5 * time.Second),
+			nvidiaSMIArgs: []string{"-q", "-x"},
 		}
 	})
 }

@@ -8,20 +8,21 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/agent"
+	"github.com/influxdata/telegraf/models"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
 	"github.com/influxdata/telegraf/plugins/processors"
 )
 
 // AddProcessor adds the processor to the shim. Later calls to Run() will run this.
 func (s *Shim) AddProcessor(processor telegraf.Processor) error {
-	setLoggerOnPlugin(processor, s.Log())
+	models.SetLoggerOnPlugin(processor, s.Log())
 	p := processors.NewStreamingProcessorFromProcessor(processor)
 	return s.AddStreamingProcessor(p)
 }
 
 // AddStreamingProcessor adds the processor to the shim. Later calls to Run() will run this.
 func (s *Shim) AddStreamingProcessor(processor telegraf.StreamingProcessor) error {
-	setLoggerOnPlugin(processor, s.Log())
+	models.SetLoggerOnPlugin(processor, s.Log())
 	if p, ok := processor.(telegraf.Initializer); ok {
 		err := p.Init()
 		if err != nil {
@@ -43,14 +44,12 @@ func (s *Shim) RunProcessor() error {
 	}
 
 	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		err := s.writeProcessedMetrics()
 		if err != nil {
 			s.log.Warn(err.Error())
 		}
-		wg.Done()
-	}()
+	})
 
 	parser := influx.NewStreamParser(s.stdin)
 	for {
@@ -59,8 +58,7 @@ func (s *Shim) RunProcessor() error {
 			if errors.Is(err, influx.EOF) {
 				break // stream ended
 			}
-			var parseErr *influx.ParseError
-			if errors.As(err, &parseErr) {
+			if parseErr, ok := errors.AsType[*influx.ParseError](err); ok {
 				fmt.Fprintf(s.stderr, "Failed to parse metric: %s\b", parseErr)
 				continue
 			}

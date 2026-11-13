@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -18,16 +19,16 @@ func Test_LinkStatusCommand(t *testing.T) {
 		response := fmt.Sprintf(`{%q:{%q: "DOWN"}}`, ethdevLinkStatusCommand, linkStatusStringFieldName)
 		simulateResponse(mockConn, response, nil)
 		dpdkConn := dpdk.connectors[0]
-		dpdkConn.processCommand(mockAcc, testutil.Logger{}, fmt.Sprintf("%s,1", ethdevLinkStatusCommand), nil)
+		dpdkConn.processCommand(mockAcc, testutil.Logger{}, ethdevLinkStatusCommand+",1", nil)
 
 		expected := []telegraf.Metric{
-			testutil.MustMetric(
+			metric.New(
 				"dpdk",
 				map[string]string{
 					"command": ethdevLinkStatusCommand,
 					"params":  "1",
 				},
-				map[string]interface{}{
+				map[string]any{
 					linkStatusStringFieldName:  "DOWN",
 					linkStatusIntegerFieldName: int64(0),
 				},
@@ -45,16 +46,16 @@ func Test_LinkStatusCommand(t *testing.T) {
 		response := fmt.Sprintf(`{%q:{%q: "UP"}}`, ethdevLinkStatusCommand, linkStatusStringFieldName)
 		simulateResponse(mockConn, response, nil)
 		dpdkConn := dpdk.connectors[0]
-		dpdkConn.processCommand(mockAcc, testutil.Logger{}, fmt.Sprintf("%s,1", ethdevLinkStatusCommand), nil)
+		dpdkConn.processCommand(mockAcc, testutil.Logger{}, ethdevLinkStatusCommand+",1", nil)
 
 		expected := []telegraf.Metric{
-			testutil.MustMetric(
+			metric.New(
 				"dpdk",
 				map[string]string{
 					"command": ethdevLinkStatusCommand,
 					"params":  "1",
 				},
-				map[string]interface{}{
+				map[string]any{
 					linkStatusStringFieldName:  "UP",
 					linkStatusIntegerFieldName: int64(1),
 				},
@@ -72,7 +73,7 @@ func Test_LinkStatusCommand(t *testing.T) {
 		response := fmt.Sprintf(`{%q:{}}`, ethdevLinkStatusCommand)
 		simulateResponse(mockConn, response, nil)
 		dpdkConn := dpdk.connectors[0]
-		dpdkConn.processCommand(mockAcc, testutil.Logger{}, fmt.Sprintf("%s,1", ethdevLinkStatusCommand), nil)
+		dpdkConn.processCommand(mockAcc, testutil.Logger{}, ethdevLinkStatusCommand+",1", nil)
 
 		actual := mockAcc.GetTelegrafMetrics()
 		testutil.RequireMetricsEqual(t, nil, actual, testutil.IgnoreTime())
@@ -84,15 +85,15 @@ func Test_LinkStatusCommand(t *testing.T) {
 		response := fmt.Sprintf(`{%q:{"tag1": 1}}`, ethdevLinkStatusCommand)
 		simulateResponse(mockConn, response, nil)
 		dpdkConn := dpdk.connectors[0]
-		dpdkConn.processCommand(mockAcc, testutil.Logger{}, fmt.Sprintf("%s,1", ethdevLinkStatusCommand), nil)
+		dpdkConn.processCommand(mockAcc, testutil.Logger{}, ethdevLinkStatusCommand+",1", nil)
 		expected := []telegraf.Metric{
-			testutil.MustMetric(
+			metric.New(
 				"dpdk",
 				map[string]string{
 					"command": ethdevLinkStatusCommand,
 					"params":  "1",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"tag1": float64(1),
 				},
 				time.Unix(0, 0),
@@ -109,16 +110,16 @@ func Test_LinkStatusCommand(t *testing.T) {
 		response := fmt.Sprintf(`{%q:{%q: "BOB"}}`, ethdevLinkStatusCommand, linkStatusStringFieldName)
 		simulateResponse(mockConn, response, nil)
 		dpdkConn := dpdk.connectors[0]
-		dpdkConn.processCommand(mockAcc, testutil.Logger{}, fmt.Sprintf("%s,1", ethdevLinkStatusCommand), nil)
+		dpdkConn.processCommand(mockAcc, testutil.Logger{}, ethdevLinkStatusCommand+",1", nil)
 
 		expected := []telegraf.Metric{
-			testutil.MustMetric(
+			metric.New(
 				"dpdk",
 				map[string]string{
 					"command": ethdevLinkStatusCommand,
 					"params":  "1",
 				},
-				map[string]interface{}{
+				map[string]any{
 					linkStatusStringFieldName: "BOB",
 				},
 				time.Unix(0, 0),

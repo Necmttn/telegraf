@@ -19,7 +19,7 @@ import (
 	"github.com/aws/smithy-go"
 
 	"github.com/influxdata/telegraf"
-	internalaws "github.com/influxdata/telegraf/plugins/common/aws"
+	common_aws "github.com/influxdata/telegraf/plugins/common/aws"
 	"github.com/influxdata/telegraf/plugins/outputs"
 )
 
@@ -47,7 +47,7 @@ type (
 		Log telegraf.Logger
 		svc WriteClient
 
-		internalaws.CredentialConfig
+		common_aws.CredentialConfig
 	}
 
 	WriteClient interface {
@@ -69,42 +69,33 @@ const (
 )
 
 // MaxRecordsPerCall reflects Timestream limit of WriteRecords API call
-const MaxRecordsPerCall = 100
+const maxRecordsPerCall = 100
 
 // Default value for maximum number of parallel go routines to ingest/write data
 // when max_write_go_routines is not specified in the config
-const MaxWriteRoutinesDefault = 1
+const maxWriteRoutinesDefault = 1
 
 // WriteFactory function provides a way to mock the client instantiation for testing purposes.
-var WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+var WriteFactory = func(credentialConfig *common_aws.CredentialConfig) (WriteClient, error) {
 	awsCreds, awsErr := credentialConfig.Credentials()
 	if awsErr != nil {
-		panic("Unable to load credentials config " + awsErr.Error())
+		return nil, fmt.Errorf("unable to load credentials config: %w", awsErr)
 	}
 
 	cfg, cfgErr := config.LoadDefaultConfig(context.TODO())
 	if cfgErr != nil {
-		panic("Unable to load SDK config for Timestream " + cfgErr.Error())
+		return nil, fmt.Errorf("unable to load SDK config for Timestream: %w", cfgErr)
 	}
 
 	if credentialConfig.EndpointURL != "" && credentialConfig.Region != "" {
-		customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-			return aws.Endpoint{
-				PartitionID:   "aws",
-				URL:           credentialConfig.EndpointURL,
-				SigningRegion: credentialConfig.Region,
-			}, nil
-		})
-
-		cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithEndpointResolverWithOptions(customResolver))
-
+		cfg, err := config.LoadDefaultConfig(context.TODO())
 		if err != nil {
-			panic("unable to load SDK config for Timestream " + err.Error())
+			return nil, fmt.Errorf("unable to load SDK config for Timestream: %w", err)
 		}
-
 		cfg.Credentials = awsCreds.Credentials
 
 		return timestreamwrite.NewFromConfig(cfg, func(o *timestreamwrite.Options) {
+			o.BaseEndpoint = &credentialConfig.EndpointURL
 			o.Region = credentialConfig.Region
 			o.EndpointDiscovery.EnableEndpointDiscovery = aws.EndpointDiscoveryDisabled
 		}), nil
@@ -123,11 +114,11 @@ func (*Timestream) SampleConfig() string {
 
 func (t *Timestream) Connect() error {
 	if t.DatabaseName == "" {
-		return fmt.Errorf("DatabaseName key is required")
+		return errors.New("'database_name' key is required")
 	}
 
 	if t.MappingMode == "" {
-		return fmt.Errorf("MappingMode key is required")
+		return errors.New("'mapping_mode' key is required")
 	}
 
 	if t.MappingMode != MappingModeSingleTable && t.MappingMode != MappingModeMultiTable {
@@ -171,16 +162,16 @@ func (t *Timestream) Connect() error {
 
 	if t.CreateTableIfNotExists {
 		if t.CreateTableMagneticStoreRetentionPeriodInDays < 1 {
-			return fmt.Errorf("if Telegraf should create tables, CreateTableMagneticStoreRetentionPeriodInDays key should have a value greater than 0")
+			return errors.New("if Telegraf should create tables, CreateTableMagneticStoreRetentionPeriodInDays key should have a value greater than 0")
 		}
 
 		if t.CreateTableMemoryStoreRetentionPeriodInHours < 1 {
-			return fmt.Errorf("if Telegraf should create tables, CreateTableMemoryStoreRetentionPeriodInHours key should have a value greater than 0")
+			return errors.New("if Telegraf should create tables, CreateTableMemoryStoreRetentionPeriodInHours key should have a value greater than 0")
 		}
 	}
 
 	if t.MaxWriteGoRoutinesCount <= 0 {
-		t.MaxWriteGoRoutinesCount = MaxWriteRoutinesDefault
+		t.MaxWriteGoRoutinesCount = maxWriteRoutinesDefault
 	}
 
 	t.Log.Infof("Constructing Timestream client for %q mode", t.MappingMode)
@@ -208,7 +199,7 @@ func (t *Timestream) Connect() error {
 	return nil
 }
 
-func (t *Timestream) Close() error {
+func (*Timestream) Close() error {
 	return nil
 }
 
@@ -235,15 +226,13 @@ func (t *Timestream) Write(metrics []telegraf.Metric) error {
 	start := time.Now()
 
 	for i := 0; i < maxWriteJobs; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for writeJob := range writeJobs {
 				if err := t.writeToTimestream(writeJob, true); err != nil {
 					errs <- err
 				}
 			}
-		}()
+		})
 	}
 
 	for i := range writeRecordsInputs {
@@ -277,8 +266,7 @@ func (t *Timestream) writeToTimestream(writeRecordsInput *timestreamwrite.WriteR
 	if err != nil {
 		// Telegraf will retry ingesting the metrics if an error is returned from the plugin.
 		// Therefore, return error only for retryable exceptions: ThrottlingException and 5xx exceptions.
-		var notFound *types.ResourceNotFoundException
-		if errors.As(err, &notFound) {
+		if notFound, ok := errors.AsType[*types.ResourceNotFoundException](err); ok {
 			if resourceNotFoundRetry {
 				t.Log.Warnf("Failed to write to Timestream database %q table %q: %s",
 					t.DatabaseName, *writeRecordsInput.TableName, notFound)
@@ -290,8 +278,7 @@ func (t *Timestream) writeToTimestream(writeRecordsInput *timestreamwrite.WriteR
 			return fmt.Errorf("failed to write to Timestream database %q table %q: %w", t.DatabaseName, *writeRecordsInput.TableName, err)
 		}
 
-		var rejected *types.RejectedRecordsException
-		if errors.As(err, &rejected) {
+		if rejected, ok := errors.AsType[*types.RejectedRecordsException](err); ok {
 			t.logWriteToTimestreamError(err, writeRecordsInput.TableName)
 			for _, rr := range rejected.RejectedRecords {
 				t.Log.Errorf("reject reason: %q, record index: '%d'", aws.ToString(rr.Reason), rr.RecordIndex)
@@ -299,20 +286,17 @@ func (t *Timestream) writeToTimestream(writeRecordsInput *timestreamwrite.WriteR
 			return nil
 		}
 
-		var throttling *types.ThrottlingException
-		if errors.As(err, &throttling) {
+		if throttling, ok := errors.AsType[*types.ThrottlingException](err); ok {
 			return fmt.Errorf("unable to write to Timestream database %q table %q: %w",
 				t.DatabaseName, *writeRecordsInput.TableName, throttling)
 		}
 
-		var internal *types.InternalServerException
-		if errors.As(err, &internal) {
+		if internal, ok := errors.AsType[*types.InternalServerException](err); ok {
 			return fmt.Errorf("unable to write to Timestream database %q table %q: %w",
 				t.DatabaseName, *writeRecordsInput.TableName, internal)
 		}
 
-		var operation *smithy.OperationError
-		if !errors.As(err, &operation) {
+		if _, ok := errors.AsType[*smithy.OperationError](err); !ok {
 			// Retry other, non-aws errors.
 			return fmt.Errorf("unable to write to Timestream database %q table %q: %w",
 				t.DatabaseName, *writeRecordsInput.TableName, err)
@@ -368,8 +352,7 @@ func (t *Timestream) createTable(tableName *string) error {
 
 	_, err := t.svc.CreateTable(context.Background(), createTableInput)
 	if err != nil {
-		var e *types.ConflictException
-		if errors.As(err, &e) {
+		if _, ok := errors.AsType[*types.ConflictException](err); ok {
 			// if the table was created in the meantime, it's ok.
 			return nil
 		}
@@ -417,8 +400,8 @@ func (t *Timestream) TransformMetrics(metrics []telegraf.Metric) []*timestreamwr
 	// Create result as array of WriteRecordsInput. Split requests over records count limit to smaller requests.
 	var result []*timestreamwrite.WriteRecordsInput
 	for _, writeRequest := range writeRequests {
-		if len(writeRequest.Records) > MaxRecordsPerCall {
-			for _, recordsPartition := range partitionRecords(MaxRecordsPerCall, writeRequest.Records) {
+		if len(writeRequest.Records) > maxRecordsPerCall {
+			for _, recordsPartition := range partitionRecords(maxRecordsPerCall, writeRequest.Records) {
 				newWriteRecord := &timestreamwrite.WriteRecordsInput{
 					DatabaseName:     writeRequest.DatabaseName,
 					TableName:        writeRequest.TableName,
@@ -492,7 +475,6 @@ func (t *Timestream) buildSingleWriteRecords(point telegraf.Metric) []types.Reco
 }
 
 func (t *Timestream) buildMultiMeasureWriteRecords(point telegraf.Metric) []types.Record {
-	var records []types.Record
 	dimensions := t.buildDimensions(point)
 
 	multiMeasureName := t.MeasureNameForMultiMeasureRecords
@@ -518,18 +500,16 @@ func (t *Timestream) buildMultiMeasureWriteRecords(point telegraf.Metric) []type
 
 	timeUnit, timeValue := getTimestreamTime(point.Time())
 
-	record := types.Record{
-		MeasureName:      aws.String(multiMeasureName),
-		MeasureValueType: "MULTI",
-		MeasureValues:    multiMeasures,
-		Dimensions:       dimensions,
-		Time:             aws.String(timeValue),
-		TimeUnit:         timeUnit,
+	return []types.Record{
+		{
+			MeasureName:      aws.String(multiMeasureName),
+			MeasureValueType: "MULTI",
+			MeasureValues:    multiMeasures,
+			Dimensions:       dimensions,
+			Time:             aws.String(timeValue),
+			TimeUnit:         timeUnit,
+		},
 	}
-
-	records = append(records, record)
-
-	return records
 }
 
 // partitionRecords splits the Timestream records into smaller slices of a max size
@@ -544,10 +524,7 @@ func partitionRecords(size int, records []types.Record) [][]types.Record {
 	partitions := make([][]types.Record, 0, numberOfPartitions)
 	for i := 0; i < numberOfPartitions; i++ {
 		start := size * i
-		end := size * (i + 1)
-		if end > len(records) {
-			end = len(records)
-		}
+		end := min(size*(i+1), len(records))
 
 		partitions = append(partitions, records[start:end])
 	}
@@ -577,7 +554,7 @@ func getTimestreamTime(t time.Time) (timeUnit types.TimeUnit, timeValue string) 
 
 // convertValue converts single Field value from Telegraf Metric and produces
 // value, valueType Timestream representation.
-func convertValue(v interface{}) (value string, valueType types.MeasureValueType, ok bool) {
+func convertValue(v any) (value string, valueType types.MeasureValueType, ok bool) {
 	ok = true
 
 	switch t := v.(type) {

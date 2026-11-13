@@ -12,7 +12,9 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/models"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -46,7 +48,6 @@ func TestConnectAndWriteIntegration(t *testing.T) {
 	defer container.Terminate()
 	url := fmt.Sprintf("postgres://crate@%s:%s/test", container.Address, container.Ports[servicePort])
 
-	fmt.Println(url)
 	db, err := sql.Open("pgx", url)
 	require.NoError(t, err)
 	defer db.Close()
@@ -77,6 +78,77 @@ func TestConnectAndWriteIntegration(t *testing.T) {
 	require.NoError(t, c.Close())
 }
 
+func TestConnectionIssueAtStartup(t *testing.T) {
+	// Test case for https://github.com/influxdata/telegraf/issues/13278
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	container := testutil.Container{
+		Image:        "crate",
+		ExposedPorts: []string{servicePort},
+		Entrypoint: []string{
+			"/docker-entrypoint.sh",
+			"-Cdiscovery.type=single-node",
+		},
+		WaitingFor: wait.ForAll(
+			wait.ForListeningPort(servicePort),
+			wait.ForLog("recovered [0] indices into cluster_state"),
+		),
+	}
+	require.NoError(t, container.Start(), "failed to start container")
+	defer container.Terminate()
+	url := fmt.Sprintf("postgres://crate@%s:%s/test", container.Address, container.Ports[servicePort])
+
+	// Pause the container for connectivity issues
+	require.NoError(t, container.Pause())
+
+	// Create a model to be able to use the startup retry strategy
+	plugin := &CrateDB{
+		URL:         url,
+		Table:       "testing",
+		Timeout:     config.Duration(time.Second * 5),
+		TableCreate: true,
+	}
+	model, err := models.NewRunningOutput(
+		plugin,
+		&models.OutputConfig{
+			Name:                 "cratedb",
+			StartupErrorBehavior: "retry",
+		},
+		1000, 1000,
+	)
+	require.NoError(t, err)
+	require.NoError(t, model.Init())
+
+	// The connect call should succeed even though the table creation was not
+	// successful due to the "retry" strategy
+	require.NoError(t, model.Connect())
+
+	// Writing the metrics in this state should fail because we are not fully
+	// started up
+	metrics := testutil.MockMetrics()
+	for _, m := range metrics {
+		model.AddMetric(m)
+	}
+	require.ErrorIs(t, model.WriteBatch(), internal.ErrNotConnected)
+
+	// Unpause the container, now writes should succeed
+	require.NoError(t, container.Resume())
+	require.NoError(t, model.WriteBatch())
+	defer model.Close()
+
+	// Verify that the metrics were actually written
+	for _, m := range metrics {
+		mid := hashID(m)
+		row := plugin.db.QueryRow("SELECT hash_id FROM testing WHERE hash_id = ? AND timestamp = ?", mid, m.Time())
+
+		var id int64
+		require.NoError(t, row.Scan(&id))
+		require.Equal(t, id, mid)
+	}
+}
+
 func TestInsertSQL(t *testing.T) {
 	tests := []struct {
 		Metrics []telegraf.Metric
@@ -102,7 +174,7 @@ VALUES
 }
 
 type escapeValueTest struct {
-	Value interface{}
+	Value any
 	Want  string
 }
 
@@ -127,13 +199,13 @@ func escapeValueTests() []escapeValueTest {
 		{map[string]string{"foo": "bar"}, `{"foo" = 'bar'}`},
 		{map[string]string{"foo": "bar", "one": "more"}, `{"foo" = 'bar', "one" = 'more'}`},
 		{map[string]string{"f.oo": "bar", "o.n.e": "more"}, `{"f_oo" = 'bar', "o_n_e" = 'more'}`},
-		// map[string]interface{}
-		{map[string]interface{}{}, `{}`},
-		{map[string]interface{}(nil), `{}`},
-		{map[string]interface{}{"foo": "bar"}, `{"foo" = 'bar'}`},
-		{map[string]interface{}{"foo": "bar", "one": "more"}, `{"foo" = 'bar', "one" = 'more'}`},
-		{map[string]interface{}{"foo": map[string]interface{}{"one": "more"}}, `{"foo" = {"one" = 'more'}}`},
-		{map[string]interface{}{`fo"o`: `b'ar`, `ab'c`: `xy"z`, `on"""e`: `mo'''re`}, `{"ab'c" = 'xy"z', "fo""o" = 'b''ar', "on""""""e" = 'mo''''''re'}`},
+		// map[string]any
+		{map[string]any{}, `{}`},
+		{map[string]any(nil), `{}`},
+		{map[string]any{"foo": "bar"}, `{"foo" = 'bar'}`},
+		{map[string]any{"foo": "bar", "one": "more"}, `{"foo" = 'bar', "one" = 'more'}`},
+		{map[string]any{"foo": map[string]any{"one": "more"}}, `{"foo" = {"one" = 'more'}}`},
+		{map[string]any{`fo"o`: `b'ar`, `ab'c`: `xy"z`, `on"""e`: `mo'''re`}, `{"ab'c" = 'xy"z', "fo""o" = 'b''ar', "on""""""e" = 'mo''''''re'}`},
 	}
 }
 
@@ -157,7 +229,7 @@ func TestEscapeValueIntegration(t *testing.T) {
 
 		// This is a smoke test that will blow up if our escaping causing a SQL
 		// syntax error, which may allow for an attack.=
-		var reply interface{}
+		var reply any
 		row := db.QueryRow("SELECT ?", got)
 		require.NoError(t, row.Scan(&reply))
 	}
@@ -173,7 +245,7 @@ func TestEscapeValue(t *testing.T) {
 }
 
 func TestCircumventingStringEscape(t *testing.T) {
-	value, err := escapeObject(map[string]interface{}{"a.b": "c"}, `_"`)
+	value, err := escapeObject(map[string]any{"a.b": "c"}, `_"`)
 	require.NoError(t, err)
 	require.Equal(t, `{"a_""b" = 'c'}`, value)
 }
@@ -182,13 +254,13 @@ func Test_hashID(t *testing.T) {
 	tests := []struct {
 		Name   string
 		Tags   map[string]string
-		Fields map[string]interface{}
+		Fields map[string]any
 		Want   int64
 	}{
 		{
 			Name:   "metric1",
 			Tags:   map[string]string{"tag1": "val1", "tag2": "val2"},
-			Fields: map[string]interface{}{"field1": "val1", "field2": "val2"},
+			Fields: map[string]any{"field1": "val1", "field2": "val2"},
 			Want:   8973971082006474188,
 		},
 
@@ -198,7 +270,7 @@ func Test_hashID(t *testing.T) {
 		{
 			Name:   "metric1",
 			Tags:   map[string]string{"tag2": "val2", "tag1": "val1"},
-			Fields: map[string]interface{}{"field3": "val3"},
+			Fields: map[string]any{"field3": "val3"},
 			Want:   8973971082006474188,
 		},
 
@@ -206,7 +278,7 @@ func Test_hashID(t *testing.T) {
 		{
 			Name:   "metric2",
 			Tags:   map[string]string{"tag1": "val1", "tag2": "val2"},
-			Fields: map[string]interface{}{"field1": "val1", "field2": "val2"},
+			Fields: map[string]any{"field1": "val1", "field2": "val2"},
 			Want:   306487682448261783,
 		},
 
@@ -214,7 +286,7 @@ func Test_hashID(t *testing.T) {
 		{
 			Name:   "metric1",
 			Tags:   map[string]string{"tag1": "new-val", "tag2": "val2"},
-			Fields: map[string]interface{}{"field1": "val1", "field2": "val2"},
+			Fields: map[string]any{"field1": "val1", "field2": "val2"},
 			Want:   1938713695181062970,
 		},
 
@@ -222,7 +294,7 @@ func Test_hashID(t *testing.T) {
 		{
 			Name:   "metric1",
 			Tags:   map[string]string{"new-key": "val1", "tag2": "val2"},
-			Fields: map[string]interface{}{"field1": "val1", "field2": "val2"},
+			Fields: map[string]any{"field1": "val1", "field2": "val2"},
 			Want:   7678889081527706328,
 		},
 	}

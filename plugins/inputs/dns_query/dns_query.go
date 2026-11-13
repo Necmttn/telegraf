@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -20,12 +21,16 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-type ResultType uint64
+var ignoredErrors = []string{
+	"NXDOMAIN",
+}
+
+type resultType uint64
 
 const (
-	Success ResultType = iota
-	Timeout
-	Error
+	successResult resultType = iota
+	timeoutResult
+	errorResult
 )
 
 type DNSQuery struct {
@@ -38,6 +43,8 @@ type DNSQuery struct {
 	IncludeFields []string        `toml:"include_fields"`
 
 	fieldEnabled map[string]bool
+	client       *dns.Client
+	record       uint16
 }
 
 func (*DNSQuery) SampleConfig() string {
@@ -61,17 +68,49 @@ func (d *DNSQuery) Init() error {
 		d.Network = "udp"
 	}
 
-	if d.RecordType == "" {
-		d.RecordType = "NS"
-	}
-
 	if len(d.Domains) == 0 {
 		d.Domains = []string{"."}
-		d.RecordType = "NS"
 	}
 
 	if d.Port < 1 {
 		d.Port = 53
+	}
+
+	// Convert the record type
+	switch d.RecordType {
+	case "":
+		d.RecordType = "NS"
+		d.record = dns.TypeNS
+	case "A":
+		d.record = dns.TypeA
+	case "AAAA":
+		d.record = dns.TypeAAAA
+	case "ANY":
+		d.record = dns.TypeANY
+	case "CNAME":
+		d.record = dns.TypeCNAME
+	case "MX":
+		d.record = dns.TypeMX
+	case "NS":
+		d.record = dns.TypeNS
+	case "PTR":
+		d.record = dns.TypePTR
+	case "SOA":
+		d.record = dns.TypeSOA
+	case "SPF":
+		d.record = dns.TypeSPF
+	case "SRV":
+		d.record = dns.TypeSRV
+	case "TXT":
+		d.record = dns.TypeTXT
+	default:
+		return fmt.Errorf("record type %q not recognized", d.RecordType)
+	}
+
+	// Create a client for querying
+	d.client = &dns.Client{
+		ReadTimeout: time.Duration(d.Timeout),
+		Net:         d.Network,
 	}
 
 	return nil
@@ -87,7 +126,7 @@ func (d *DNSQuery) Gather(acc telegraf.Accumulator) error {
 				defer wg.Done()
 
 				fields, tags, err := d.query(domain, server)
-				if err != nil {
+				if err != nil && !slices.Contains(ignoredErrors, tags["rcode"]) {
 					var opErr *net.OpError
 					if !errors.As(err, &opErr) || !opErr.Timeout() {
 						acc.AddError(err)
@@ -102,7 +141,7 @@ func (d *DNSQuery) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (d *DNSQuery) query(domain string, server string) (map[string]interface{}, map[string]string, error) {
+func (d *DNSQuery) query(domain, server string) (map[string]any, map[string]string, error) {
 	tags := map[string]string{
 		"server":      server,
 		"domain":      domain,
@@ -110,32 +149,22 @@ func (d *DNSQuery) query(domain string, server string) (map[string]interface{}, 
 		"result":      "error",
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"query_time_ms": float64(0),
-		"result_code":   uint64(Error),
-	}
-
-	c := dns.Client{
-		ReadTimeout: time.Duration(d.Timeout),
-		Net:         d.Network,
-	}
-
-	recordType, err := d.parseRecordType()
-	if err != nil {
-		return fields, tags, err
+		"result_code":   uint64(errorResult),
 	}
 
 	var msg dns.Msg
-	msg.SetQuestion(dns.Fqdn(domain), recordType)
+	msg.SetQuestion(dns.Fqdn(domain), d.record)
 	msg.RecursionDesired = true
 
 	addr := net.JoinHostPort(server, strconv.Itoa(d.Port))
-	r, rtt, err := c.Exchange(&msg, addr)
+	r, rtt, err := d.client.Exchange(&msg, addr)
 	if err != nil {
 		var opErr *net.OpError
 		if errors.As(err, &opErr) && opErr.Timeout() {
 			tags["result"] = "timeout"
-			fields["result_code"] = uint64(Timeout)
+			fields["result_code"] = uint64(timeoutResult)
 			return fields, tags, err
 		}
 		return fields, tags, err
@@ -153,7 +182,29 @@ func (d *DNSQuery) query(domain string, server string) (map[string]interface{}, 
 
 	// Success
 	tags["result"] = "success"
-	fields["result_code"] = uint64(Success)
+	fields["result_code"] = uint64(successResult)
+
+	// Fill out custom fields for specific record types
+	for _, record := range r.Answer {
+		switch x := record.(type) {
+		case *dns.A:
+			fields["name"] = x.Hdr.Name
+		case *dns.AAAA:
+			fields["name"] = x.Hdr.Name
+		case *dns.CNAME:
+			fields["name"] = x.Hdr.Name
+		case *dns.MX:
+			fields["name"] = x.Hdr.Name
+			fields["preference"] = x.Preference
+		case *dns.SOA:
+			fields["expire"] = x.Expire
+			fields["minttl"] = x.Minttl
+			fields["name"] = x.Hdr.Name
+			fields["refresh"] = x.Refresh
+			fields["retry"] = x.Retry
+			fields["serial"] = x.Serial
+		}
+	}
 
 	if d.fieldEnabled["first_ip"] {
 		for _, record := range r.Answer {
@@ -172,40 +223,6 @@ func (d *DNSQuery) query(domain string, server string) (map[string]interface{}, 
 	}
 
 	return fields, tags, nil
-}
-
-func (d *DNSQuery) parseRecordType() (uint16, error) {
-	var recordType uint16
-	var err error
-
-	switch d.RecordType {
-	case "A":
-		recordType = dns.TypeA
-	case "AAAA":
-		recordType = dns.TypeAAAA
-	case "ANY":
-		recordType = dns.TypeANY
-	case "CNAME":
-		recordType = dns.TypeCNAME
-	case "MX":
-		recordType = dns.TypeMX
-	case "NS":
-		recordType = dns.TypeNS
-	case "PTR":
-		recordType = dns.TypePTR
-	case "SOA":
-		recordType = dns.TypeSOA
-	case "SPF":
-		recordType = dns.TypeSPF
-	case "SRV":
-		recordType = dns.TypeSRV
-	case "TXT":
-		recordType = dns.TypeTXT
-	default:
-		err = fmt.Errorf("record type %s not recognized", d.RecordType)
-	}
-
-	return recordType, err
 }
 
 func extractIP(record dns.RR) (string, bool) {

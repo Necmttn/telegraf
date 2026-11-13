@@ -13,7 +13,7 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
-	influxSerializer "github.com/influxdata/telegraf/plugins/serializers/influx"
+	serializers_influx "github.com/influxdata/telegraf/plugins/serializers/influx"
 )
 
 func TestProcessorShim(t *testing.T) {
@@ -23,14 +23,14 @@ func TestProcessorShim(t *testing.T) {
 func TestProcessorShimWithLargerThanDefaultScannerBufferSize(t *testing.T) {
 	letters := []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	b := make([]rune, 0, bufio.MaxScanTokenSize*2)
-	for i := 0; i < bufio.MaxScanTokenSize*2; i++ {
+	for range bufio.MaxScanTokenSize * 2 {
 		b = append(b, letters[rand.Intn(len(letters))])
 	}
 
 	testSendAndReceive(t, "f1", string(b))
 }
 
-func testSendAndReceive(t *testing.T, fieldKey string, fieldValue string) {
+func testSendAndReceive(t *testing.T, fieldKey, fieldValue string) {
 	p := &testProcessor{"hi", "mom"}
 
 	stdinReader, stdinWriter := io.Pipe()
@@ -45,14 +45,13 @@ func testSendAndReceive(t *testing.T, fieldKey string, fieldValue string) {
 
 	wg := sync.WaitGroup{}
 
-	wg.Add(1)
-	go func() {
-		err := s.RunProcessor()
-		require.NoError(t, err)
-		wg.Done()
-	}()
+	wg.Go(func() {
+		if err := s.RunProcessor(); err != nil {
+			t.Error(err)
+		}
+	})
 
-	serializer := &influxSerializer.Serializer{}
+	serializer := &serializers_influx.Serializer{}
 	require.NoError(t, serializer.Init())
 
 	parser := influx.Parser{}
@@ -62,7 +61,7 @@ func testSendAndReceive(t *testing.T, fieldKey string, fieldValue string) {
 		map[string]string{
 			"a": "b",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"v":      1,
 			fieldKey: fieldValue,
 		},
@@ -88,7 +87,9 @@ func testSendAndReceive(t *testing.T, fieldKey string, fieldValue string) {
 	require.True(t, ok)
 	require.Equal(t, fieldValue, val2)
 	go func() {
-		_, _ = io.ReadAll(r)
+		if _, err = io.ReadAll(r); err != nil {
+			t.Error(err)
+		}
 	}()
 	wg.Wait()
 }
@@ -105,10 +106,6 @@ func (p *testProcessor) Apply(in ...telegraf.Metric) []telegraf.Metric {
 	return in
 }
 
-func (p *testProcessor) SampleConfig() string {
-	return ""
-}
-
-func (p *testProcessor) Description() string {
+func (*testProcessor) SampleConfig() string {
 	return ""
 }

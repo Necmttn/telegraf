@@ -1,12 +1,18 @@
 # Riemann Listener Input Plugin
 
-The Riemann Listener is a simple input plugin that listens for messages from
-client that use riemann clients using riemann-protobuff format.
+This service plugin listens for messages from [Riemann][riemann] clients using
+the protocol buffer format.
+
+⭐ Telegraf v1.17.0
+🏷️ datastore
+💻 all
+
+[riemann]: https://riemann.io/
 
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -16,10 +22,9 @@ normal plugins:
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -49,6 +54,9 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   #  tls_allowed_cacerts = ["/etc/telegraf/clientca.pem"]
   ## Maximum socket buffer size (in bytes when no unit specified).
   #  read_buffer_size = "64KiB"
+  ## Maximum size of a single message. Messages announcing a larger size
+  ## are rejected and the connection is closed.
+  #  max_message_size = "4MiB"
   ## Period between keep alive probes.
   ## 0 disables keep alive probes.
   ## Defaults to the OS configuration.

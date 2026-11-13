@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf/testutil"
 	ia "github.com/intel/iaevents"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestInitialization(t *testing.T) {
@@ -62,7 +64,7 @@ func TestInitialization(t *testing.T) {
 
 	t.Run("exceeded file descriptors", func(t *testing.T) {
 		limit := []byte("10")
-		uncoreEntities := []*UncoreEventEntity{{parsedEvents: makeEvents(10, 21), parsedSockets: makeIDs(5)}}
+		uncoreEntities := []*uncoreEventEntity{{parsedEvents: makeEvents(10, 21), parsedSockets: makeIDs(5)}}
 		estimation := 1050
 
 		mIntelPMU := IntelPMU{EventListPaths: paths, Log: testutil.Logger{}, fileInfo: mFileInfo, UncoreEntities: uncoreEntities}
@@ -123,7 +125,7 @@ func TestGather(t *testing.T) {
 	mIntelPMU := &IntelPMU{entitiesReader: mEntitiesValuesReader}
 
 	type fieldWithTags struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}
 
@@ -135,7 +137,7 @@ func TestGather(t *testing.T) {
 	})
 
 	t.Run("error while reading entities", func(t *testing.T) {
-		errMock := fmt.Errorf("houston we have a problem")
+		errMock := errors.New("houston we have a problem")
 		mEntitiesValuesReader.On("readEntities", mIntelPMU.CoreEntities, mIntelPMU.UncoreEntities).
 			Return(nil, nil, errMock).Once()
 
@@ -188,7 +190,7 @@ func TestGather(t *testing.T) {
 			},
 			results: []fieldWithTags{
 				{
-					fields: map[string]interface{}{
+					fields: map[string]any{
 						"raw":     uint64(100),
 						"enabled": uint64(200),
 						"running": uint64(200),
@@ -201,7 +203,7 @@ func TestGather(t *testing.T) {
 					},
 				},
 				{
-					fields: map[string]interface{}{
+					fields: map[string]any{
 						"raw":     uint64(2100),
 						"enabled": uint64(400),
 						"running": uint64(200),
@@ -213,7 +215,7 @@ func TestGather(t *testing.T) {
 					},
 				},
 				{
-					fields: map[string]interface{}{
+					fields: map[string]any{
 						"raw":     uint64(2134562),
 						"enabled": uint64(1000000),
 						"running": uint64(1000000),
@@ -228,7 +230,7 @@ func TestGather(t *testing.T) {
 					},
 				},
 				{
-					fields: map[string]interface{}{
+					fields: map[string]any{
 						"raw":     uint64(2134562),
 						"enabled": uint64(3222222),
 						"running": uint64(2100000),
@@ -290,31 +292,31 @@ func TestGather(t *testing.T) {
 func TestCheckFileDescriptors(t *testing.T) {
 	tests := []struct {
 		name       string
-		uncores    []*UncoreEventEntity
-		cores      []*CoreEventEntity
+		uncores    []*uncoreEventEntity
+		cores      []*coreEventEntity
 		estimation uint64
 		maxFD      []byte
 		fileLimit  uint64
 		errMsg     string
 	}{
-		{"exceed maximum file descriptors number", []*UncoreEventEntity{
+		{"exceed maximum file descriptors number", []*uncoreEventEntity{
 			{parsedEvents: makeEvents(100, 21), parsedSockets: makeIDs(5)},
 			{parsedEvents: makeEvents(25, 3), parsedSockets: makeIDs(7)},
 			{parsedEvents: makeEvents(2, 7), parsedSockets: makeIDs(20)}},
-			[]*CoreEventEntity{
+			[]*coreEventEntity{
 				{parsedEvents: makeEvents(100, 1), parsedCores: makeIDs(5)},
 				{parsedEvents: makeEvents(25, 1), parsedCores: makeIDs(7)},
 				{parsedEvents: makeEvents(2, 1), parsedCores: makeIDs(20)}},
 			12020, []byte("11000"), 8000, fmt.Sprintf("required file descriptors number `%d` exceeds maximum number of available file descriptors `%d`"+
 				": consider increasing the maximum number", 12020, 11000),
 		},
-		{"exceed soft file limit", []*UncoreEventEntity{{parsedEvents: makeEvents(100, 21), parsedSockets: makeIDs(5)}}, []*CoreEventEntity{
+		{"exceed soft file limit", []*uncoreEventEntity{{parsedEvents: makeEvents(100, 21), parsedSockets: makeIDs(5)}}, []*coreEventEntity{
 			{parsedEvents: makeEvents(100, 1), parsedCores: makeIDs(5)}},
 			11000, []byte("2515357"), 800, fmt.Sprintf("required file descriptors number `%d` exceeds soft limit of open files `%d`"+
 				": consider increasing the limit", 11000, 800),
 		},
-		{"no exceeds", []*UncoreEventEntity{{parsedEvents: makeEvents(100, 21), parsedSockets: makeIDs(5)}},
-			[]*CoreEventEntity{{parsedEvents: makeEvents(100, 1), parsedCores: makeIDs(5)}},
+		{"no exceeds", []*uncoreEventEntity{{parsedEvents: makeEvents(100, 21), parsedSockets: makeIDs(5)}},
+			[]*coreEventEntity{{parsedEvents: makeEvents(100, 1), parsedCores: makeIDs(5)}},
 			11000, []byte("2515357"), 13000, "",
 		},
 	}
@@ -346,14 +348,14 @@ func TestCheckFileDescriptors(t *testing.T) {
 func TestEstimateUncoreFd(t *testing.T) {
 	tests := []struct {
 		name     string
-		entities []*UncoreEventEntity
+		entities []*uncoreEventEntity
 		result   uint64
 	}{
 		{"nil entities", nil, 0},
-		{"nil perf event", []*UncoreEventEntity{{parsedEvents: []*eventWithQuals{{"", nil, ia.CustomizableEvent{}}}, parsedSockets: makeIDs(0)}}, 0},
-		{"one uncore entity", []*UncoreEventEntity{{parsedEvents: makeEvents(10, 10), parsedSockets: makeIDs(20)}}, 2000},
-		{"nil entity", []*UncoreEventEntity{nil, {parsedEvents: makeEvents(1, 8), parsedSockets: makeIDs(1)}}, 8},
-		{"many core entities", []*UncoreEventEntity{
+		{"nil perf event", []*uncoreEventEntity{{parsedEvents: []*eventWithQuals{{"", nil, ia.CustomizableEvent{}}}, parsedSockets: makeIDs(0)}}, 0},
+		{"one uncore entity", []*uncoreEventEntity{{parsedEvents: makeEvents(10, 10), parsedSockets: makeIDs(20)}}, 2000},
+		{"nil entity", []*uncoreEventEntity{nil, {parsedEvents: makeEvents(1, 8), parsedSockets: makeIDs(1)}}, 8},
+		{"many core entities", []*uncoreEventEntity{
 			{parsedEvents: makeEvents(100, 21), parsedSockets: makeIDs(5)},
 			{parsedEvents: makeEvents(25, 3), parsedSockets: makeIDs(7)},
 			{parsedEvents: makeEvents(2, 7), parsedSockets: makeIDs(20)},
@@ -373,19 +375,19 @@ func TestEstimateUncoreFd(t *testing.T) {
 func TestEstimateCoresFd(t *testing.T) {
 	tests := []struct {
 		name     string
-		entities []*CoreEventEntity
+		entities []*coreEventEntity
 		result   uint64
 	}{
 		{"nil entities", nil, 0},
-		{"one core entity", []*CoreEventEntity{{parsedEvents: makeEvents(10, 1), parsedCores: makeIDs(20)}}, 200},
-		{"nil entity", []*CoreEventEntity{nil, {parsedEvents: makeEvents(10, 1), parsedCores: makeIDs(20)}}, 200},
-		{"many core entities", []*CoreEventEntity{
+		{"one core entity", []*coreEventEntity{{parsedEvents: makeEvents(10, 1), parsedCores: makeIDs(20)}}, 200},
+		{"nil entity", []*coreEventEntity{nil, {parsedEvents: makeEvents(10, 1), parsedCores: makeIDs(20)}}, 200},
+		{"many core entities", []*coreEventEntity{
 			{parsedEvents: makeEvents(100, 1), parsedCores: makeIDs(5)},
 			{parsedEvents: makeEvents(25, 1), parsedCores: makeIDs(7)},
 			{parsedEvents: makeEvents(2, 1), parsedCores: makeIDs(20)},
 		}, 715},
-		{"1024 events", []*CoreEventEntity{{parsedEvents: makeEvents(1024, 1), parsedCores: makeIDs(12)}}, 12288},
-		{"big number", []*CoreEventEntity{{parsedEvents: makeEvents(1024, 1), parsedCores: makeIDs(1048576)}}, 1073741824},
+		{"1024 events", []*coreEventEntity{{parsedEvents: makeEvents(1024, 1), parsedCores: makeIDs(12)}}, 12288},
+		{"big number", []*coreEventEntity{{parsedEvents: makeEvents(1024, 1), parsedCores: makeIDs(1048576)}}, 1073741824},
 	}
 
 	for _, test := range tests {
@@ -398,7 +400,7 @@ func TestEstimateCoresFd(t *testing.T) {
 	}
 }
 
-func makeEvents(number int, pmusNumber int) []*eventWithQuals {
+func makeEvents(number, pmusNumber int) []*eventWithQuals {
 	a := make([]*eventWithQuals, number)
 	for i := range a {
 		b := make([]ia.NamedPMUType, pmusNumber)
@@ -440,7 +442,7 @@ func TestReadMaxFD(t *testing.T) {
 		maxFD   uint64
 		failMsg string
 	}{
-		{"read file error", fmt.Errorf("mock error"), nil, 0, openErrorMsg},
+		{"read file error", errors.New("mock error"), nil, 0, openErrorMsg},
 		{"file content parse error", nil, []byte("wrong format"), 0, parseErrorMsg},
 		{"negative value reading", nil, []byte("-10000"), 0, parseErrorMsg},
 		{"max uint exceeded", nil, []byte("18446744073709551616"), 0, parseErrorMsg},
@@ -471,7 +473,7 @@ func TestAddFiles(t *testing.T) {
 	mError := errors.New("mock error")
 
 	t.Run("no paths", func(t *testing.T) {
-		err := checkFiles([]string{}, mFileInfo)
+		err := checkFiles(nil, mFileInfo)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no paths were given")
 	})
@@ -546,9 +548,177 @@ type fakeFileInfo struct {
 	fileMode os.FileMode
 }
 
-func (f fakeFileInfo) Name() string       { return "" }
-func (f fakeFileInfo) Size() int64        { return 0 }
-func (f fakeFileInfo) Mode() os.FileMode  { return f.fileMode }
-func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
-func (f fakeFileInfo) IsDir() bool        { return false }
-func (f fakeFileInfo) Sys() interface{}   { return nil }
+func (fakeFileInfo) Name() string        { return "" }
+func (fakeFileInfo) Size() int64         { return 0 }
+func (f fakeFileInfo) Mode() os.FileMode { return f.fileMode }
+func (fakeFileInfo) ModTime() time.Time  { return time.Time{} }
+func (fakeFileInfo) IsDir() bool         { return false }
+func (fakeFileInfo) Sys() any            { return nil }
+
+// Mocking
+
+// mockEntitiesValuesReader is an autogenerated mock type for the entitiesValuesReader type
+type mockEntitiesValuesReader struct {
+	mock.Mock
+}
+
+// readEntities provides a mock function with given fields: _a0, _a1
+func (_m *mockEntitiesValuesReader) readEntities(_a0 []*coreEventEntity, _a1 []*uncoreEventEntity) ([]coreMetric, []uncoreMetric, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 []coreMetric
+	if rf, ok := ret.Get(0).(func([]*coreEventEntity, []*uncoreEventEntity) []coreMetric); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]coreMetric)
+		}
+	}
+
+	var r1 []uncoreMetric
+	if rf, ok := ret.Get(1).(func([]*coreEventEntity, []*uncoreEventEntity) []uncoreMetric); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]uncoreMetric)
+		}
+	}
+
+	var r2 error
+	if rf, ok := ret.Get(2).(func([]*coreEventEntity, []*uncoreEventEntity) error); ok {
+		r2 = rf(_a0, _a1)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// mockEntitiesActivator is an autogenerated mock type for the entitiesActivator type
+type mockEntitiesActivator struct {
+	mock.Mock
+}
+
+// activateEntities provides a mock function with given fields: coreEntities, uncoreEntities
+func (_m *mockEntitiesActivator) activateEntities(coreEntities []*coreEventEntity, uncoreEntities []*uncoreEventEntity) error {
+	ret := _m.Called(coreEntities, uncoreEntities)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]*coreEventEntity, []*uncoreEventEntity) error); ok {
+		r0 = rf(coreEntities, uncoreEntities)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// mockEntitiesParser is an autogenerated mock type for the entitiesParser type
+type mockEntitiesParser struct {
+	mock.Mock
+}
+
+// parseEntities provides a mock function with given fields: coreEntities, uncoreEntities
+func (_m *mockEntitiesParser) parseEntities(coreEntities []*coreEventEntity, uncoreEntities []*uncoreEventEntity) error {
+	ret := _m.Called(coreEntities, uncoreEntities)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]*coreEventEntity, []*uncoreEventEntity) error); ok {
+		r0 = rf(coreEntities, uncoreEntities)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// mockEntitiesResolver is an autogenerated mock type for the entitiesResolver type
+type mockEntitiesResolver struct {
+	mock.Mock
+}
+
+// resolveEntities provides a mock function with given fields: coreEntities, uncoreEntities
+func (_m *mockEntitiesResolver) resolveEntities(coreEntities []*coreEventEntity, uncoreEntities []*uncoreEventEntity) error {
+	ret := _m.Called(coreEntities, uncoreEntities)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func([]*coreEventEntity, []*uncoreEventEntity) error); ok {
+		r0 = rf(coreEntities, uncoreEntities)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// mockFileInfoProvider is an autogenerated mock type for the fileInfoProvider type
+type mockFileInfoProvider struct {
+	mock.Mock
+}
+
+// fileLimit provides a mock function with given fields:
+func (_m *mockFileInfoProvider) fileLimit() (uint64, error) {
+	ret := _m.Called()
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func() uint64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// readFile provides a mock function with given fields: _a0
+func (_m *mockFileInfoProvider) readFile(_a0 string) ([]byte, error) {
+	ret := _m.Called(_a0)
+
+	var r0 []byte
+	if rf, ok := ret.Get(0).(func(string) []byte); ok {
+		r0 = rf(_a0)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(_a0)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// lstat provides a mock function with given fields: _a0
+func (_m *mockFileInfoProvider) lstat(_a0 string) (os.FileInfo, error) {
+	ret := _m.Called(_a0)
+
+	var r0 os.FileInfo
+	if rf, ok := ret.Get(0).(func(string) os.FileInfo); ok {
+		r0 = rf(_a0)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(os.FileInfo)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(_a0)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}

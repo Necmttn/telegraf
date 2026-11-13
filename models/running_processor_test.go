@@ -8,74 +8,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/models"
 	"github.com/influxdata/telegraf/plugins/processors"
 	"github.com/influxdata/telegraf/testutil"
 )
 
-// MockProcessor is a Processor with an overridable Apply implementation.
-type MockProcessor struct {
-	ApplyF func(in ...telegraf.Metric) []telegraf.Metric
-}
-
-func (p *MockProcessor) SampleConfig() string {
-	return ""
-}
-
-func (p *MockProcessor) Description() string {
-	return ""
-}
-
-func (p *MockProcessor) Apply(in ...telegraf.Metric) []telegraf.Metric {
-	return p.ApplyF(in...)
-}
-
-// MockProcessorToInit is a Processor that needs to be initialized.
-type MockProcessorToInit struct {
-	HasBeenInit bool
-}
-
-func (p *MockProcessorToInit) SampleConfig() string {
-	return ""
-}
-
-func (p *MockProcessorToInit) Description() string {
-	return ""
-}
-
-func (p *MockProcessorToInit) Apply(in ...telegraf.Metric) []telegraf.Metric {
-	return in
-}
-
-func (p *MockProcessorToInit) Init() error {
-	p.HasBeenInit = true
-	return nil
-}
-
-func TestRunningProcessor_Init(t *testing.T) {
-	mock := MockProcessorToInit{}
+func TestRunningProcessorInit(t *testing.T) {
+	mock := mockProcessor{}
 	rp := &models.RunningProcessor{
 		Processor: processors.NewStreamingProcessorFromProcessor(&mock),
 	}
-	err := rp.Init()
-	require.NoError(t, err)
-	require.True(t, mock.HasBeenInit)
+	require.NoError(t, rp.Init())
+	require.True(t, mock.hasBeenInit)
 }
 
-// TagProcessor returns a Processor whose Apply function adds the tag and
-// value.
-func TagProcessor(key, value string) *MockProcessor {
-	return &MockProcessor{
-		ApplyF: func(in ...telegraf.Metric) []telegraf.Metric {
-			for _, m := range in {
-				m.AddTag(key, value)
-			}
-			return in
-		},
-	}
-}
-
-func TestRunningProcessor_Apply(t *testing.T) {
+func TestRunningProcessorApply(t *testing.T) {
 	type args struct {
 		Processor telegraf.StreamingProcessor
 		Config    *models.ProcessorConfig
@@ -90,28 +38,37 @@ func TestRunningProcessor_Apply(t *testing.T) {
 		{
 			name: "inactive filter applies metrics",
 			args: args{
-				Processor: processors.NewStreamingProcessorFromProcessor(TagProcessor("apply", "true")),
+				Processor: processors.NewStreamingProcessorFromProcessor(
+					&mockProcessor{
+						applyF: func(in ...telegraf.Metric) []telegraf.Metric {
+							for _, m := range in {
+								m.AddTag("apply", "true")
+							}
+							return in
+						},
+					},
+				),
 				Config: &models.ProcessorConfig{
 					Filter: models.Filter{},
 				},
 			},
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"value": 42.0,
 					},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"apply": "true",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value": 42.0,
 					},
 					time.Unix(0, 0),
@@ -121,7 +78,16 @@ func TestRunningProcessor_Apply(t *testing.T) {
 		{
 			name: "filter applies",
 			args: args{
-				Processor: processors.NewStreamingProcessorFromProcessor(TagProcessor("apply", "true")),
+				Processor: processors.NewStreamingProcessorFromProcessor(
+					&mockProcessor{
+						applyF: func(in ...telegraf.Metric) []telegraf.Metric {
+							for _, m := range in {
+								m.AddTag("apply", "true")
+							}
+							return in
+						},
+					},
+				),
 				Config: &models.ProcessorConfig{
 					Filter: models.Filter{
 						NamePass: []string{"cpu"},
@@ -129,22 +95,22 @@ func TestRunningProcessor_Apply(t *testing.T) {
 				},
 			},
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"value": 42.0,
 					},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{
 						"apply": "true",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value": 42.0,
 					},
 					time.Unix(0, 0),
@@ -154,7 +120,16 @@ func TestRunningProcessor_Apply(t *testing.T) {
 		{
 			name: "filter doesn't apply",
 			args: args{
-				Processor: processors.NewStreamingProcessorFromProcessor(TagProcessor("apply", "true")),
+				Processor: processors.NewStreamingProcessorFromProcessor(
+					&mockProcessor{
+						applyF: func(in ...telegraf.Metric) []telegraf.Metric {
+							for _, m := range in {
+								m.AddTag("apply", "true")
+							}
+							return in
+						},
+					},
+				),
 				Config: &models.ProcessorConfig{
 					Filter: models.Filter{
 						NameDrop: []string{"cpu"},
@@ -162,20 +137,20 @@ func TestRunningProcessor_Apply(t *testing.T) {
 				},
 			},
 			input: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"value": 42.0,
 					},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"value": 42.0,
 					},
 					time.Unix(0, 0),
@@ -208,7 +183,7 @@ func TestRunningProcessor_Apply(t *testing.T) {
 	}
 }
 
-func TestRunningProcessor_Order(t *testing.T) {
+func TestRunningProcessorOrder(t *testing.T) {
 	rp1 := &models.RunningProcessor{
 		Config: &models.ProcessorConfig{
 			Order: 1,
@@ -230,4 +205,23 @@ func TestRunningProcessor_Order(t *testing.T) {
 	require.Equal(t,
 		models.RunningProcessors{rp1, rp2, rp3},
 		procs)
+}
+
+// mockProcessor is a processor with an overridable apply implementation.
+type mockProcessor struct {
+	applyF      func(in ...telegraf.Metric) []telegraf.Metric
+	hasBeenInit bool
+}
+
+func (*mockProcessor) SampleConfig() string {
+	return ""
+}
+
+func (p *mockProcessor) Init() error {
+	p.hasBeenInit = true
+	return nil
+}
+
+func (p *mockProcessor) Apply(in ...telegraf.Metric) []telegraf.Metric {
+	return p.applyF(in...)
 }

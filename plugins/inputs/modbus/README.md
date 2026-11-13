@@ -1,15 +1,20 @@
 <!-- markdownlint-disable MD024 -->
 # Modbus Input Plugin
 
-The Modbus plugin collects Discrete Inputs, Coils, Input Registers and Holding
-Registers via Modbus TCP or Modbus RTU/ASCII.
+This plugin collects data from [Modbus][modbus] registers using e.g. Modbus TCP
+or serial interfaces with Modbus RTU or Modbus ASCII.
+
+⭐ Telegraf v1.14.0
+🏷️ iot
+💻 all
+
+[modbus]: https://www.modbus.org/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -60,15 +65,19 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## and "RTU" for serial connections.
   # transmission_mode = "auto"
 
-  ## Trace the connection to the modbus device as debug messages
-  ## Note: You have to enable telegraf's debug mode to see those messages!
-  # debug_connection = false
+  ## Trace the connection to the modbus device
+  # log_level = "trace"
 
   ## Define the configuration schema
   ##  |---register -- define fields per register type in the original style (only supports one slave ID)
   ##  |---request  -- define fields on a requests base
   ##  |---metric   -- define fields on a metric base
   configuration_type = "register"
+
+  ## Exclude the register type tag
+  ## Please note, this will also influence the grouping of metrics as you won't
+  ## see one metric per register type anymore!
+  # exclude_register_type_tag = false
 
   ## --- "register" configuration style ---
 
@@ -101,12 +110,13 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ##  |---BA, DCBA   - Little Endian
   ##  |---BADC       - Mid-Big Endian
   ##  |---CDAB       - Mid-Little Endian
-  ## data_type   - INT8L, INT8H, UINT8L, UINT8H (low and high byte variants)
+  ## data_type   - BIT (single bit of a register)
+  ##               INT8L, INT8H, UINT8L, UINT8H (low and high byte variants)
   ##               INT16, UINT16, INT32, UINT32, INT64, UINT64,
   ##               FLOAT16-IEEE, FLOAT32-IEEE, FLOAT64-IEEE (IEEE 754 binary representation)
   ##               FIXED, UFIXED (fixed-point representation on input)
-  ##               FLOAT32 is a deprecated alias for UFIXED for historic reasons, should be avoided
   ##               STRING (byte-sequence converted to string)
+  ## bit         - (optional) bit of the register, ONLY valid for BIT type
   ## scale       - the final numeric variable representation
   ## address     - variable address
 
@@ -176,11 +186,13 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
     ## address        - address of the register to query. For coil and discrete inputs this is the bit address.
     ## name *1        - field name
     ## type *1,2      - type of the modbus field, can be
+    ##                  BIT (single bit of a register)
     ##                  INT8L, INT8H, UINT8L, UINT8H (low and high byte variants)
     ##                  INT16, UINT16, INT32, UINT32, INT64, UINT64 and
     ##                  FLOAT16, FLOAT32, FLOAT64 (IEEE 754 binary representation)
     ##                  STRING (byte-sequence converted to string)
     ## length *1,2    - (optional) number of registers, ONLY valid for STRING type
+    ## bit *1,2       - (optional) bit of the register, ONLY valid for BIT type
     ## scale *1,2,4   - (optional) factor to scale the variable with
     ## output *1,3,4  - (optional) type of resulting field, can be INT64, UINT64 or FLOAT64.
     ##                  Defaults to FLOAT64 for numeric fields if "scale" is provided.
@@ -286,14 +298,16 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
     ## address     - address of the register to query. For coil and discrete inputs this is the bit address.
     ## name        - field name
     ## type *1     - type of the modbus field, can be
+    ##                 BIT (single bit of a register)
     ##                 INT8L, INT8H, UINT8L, UINT8H (low and high byte variants)
     ##                 INT16, UINT16, INT32, UINT32, INT64, UINT64 and
     ##                 FLOAT16, FLOAT32, FLOAT64 (IEEE 754 binary representation)
     ##                 STRING (byte-sequence converted to string)
     ## length *1   - (optional) number of registers, ONLY valid for STRING type
+    ## bit *1,2    - (optional) bit of the register, ONLY valid for BIT type
     ## scale *1,3  - (optional) factor to scale the variable with
     ## output *2,3 - (optional) type of resulting field, can be INT64, UINT64 or FLOAT64. Defaults to FLOAT64 if
-    ##               "scale" is provided and to the input "type" class otherwise (i.e. INT* -> INT64, etc).
+    ##               "scale" is provided and to the input "type" class otherwise (INT* -> INT64, etc).
     ##
     ## *1: These fields are ignored for both "coil" and "discrete"-input type of registers.
     ## *2: This field can only be "UINT16" or "BOOL" if specified for both "coil"
@@ -305,7 +319,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
       { register="coil",    address=1, name="status_ok"},
       { register="holding", address=0, name="voltage",      type="INT16"   },
       { address=1, name="current",      type="INT32",   scale=0.001 },
-      { address=5, name="energy",       type="FLOAT32", scale=0.001,},
+      { address=5, name="energy",       type="FLOAT32", scale=0.001 },
       { address=7, name="frequency",    type="UINT32",  scale=0.1   },
       { address=8, name="power_factor", type="INT64",   scale=0.01  },
       { address=9, name="firmware",     type="STRING",  length=8    },
@@ -348,22 +362,42 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
     ## stay connected during gather and disconnect afterwards.
     # close_connection_after_gather = false
 
+    ## Enforce the starting address to be zero for the first request on
+    ## coil registers. This is necessary for some devices see
+    ## https://github.com/influxdata/telegraf/issues/8905
+    # read_coils_starting_at_zero = false
+
+    ## String byte-location in registers AFTER byte-order conversion
+    ## Some device (e.g. EM340) place the string byte in only the upper or
+    ## lower byte location of a register see
+    ## https://github.com/influxdata/telegraf/issues/14748
+    ## Available settings:
+    ##   lower -- use only lower byte of the register (00XX 00XX 00XX 00XX)
+    ##   upper -- use only upper byte of the register (XX00 XX00 XX00 XX00)
+    ## By default both bytes of the register are used (XXXX XXXX).
+    # string_register_location = ""
+
     ## Force the plugin to read each field in a separate request.
     ## This might be necessary for devices not conforming to the spec,
     ## see https://github.com/influxdata/telegraf/issues/12071.
     # one_request_per_field = false
 
-    ## Enforce the starting address to be zero for the first request on
-    ## coil registers. This is necessary for some devices see
-    ## https://github.com/influxdata/telegraf/issues/8905
-    # read_coils_starting_at_zero = false
+    ## Maximum number of coil or discrete-input registers to read per request
+    ## The specification defines this limit as 2000 but some devices only
+    ## support a smaller number per request
+    # max_bit_registers_per_request = 2000
+
+    ## Maximum number of input or holding registers to read per request
+    ## The specification defines this limit as 125 but some devices only
+    ## support a smaller number per request
+    # max_word_registers_per_request = 125
 ```
 
 ## Notes
 
 You can debug Modbus connection issues by enabling `debug_connection`. To see
 those debug messages, Telegraf has to be started with debugging enabled
-(i.e. with the `--debug` option). Please be aware that connection tracing will
+(with the `--debug` option). Please be aware that connection tracing will
 produce a lot of messages and should __NOT__ be used in production environments.
 
 Please use `pause_after_connect` / `pause_between_requests` with care. Ensure
@@ -374,9 +408,9 @@ collection interval. Note that pauses add up if multiple requests are sent!
 
 The modbus plugin supports multiple configuration styles that can be set using
 the `configuration_type` setting. The different styles are described
-below. Please note that styles cannot be mixed, i.e. only the settings belonging
-to the configured `configuration_type` are used for constructing _modbus_
-requests and creation of metrics.
+below. Please note that styles cannot be mixed.
+Only the settings belonging to the configured `configuration_type` are used for
+constructing _modbus_ requests and creation of metrics.
 
 Directly jump to the styles:
 
@@ -392,7 +426,8 @@ This is the original style used by this plugin. It allows a per-register
 configuration for a single slave-device.
 
 > [!NOTE]
-> _For legacy reasons this configuration style is not completely consistent with the other styles. Especially `FLOAT32` which suggests a floating point representation is actually a_ ___Fixed Point___ _data type and should be considered_ ___deprecated___
+> For legacy reasons this configuration style is not completely consistent with
+> the other styles.
 
 #### Usage of `data_type`
 
@@ -425,7 +460,7 @@ modbus data source. For _coil_ and _discrete_ registers only `UINT16` is valid.
 Use these types if your modbus registers contain a value that is encoded in this
 format. These types always include the sign, therefore no variant exists.
 
-##### Fixed Point: `FIXED`, `UFIXED`, (`FLOAT32` - _deprecated_)
+##### Fixed Point: `FIXED`, `UFIXED`
 
 These types are handled as an integer type on input, but are converted to
 floating point representation for further processing (e.g. scaling). Use one of
@@ -441,15 +476,18 @@ Select the type `FIXED` when the input type is declared to hold signed integer
 values. Your documentation of the modbus device should indicate this with a term
 like 'int32 containing fixed-point representation with N decimal places'.
 
-(`FLOAT32` is deprecated and should not be used. `UFIXED` provides the same
-conversion from unsigned values).
-
 ##### String: `STRING`
 
 This type is used to query the number of registers specified in the `address`
 setting and convert the byte-sequence to a string. Please note, if the
 byte-sequence contains a `null` byte, the string is truncated at this position.
 You cannot use the `scale` setting for string fields.
+
+##### Bit: `BIT`
+
+This type is used to query a single bit of a register specified in the `address`
+setting and convert the value to an unsigned integer. This type __requires__ the
+`bit` setting to be specified.
 
 ---
 
@@ -496,8 +534,8 @@ the device. The following algorithms are available
 ##### `none` (_default_)
 
 Do not perform any optimization. Please note that the requests are still obeying
-the maximum request sizes. Furthermore, completely empty requests, i.e. all
-fields specify `omit=true`, are removed. Otherwise, the requests are sent as
+the maximum request sizes. Furthermore, completely empty requests (where all
+fields specify `omit=true`) are removed. Otherwise, the requests are sent as
 specified by the user including request of omitted fields. This setting should
 be used if you want full control over the requests e.g. to accommodate for
 device constraints.
@@ -515,17 +553,6 @@ Requests are processed similar to `shrink` but the request boundaries are
 rearranged such that usually less registers are being read while keeping the
 number of requests. This optimization algorithm only works on consecutive
 address ranges and respects user-defined gaps in the field addresses.
-
-__Please note:__ This optimization might take long in case of many
-non-consecutive, non-omitted fields!
-
-##### `aggressive`
-
-Requests are processed similar to `rearrange` but user-defined gaps in the field
-addresses are filled automatically. This usually reduces the number of requests,
-but will increase the number of registers read due to larger requests.
-This algorithm might be useful if you only want to specify the fields you are
-interested in but want to minimize the number of requests sent to the device.
 
 __Please note:__ This optimization might take long in case of many
 non-consecutive, non-omitted fields!
@@ -611,8 +638,8 @@ Using the `output` setting you can explicitly specify the output
 field-datatype. The `output` type can be `INT64`, `UINT64` or `FLOAT64`. If not
 set explicitly, the output type is guessed as follows: If `scale` is set to a
 non-zero value, the output type is `FLOAT64`. Otherwise, the output type
-corresponds to the register datatype _class_, i.e. `INT*` will result in
-`INT64`, `UINT*` in `UINT64` and `FLOAT*` in `FLOAT64`.
+corresponds to the register datatype _class_ (`INT*` will result in
+`INT64`, `UINT*` in `UINT64`, and `FLOAT*` in `FLOAT64`).
 
 This setting is ignored if the field's `omit` is set to `true` and can be
 omitted. In case the `register` type is a bit-type (`coil` or `discrete`) only
@@ -680,8 +707,8 @@ given section using the `measurement` setting. If the setting is omitted
 #### Optimization setting
 
 __Please only use request optimization if you do understand the implications!__
-The `optimization` setting can specified globally, i.e. __NOT__ per metric
-section, and is used to optimize the actual requests sent to the device. Here,
+The `optimization` setting can be specified globally (__NOT__ per metric
+section) and is used to optimize the actual requests sent to the device. Here,
 the optimization is applied across _all metric sections_! The following
 algorithms are available
 
@@ -774,8 +801,8 @@ Using the `output` setting you can explicitly specify the output
 field-datatype. The `output` type can be `INT64`, `UINT64` or `FLOAT64`. If not
 set explicitly, the output type is guessed as follows: If `scale` is set to a
 non-zero value, the output type is `FLOAT64`. Otherwise, the output type
-corresponds to the register datatype _class_, i.e. `INT*` will result in
-`INT64`, `UINT*` in `UINT64` and `FLOAT*` in `FLOAT64`.
+corresponds to the register datatype _class_ (`INT*` will result in
+`INT64`, `UINT*` in `UINT64`, and `FLOAT*` in `FLOAT64`).
 
 In case the `register` is a bit-type (`coil` or `discrete`) only `UINT16` or
 `BOOL` are valid with the former being the default if omitted. For `coil` and
@@ -791,11 +818,6 @@ __Please note:__ These tags take precedence over predefined tags such as `name`,
 `type` or `slave_id`.
 
 ---
-
-## Metrics
-
-Metrics are custom and configured using the `discrete_inputs`, `coils`,
-`holding_register` and `input_registers` options.
 
 ## Troubleshooting
 
@@ -850,8 +872,13 @@ are required for your device, please let us know.
 In case your device needs a workaround that is not yet implemented, please open
 an issue or submit a pull-request.
 
+## Metrics
+
+The plugin reads the configured registers and constructs metrics based on the
+specified configuration. There is no predefined metric format.
+
 ## Example Output
 
 ```text
-modbus.InputRegisters,host=orangepizero Current=0,Energy=0,Frequency=60,Power=0,PowerFactor=0,Voltage=123.9000015258789 1554079521000000000
+modbus,name=device,slave_id=1,type=holding_register energy=3254.5,power=23.5,frequency=49.97 1701777274026591864
 ```

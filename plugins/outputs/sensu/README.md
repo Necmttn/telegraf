@@ -1,14 +1,18 @@
 # Sensu Go Output Plugin
 
-This plugin writes metrics events to [Sensu Go](https://sensu.io) via its
-HTTP events API.
+This plugin writes metrics to [Sensu Go][sensu] via its HTTP events API.
+
+⭐ Telegraf v1.18.0
+🏷️ applications
+💻 all
+
+[sensu]: https://sensu.io
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -84,7 +88,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ##
   ## Check specification
   ## The check name is the name to give the Sensu check associated with the event
-  ## created. This maps to check.metatadata.name in the event.
+  ## created. This maps to check.metadata.name in the event.
   [outputs.sensu.check]
     name = "telegraf"
 

@@ -4,27 +4,22 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/influxdata/telegraf/testutil"
 )
 
-var ServicePort = "27017"
+var servicePort = "27017"
 var unreachableMongoEndpoint = "mongodb://user:pass@127.0.0.1:27017/nop"
 
 func createTestServer(t *testing.T) *testutil.Container {
 	container := testutil.Container{
 		Image:        "mongo",
-		ExposedPorts: []string{ServicePort},
-		WaitingFor: wait.ForAll(
-			wait.NewHTTPStrategy("/").WithPort(nat.Port(ServicePort)),
-			wait.ForLog("Waiting for connections"),
-		),
+		ExposedPorts: []string{servicePort},
+		WaitingFor:   wait.ForLog("Waiting for connections"),
 	}
-	err := container.Start()
-	require.NoError(t, err, "failed to start container")
+	require.NoError(t, container.Start(), "failed to start container")
 
 	return &container
 }
@@ -40,7 +35,7 @@ func TestGetDefaultTagsIntegration(t *testing.T) {
 	m := &MongoDB{
 		Log: testutil.Logger{},
 		Servers: []string{
-			fmt.Sprintf("mongodb://%s:%s", container.Address, container.Ports[ServicePort]),
+			fmt.Sprintf("mongodb://%s:%s", container.Address, container.Ports[servicePort]),
 		},
 	}
 	err := m.Init()
@@ -76,7 +71,7 @@ func TestAddDefaultStatsIntegration(t *testing.T) {
 	m := &MongoDB{
 		Log: testutil.Logger{},
 		Servers: []string{
-			fmt.Sprintf("mongodb://%s:%s", container.Address, container.Ports[ServicePort]),
+			fmt.Sprintf("mongodb://%s:%s", container.Address, container.Ports[servicePort]),
 		},
 	}
 	err := m.Init()

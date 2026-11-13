@@ -2,13 +2,16 @@ package noise
 
 import (
 	"math"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
 	"gonum.org/v1/gonum/stat/distuv"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 type testDistribution struct {
@@ -51,26 +54,26 @@ func TestAddNoise(t *testing.T) {
 		{
 			name: "int64",
 			input: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": int64(5)},
+					map[string]any{"value": int64(5)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": int64(-10)},
+					map[string]any{"value": int64(-10)},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": int64(4)},
+					map[string]any{"value": int64(4)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": int64(-11)},
+					map[string]any{"value": int64(-11)},
 					time.Unix(0, 0),
 				),
 			},
@@ -79,26 +82,26 @@ func TestAddNoise(t *testing.T) {
 		{
 			name: "uint64",
 			input: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(25)},
+					map[string]any{"value": uint64(25)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(0)},
+					map[string]any{"value": uint64(0)},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(26)},
+					map[string]any{"value": uint64(26)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(1)},
+					map[string]any{"value": uint64(1)},
 					time.Unix(0, 0),
 				),
 			},
@@ -107,26 +110,26 @@ func TestAddNoise(t *testing.T) {
 		{
 			name: "float64",
 			input: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(0.0005)},
+					map[string]any{"value": float64(0.0005)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(1000.5)},
+					map[string]any{"value": float64(1000.5)},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(5.0005)},
+					map[string]any{"value": float64(5.0005)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(1005.5)},
+					map[string]any{"value": float64(1005.5)},
 					time.Unix(0, 0),
 				),
 			},
@@ -135,26 +138,26 @@ func TestAddNoise(t *testing.T) {
 		{
 			name: "float64",
 			input: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(0.0005)},
+					map[string]any{"value": float64(0.0005)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(1000.5)},
+					map[string]any{"value": float64(1000.5)},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(-0.4995)},
+					map[string]any{"value": float64(-0.4995)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{"value": float64(1000)},
+					map[string]any{"value": float64(1000)},
 					time.Unix(0, 0),
 				),
 			},
@@ -188,36 +191,36 @@ func TestAddNoiseOverflowCheck(t *testing.T) {
 		{
 			name: "underflow",
 			input: []telegraf.Metric{
-				testutil.MustMetric("underflow_int64",
+				metric.New("underflow_int64",
 					map[string]string{},
-					map[string]interface{}{"value": int64(math.MinInt64)},
+					map[string]any{"value": int64(math.MinInt64)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("underflow_uint64_1",
+				metric.New("underflow_uint64_1",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(5)},
+					map[string]any{"value": uint64(5)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("underflow_uint64_2",
+				metric.New("underflow_uint64_2",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(0)},
+					map[string]any{"value": uint64(0)},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("underflow_int64",
+				metric.New("underflow_int64",
 					map[string]string{},
-					map[string]interface{}{"value": int64(math.MinInt64)},
+					map[string]any{"value": int64(math.MinInt64)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("underflow_uint64_1",
+				metric.New("underflow_uint64_1",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(4)},
+					map[string]any{"value": uint64(4)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("underflow_uint64_2",
+				metric.New("underflow_uint64_2",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(0)},
+					map[string]any{"value": uint64(0)},
 					time.Unix(0, 0),
 				),
 			},
@@ -226,36 +229,36 @@ func TestAddNoiseOverflowCheck(t *testing.T) {
 		{
 			name: "overflow",
 			input: []telegraf.Metric{
-				testutil.MustMetric("overflow_int64",
+				metric.New("overflow_int64",
 					map[string]string{},
-					map[string]interface{}{"value": int64(math.MaxInt64)},
+					map[string]any{"value": int64(math.MaxInt64)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("overflow_uint",
+				metric.New("overflow_uint",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(math.MaxUint)},
+					map[string]any{"value": uint64(math.MaxUint)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("overflow_uint64",
+				metric.New("overflow_uint64",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(math.MaxUint64)},
+					map[string]any{"value": uint64(math.MaxUint64)},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("overflow_int64",
+				metric.New("overflow_int64",
 					map[string]string{},
-					map[string]interface{}{"value": int64(math.MaxInt64)},
+					map[string]any{"value": int64(math.MaxInt64)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("overflow_uint",
+				metric.New("overflow_uint",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(math.MaxUint)},
+					map[string]any{"value": uint64(math.MaxUint)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("overflow_uint64",
+				metric.New("overflow_uint64",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(math.MaxUint64)},
+					map[string]any{"value": uint64(math.MaxUint64)},
 					time.Unix(0, 0),
 				),
 			},
@@ -264,9 +267,9 @@ func TestAddNoiseOverflowCheck(t *testing.T) {
 		{
 			name: "non-numeric fields",
 			input: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"a": "test",
 						"b": true,
 					},
@@ -274,9 +277,9 @@ func TestAddNoiseOverflowCheck(t *testing.T) {
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("cpu",
+				metric.New("cpu",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"a": "test",
 						"b": true,
 					},
@@ -313,36 +316,36 @@ func TestAddNoiseWithZeroValue(t *testing.T) {
 		{
 			name: "zeros",
 			input: []telegraf.Metric{
-				testutil.MustMetric("zero_uint64",
+				metric.New("zero_uint64",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(0)},
+					map[string]any{"value": uint64(0)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("zero_int64",
+				metric.New("zero_int64",
 					map[string]string{},
-					map[string]interface{}{"value": int64(0)},
+					map[string]any{"value": int64(0)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("zero_float",
+				metric.New("zero_float",
 					map[string]string{},
-					map[string]interface{}{"value": float64(0.0)},
+					map[string]any{"value": float64(0.0)},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("zero_uint64",
+				metric.New("zero_uint64",
 					map[string]string{},
-					map[string]interface{}{"value": uint64(13)},
+					map[string]any{"value": uint64(13)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("zero_int64",
+				metric.New("zero_int64",
 					map[string]string{},
-					map[string]interface{}{"value": int64(13)},
+					map[string]any{"value": int64(13)},
 					time.Unix(0, 0),
 				),
-				testutil.MustMetric("zero_float",
+				metric.New("zero_float",
 					map[string]string{},
-					map[string]interface{}{"value": float64(13.37)},
+					map[string]any{"value": float64(13.37)},
 					time.Unix(0, 0),
 				),
 			},
@@ -375,4 +378,90 @@ func TestInvalidDistributionFunction(t *testing.T) {
 	}
 	err := p.Init()
 	require.EqualError(t, err, "unknown distribution type \"invalid\"")
+}
+
+func TestTracking(t *testing.T) {
+	// Setup raw input and expected output
+	inputRaw := []telegraf.Metric{
+		metric.New(
+			"zero_uint64",
+			map[string]string{},
+			map[string]any{"value": uint64(0)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"zero_int64",
+			map[string]string{},
+			map[string]any{"value": int64(0)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"zero_float",
+			map[string]string{},
+			map[string]any{"value": float64(0.0)},
+			time.Unix(0, 0),
+		),
+	}
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"zero_uint64",
+			map[string]string{},
+			map[string]any{"value": uint64(13)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"zero_int64",
+			map[string]string{},
+			map[string]any{"value": int64(13)},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"zero_float",
+			map[string]string{},
+			map[string]any{"value": float64(13.37)},
+			time.Unix(0, 0),
+		),
+	}
+
+	// Create fake notification for testing
+	var mu sync.Mutex
+	delivered := make([]telegraf.DeliveryInfo, 0, len(inputRaw))
+	notify := func(di telegraf.DeliveryInfo) {
+		mu.Lock()
+		defer mu.Unlock()
+		delivered = append(delivered, di)
+	}
+
+	// Convert raw input to tracking metric
+	input := make([]telegraf.Metric, 0, len(inputRaw))
+	for _, m := range inputRaw {
+		tm, _ := metric.WithTracking(m, notify)
+		input = append(input, tm)
+	}
+
+	// Prepare and start the plugin
+	plugin := &Noise{
+		NoiseType: "laplacian",
+		Scale:     1.0,
+		Log:       testutil.Logger{},
+	}
+	require.NoError(t, plugin.Init())
+	plugin.generator = &testDistribution{value: 13.37}
+
+	// Process expected metrics and compare with resulting metrics
+	actual := plugin.Apply(input...)
+	testutil.RequireMetricsEqual(t, expected, actual)
+
+	// Simulate output acknowledging delivery
+	for _, m := range actual {
+		m.Accept()
+	}
+
+	// Check delivery
+	require.Eventuallyf(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(input) == len(delivered)
+	}, time.Second, 100*time.Millisecond, "%d delivered but %d expected", len(delivered), len(expected))
 }

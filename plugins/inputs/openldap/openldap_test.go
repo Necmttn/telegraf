@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/go-ldap/ldap/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -28,8 +27,6 @@ func TestOpenldapMockResult(t *testing.T) {
 				Attributes: []*ldap.EntryAttribute{{Name: "monitorCounter", Values: []string{"1"}}},
 			},
 		},
-		Referrals: []string{},
-		Controls:  []ldap.Control{},
 	}
 
 	o := &Openldap{
@@ -64,7 +61,7 @@ func TestOpenldapGeneratesMetricsIntegration(t *testing.T) {
 	}
 
 	container := testutil.Container{
-		Image:        "bitnami/openldap",
+		Image:        "bitnamilegacy/openldap",
 		ExposedPorts: []string{servicePort},
 		Env: map[string]string{
 			"LDAP_ADMIN_USERNAME": "manager",
@@ -72,7 +69,7 @@ func TestOpenldapGeneratesMetricsIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("slapd starting"),
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 		),
 	}
 	err := container.Start()
@@ -110,7 +107,7 @@ func TestOpenldapStartTLSIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	container := testutil.Container{
-		Image:        "bitnami/openldap",
+		Image:        "bitnamilegacy/openldap",
 		ExposedPorts: []string{servicePort},
 		Env: map[string]string{
 			"LDAP_ADMIN_USERNAME": "manager",
@@ -127,7 +124,7 @@ func TestOpenldapStartTLSIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("slapd starting"),
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 		),
 	}
 	err = container.Start()
@@ -143,7 +140,7 @@ func TestOpenldapStartTLSIntegration(t *testing.T) {
 	o := &Openldap{
 		Host:               container.Address,
 		Port:               port,
-		SSL:                "starttls",
+		TLS:                "starttls",
 		InsecureSkipVerify: true,
 		BindDn:             "CN=manager,DC=example,DC=org",
 		BindPassword:       "secret",
@@ -171,7 +168,7 @@ func TestOpenldapLDAPSIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	container := testutil.Container{
-		Image:        "bitnami/openldap",
+		Image:        "bitnamilegacy/openldap",
 		ExposedPorts: []string{servicePortSecure},
 		Env: map[string]string{
 			"LDAP_ADMIN_USERNAME": "manager",
@@ -188,7 +185,7 @@ func TestOpenldapLDAPSIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("slapd starting"),
-			wait.ForListeningPort(nat.Port(servicePortSecure)),
+			wait.ForListeningPort(servicePortSecure),
 		),
 	}
 	err = container.Start()
@@ -201,7 +198,7 @@ func TestOpenldapLDAPSIntegration(t *testing.T) {
 	o := &Openldap{
 		Host:               container.Address,
 		Port:               port,
-		SSL:                "ldaps",
+		TLS:                "ldaps",
 		InsecureSkipVerify: true,
 		BindDn:             "CN=manager,DC=example,DC=org",
 		BindPassword:       "secret",
@@ -213,7 +210,7 @@ func TestOpenldapLDAPSIntegration(t *testing.T) {
 	commonTests(t, o, &acc)
 }
 
-func TestOpenldapInvalidSSLIntegration(t *testing.T) {
+func TestOpenldapInvalidTLSIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
@@ -227,7 +224,7 @@ func TestOpenldapInvalidSSLIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	container := testutil.Container{
-		Image:        "bitnami/openldap",
+		Image:        "bitnamilegacy/openldap",
 		ExposedPorts: []string{servicePortSecure},
 		Env: map[string]string{
 			"LDAP_ADMIN_USERNAME": "manager",
@@ -244,7 +241,7 @@ func TestOpenldapInvalidSSLIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("slapd starting"),
-			wait.ForListeningPort(nat.Port(servicePortSecure)),
+			wait.ForListeningPort(servicePortSecure),
 		),
 	}
 	err = container.Start()
@@ -257,7 +254,7 @@ func TestOpenldapInvalidSSLIntegration(t *testing.T) {
 	o := &Openldap{
 		Host:               container.Address,
 		Port:               port,
-		SSL:                "invalid",
+		TLS:                "invalid",
 		InsecureSkipVerify: true,
 	}
 
@@ -274,7 +271,7 @@ func TestOpenldapBindIntegration(t *testing.T) {
 	}
 
 	container := testutil.Container{
-		Image:        "bitnami/openldap",
+		Image:        "bitnamilegacy/openldap",
 		ExposedPorts: []string{servicePort},
 		Env: map[string]string{
 			"LDAP_ADMIN_USERNAME": "manager",
@@ -282,7 +279,7 @@ func TestOpenldapBindIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("slapd starting"),
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 		),
 	}
 	err := container.Start()
@@ -295,7 +292,7 @@ func TestOpenldapBindIntegration(t *testing.T) {
 	o := &Openldap{
 		Host:               container.Address,
 		Port:               port,
-		SSL:                "",
+		TLS:                "",
 		InsecureSkipVerify: true,
 		BindDn:             "CN=manager,DC=example,DC=org",
 		BindPassword:       "secret",
@@ -324,7 +321,7 @@ func TestOpenldapReverseMetricsIntegration(t *testing.T) {
 	}
 
 	container := testutil.Container{
-		Image:        "bitnami/openldap",
+		Image:        "bitnamilegacy/openldap",
 		ExposedPorts: []string{servicePort},
 		Env: map[string]string{
 			"LDAP_ADMIN_USERNAME": "manager",
@@ -332,7 +329,7 @@ func TestOpenldapReverseMetricsIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("slapd starting"),
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 		),
 	}
 	err := container.Start()
@@ -345,7 +342,7 @@ func TestOpenldapReverseMetricsIntegration(t *testing.T) {
 	o := &Openldap{
 		Host:               container.Address,
 		Port:               port,
-		SSL:                "",
+		TLS:                "",
 		InsecureSkipVerify: true,
 		BindDn:             "CN=manager,DC=example,DC=org",
 		BindPassword:       "secret",

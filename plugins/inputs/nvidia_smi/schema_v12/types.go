@@ -48,6 +48,17 @@ type smi struct {
 			ClocksEventReasonSwThermalSlowdown         string `xml:"clocks_event_reason_sw_thermal_slowdown"`
 			ClocksEventReasonSyncBoost                 string `xml:"clocks_event_reason_sync_boost"`
 		} `xml:"clocks_event_reasons"`
+		ClocksThrottleReasons struct {
+			ClocksThrottleReasonApplicationsClocksSetting string `xml:"clocks_throttle_reason_applications_clocks_setting"`
+			ClocksThrottleReasonDisplayClocksSetting      string `xml:"clocks_throttle_reason_display_clocks_setting"`
+			ClocksThrottleReasonGpuIdle                   string `xml:"clocks_throttle_reason_gpu_idle"`
+			ClocksThrottleReasonHwPowerBrakeSlowdown      string `xml:"clocks_throttle_reason_hw_power_brake_slowdown"`
+			ClocksThrottleReasonHwSlowdown                string `xml:"clocks_throttle_reason_hw_slowdown"`
+			ClocksThrottleReasonHwThermalSlowdown         string `xml:"clocks_throttle_reason_hw_thermal_slowdown"`
+			ClocksThrottleReasonSwPowerCap                string `xml:"clocks_throttle_reason_sw_power_cap"`
+			ClocksThrottleReasonSwThermalSlowdown         string `xml:"clocks_throttle_reason_sw_thermal_slowdown"`
+			ClocksThrottleReasonSyncBoost                 string `xml:"clocks_throttle_reason_sync_boost"`
+		} `xml:"clocks_throttle_reasons"`
 		ComputeMode               string `xml:"compute_mode"`
 		DefaultApplicationsClocks struct {
 			GraphicsClock string `xml:"graphics_clock"`
@@ -114,6 +125,9 @@ type smi struct {
 			MaxPowerLimit       string `xml:"max_power_limit"`
 			MinPowerLimit       string `xml:"min_power_limit"`
 			PowerDraw           string `xml:"power_draw"`
+			AveragePowerDraw    string `xml:"average_power_draw"`
+			InstantPowerDraw    string `xml:"instant_power_draw"`
+			PowerLimit          string `xml:"power_limit"`
 			PowerState          string `xml:"power_state"`
 			RequestedPowerLimit string `xml:"requested_power_limit"`
 		} `xml:"gpu_power_readings"`
@@ -179,6 +193,8 @@ type smi struct {
 			MaxPowerLimit       string `xml:"max_power_limit"`
 			MinPowerLimit       string `xml:"min_power_limit"`
 			PowerDraw           string `xml:"power_draw"`
+			AveragePowerDraw    string `xml:"average_power_draw"`
+			InstantPowerDraw    string `xml:"instant_power_draw"`
 			PowerState          string `xml:"power_state"`
 			RequestedPowerLimit string `xml:"requested_power_limit"`
 		} `xml:"module_power_readings"`
@@ -220,16 +236,25 @@ type smi struct {
 			PowerState         string `xml:"power_state"`
 			PowerManagement    string `xml:"power_management"`
 			PowerDraw          string `xml:"power_draw"`
+			AveragePowerDraw   string `xml:"average_power_draw"`
+			InstantPowerDraw   string `xml:"instant_power_draw"`
 			PowerLimit         string `xml:"power_limit"`
 			DefaultPowerLimit  string `xml:"default_power_limit"`
 			EnforcedPowerLimit string `xml:"enforced_power_limit"`
 			MinPowerLimit      string `xml:"min_power_limit"`
 			MaxPowerLimit      string `xml:"max_power_limit"`
 		} `xml:"power_readings"`
-		Processes           struct{} `xml:"processes"`
-		ProductArchitecture string   `xml:"product_architecture"`
-		ProductBrand        string   `xml:"product_brand"`
-		ProductName         string   `xml:"product_name"`
+		Processes struct {
+			ProcessInfo []struct {
+				Pid         string `xml:"pid"`
+				Type        string `xml:"type"`
+				ProcessName string `xml:"process_name"`
+				UsedMemory  string `xml:"used_memory"`
+			} `xml:"process_info"`
+		} `xml:"processes"`
+		ProductArchitecture string `xml:"product_architecture"`
+		ProductBrand        string `xml:"product_brand"`
+		ProductName         string `xml:"product_name"`
 		RemappedRows        struct {
 			// Manually added
 			Correctable   string `xml:"remapped_row_corr"`

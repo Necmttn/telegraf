@@ -17,6 +17,7 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/influxdata/telegraf"
+	common_gcp "github.com/influxdata/telegraf/plugins/common/gcp"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
@@ -29,39 +30,35 @@ const (
 var sampleConfig string
 
 type GCS struct {
-	CredentialsFile string `toml:"credentials_file"`
-	Bucket          string `toml:"bucket"`
+	CredentialsFile     string          `toml:"credentials_file"`
+	Bucket              string          `toml:"bucket"`
+	Prefix              string          `toml:"key_prefix"`
+	OffsetKey           string          `toml:"offset_key"`
+	ObjectsPerIteration int             `toml:"objects_per_iteration"`
+	Log                 telegraf.Logger `toml:"-"`
 
-	Prefix              string `toml:"key_prefix"`
-	OffsetKey           string `toml:"offset_key"`
-	ObjectsPerIteration int    `toml:"objects_per_iteration"`
-
-	Log    telegraf.Logger
-	offSet OffSet
-
+	offSet offSet
 	parser telegraf.Parser
 	client *storage.Client
-
-	ctx context.Context
+	ctx    context.Context
 }
 
-type OffSet struct {
+type offSet struct {
 	OffSet string `json:"offSet"`
 }
 
-func NewEmptyOffset() *OffSet {
-	return &OffSet{OffSet: ""}
+func (gcs *GCS) Init() error {
+	gcs.ctx = context.Background()
+	err := gcs.setUpClient()
+	if err != nil {
+		gcs.Log.Error("Could not create client", err)
+		return err
+	}
+
+	return gcs.setOffset()
 }
 
-func NewOffset(offset string) *OffSet {
-	return &OffSet{OffSet: offset}
-}
-
-func (offSet *OffSet) isPresent() bool {
-	return offSet.OffSet != ""
-}
-
-func (gcs *GCS) SampleConfig() string {
+func (*GCS) SampleConfig() string {
 	return sampleConfig
 }
 
@@ -94,10 +91,10 @@ func (gcs *GCS) Gather(acc telegraf.Accumulator) error {
 
 		name = attrs.Name
 
-		if !gcs.shoudIgnore(name) {
+		if !gcs.shouldIgnore(name) {
 			if err := gcs.processMeasurementsInObject(name, bucket, acc); err != nil {
 				gcs.Log.Errorf("Could not process object %q in bucket %q: %v", name, bucketName, err)
-				acc.AddError(fmt.Errorf("COULD NOT PROCESS OBJECT %q IN BUCKET %q: %w", name, bucketName, err))
+				acc.AddError(fmt.Errorf("could not process object %q in bucket %q: %w", name, bucketName, err))
 			}
 		}
 
@@ -119,7 +116,7 @@ func (gcs *GCS) createQuery() storage.Query {
 	return storage.Query{Prefix: gcs.Prefix}
 }
 
-func (gcs *GCS) shoudIgnore(name string) bool {
+func (gcs *GCS) shouldIgnore(name string) bool {
 	return gcs.offSet.OffSet == name || gcs.OffsetKey == name
 }
 
@@ -159,11 +156,11 @@ func (gcs *GCS) reachedThreshlod(processed int) bool {
 }
 
 func (gcs *GCS) updateOffset(bucket *storage.BucketHandle, name string) error {
-	if gcs.shoudIgnore(name) {
+	if gcs.shouldIgnore(name) {
 		return nil
 	}
 
-	offsetModel := NewOffset(name)
+	offsetModel := newOffset(name)
 	marshalled, err := json.Marshal(offsetModel)
 
 	if err != nil {
@@ -182,17 +179,6 @@ func (gcs *GCS) updateOffset(bucket *storage.BucketHandle, name string) error {
 	gcs.offSet = *offsetModel
 
 	return nil
-}
-
-func (gcs *GCS) Init() error {
-	gcs.ctx = context.Background()
-	err := gcs.setUpClient()
-	if err != nil {
-		gcs.Log.Error("Could not create client", err)
-		return err
-	}
-
-	return gcs.setOffset()
 }
 
 func (gcs *GCS) setUpClient() error {
@@ -220,7 +206,11 @@ func (gcs *GCS) setUpDefaultClient() error {
 	var credentialsOption option.ClientOption
 
 	if gcs.CredentialsFile != "" {
-		credentialsOption = option.WithCredentialsFile(gcs.CredentialsFile)
+		credType, err := common_gcp.ParseCredentialType(gcs.CredentialsFile)
+		if err != nil {
+			return fmt.Errorf("unable to parse credential file type: %w", err)
+		}
+		credentialsOption = option.WithAuthCredentialsFile(option.CredentialsType(credType), gcs.CredentialsFile)
 	} else {
 		creds, err := google.FindDefaultCredentials(gcs.ctx, storage.ScopeReadOnly)
 		if err != nil {
@@ -238,7 +228,7 @@ func (gcs *GCS) setUpDefaultClient() error {
 
 func (gcs *GCS) setOffset() error {
 	if gcs.client == nil {
-		return fmt.Errorf("CANNOT SET OFFSET IF CLIENT IS NOT SET")
+		return errors.New("cannot set offset if client is not set")
 	}
 
 	if gcs.OffsetKey != "" {
@@ -250,7 +240,7 @@ func (gcs *GCS) setOffset() error {
 	btk := gcs.client.Bucket(gcs.Bucket)
 	obj := btk.Object(gcs.OffsetKey)
 
-	var offSet OffSet
+	var offSet offSet
 
 	if r, err := obj.NewReader(gcs.ctx); err == nil {
 		defer gcs.closeReader(r)
@@ -262,7 +252,7 @@ func (gcs *GCS) setOffset() error {
 			}
 		}
 	} else {
-		offSet = *NewEmptyOffset()
+		offSet = *newEmptyOffset()
 	}
 
 	gcs.offSet = offSet
@@ -270,15 +260,27 @@ func (gcs *GCS) setOffset() error {
 	return nil
 }
 
+func (gcs *GCS) closeReader(r *storage.Reader) {
+	if err := r.Close(); err != nil {
+		gcs.Log.Errorf("Could not close reader: %v", err)
+	}
+}
+
+func newEmptyOffset() *offSet {
+	return &offSet{OffSet: ""}
+}
+
+func newOffset(offset string) *offSet {
+	return &offSet{OffSet: offset}
+}
+
+func (offSet *offSet) isPresent() bool {
+	return offSet.OffSet != ""
+}
+
 func init() {
 	inputs.Add("google_cloud_storage", func() telegraf.Input {
 		gcs := &GCS{}
 		return gcs
 	})
-}
-
-func (gcs *GCS) closeReader(r *storage.Reader) {
-	if err := r.Close(); err != nil {
-		gcs.Log.Errorf("Could not close reader: %v", err)
-	}
 }

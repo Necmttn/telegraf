@@ -10,7 +10,7 @@ import (
 
 var m1 = metric.New("m1",
 	map[string]string{"foo": "bar"},
-	map[string]interface{}{
+	map[string]any{
 		"a": int64(1),
 		"b": int64(1),
 		"c": int64(1),
@@ -26,7 +26,7 @@ var m1 = metric.New("m1",
 )
 var m2 = metric.New("m1",
 	map[string]string{"foo": "bar"},
-	map[string]interface{}{
+	map[string]any{
 		"a":        int64(1),
 		"b":        int64(3),
 		"c":        int64(3),
@@ -46,7 +46,7 @@ var m2 = metric.New("m1",
 )
 
 func BenchmarkApply(b *testing.B) {
-	minmax := NewMinMax()
+	minmax := newMinMax()
 
 	for n := 0; n < b.N; n++ {
 		minmax.Add(m1)
@@ -57,13 +57,13 @@ func BenchmarkApply(b *testing.B) {
 // Test two metrics getting added.
 func TestMinMaxWithPeriod(t *testing.T) {
 	acc := testutil.Accumulator{}
-	minmax := NewMinMax()
+	minmax := newMinMax()
 
 	minmax.Add(m1)
 	minmax.Add(m2)
 	minmax.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"a_max": float64(1),
 		"a_min": float64(1),
 		"b_max": float64(3),
@@ -99,11 +99,11 @@ func TestMinMaxWithPeriod(t *testing.T) {
 // getting added in different periods.)
 func TestMinMaxDifferentPeriods(t *testing.T) {
 	acc := testutil.Accumulator{}
-	minmax := NewMinMax()
+	minmax := newMinMax()
 
 	minmax.Add(m1)
 	minmax.Push(&acc)
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"a_max": float64(1),
 		"a_min": float64(1),
 		"b_max": float64(1),
@@ -134,7 +134,7 @@ func TestMinMaxDifferentPeriods(t *testing.T) {
 	minmax.Reset()
 	minmax.Add(m2)
 	minmax.Push(&acc)
-	expectedFields = map[string]interface{}{
+	expectedFields = map[string]any{
 		"a_max": float64(1),
 		"a_min": float64(1),
 		"b_max": float64(3),

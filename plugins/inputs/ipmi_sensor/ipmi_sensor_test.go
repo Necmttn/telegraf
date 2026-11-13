@@ -11,6 +11,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -30,19 +31,19 @@ func TestGather(t *testing.T) {
 
 	require.NoError(t, i.Init())
 	require.NoError(t, acc.GatherError(i.Gather))
-	require.EqualValues(t, acc.NFields(), 262, "non-numeric measurements should be ignored")
+	require.EqualValues(t, 262, acc.NFields(), "non-numeric measurements should be ignored")
 
-	conn := NewConnection(i.Servers[0], i.Privilege, i.HexKey)
-	require.EqualValues(t, "USERID", conn.Username)
-	require.EqualValues(t, "lan", conn.Interface)
-	require.EqualValues(t, "1234567F", conn.HexKey)
+	conn := newConnection(i.Servers[0], i.Privilege, i.HexKey)
+	require.EqualValues(t, "USERID", conn.username)
+	require.EqualValues(t, "lan", conn.intf)
+	require.EqualValues(t, "1234567F", conn.hexKey)
 
 	var testsWithServer = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(20),
 				"status": 1,
 			},
@@ -53,7 +54,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(80),
 				"status": 1,
 			},
@@ -64,7 +65,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(210),
 				"status": 1,
 			},
@@ -75,7 +76,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(4.9),
 				"status": 1,
 			},
@@ -86,7 +87,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(3.05),
 				"status": 1,
 			},
@@ -97,7 +98,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(2610),
 				"status": 1,
 			},
@@ -108,7 +109,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(1775),
 				"status": 1,
 			},
@@ -134,11 +135,11 @@ func TestGather(t *testing.T) {
 	require.NoError(t, acc.GatherError(i.Gather))
 
 	var testsWithoutServer = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(20),
 				"status": 1,
 			},
@@ -148,7 +149,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(80),
 				"status": 1,
 			},
@@ -158,7 +159,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(210),
 				"status": 1,
 			},
@@ -168,7 +169,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(4.9),
 				"status": 1,
 			},
@@ -178,7 +179,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(3.05),
 				"status": 1,
 			},
@@ -188,7 +189,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(2610),
 				"status": 1,
 			},
@@ -198,7 +199,7 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value":  float64(1775),
 				"status": 1,
 			},
@@ -214,10 +215,11 @@ func TestGather(t *testing.T) {
 	}
 }
 
-// fackeExecCommand is a helper function that mock
+// fakeExecCommand is a helper function that mock
 // the exec.Command call (and call the test binary)
 func fakeExecCommand(command string, args ...string) *exec.Cmd {
-	cs := []string{"-test.run=TestHelperProcess", "--", command}
+	cs := make([]string, 0, len(args)+3)
+	cs = append(cs, "-test.run=TestHelperProcess", "--", command)
 	cs = append(cs, args...)
 	cmd := exec.Command(os.Args[0], cs...)
 	cmd.Env = []string{"GO_WANT_HELPER_PROCESS=1"}
@@ -402,18 +404,18 @@ func TestGatherV2(t *testing.T) {
 	require.NoError(t, i.Init())
 	require.NoError(t, acc.GatherError(i.Gather))
 
-	conn := NewConnection(i.Servers[0], i.Privilege, i.HexKey)
-	require.EqualValues(t, "USERID", conn.Username)
-	require.EqualValues(t, "lan", conn.Interface)
-	require.EqualValues(t, "0000000F", conn.HexKey)
+	conn := newConnection(i.Servers[0], i.Privilege, i.HexKey)
+	require.EqualValues(t, "USERID", conn.username)
+	require.EqualValues(t, "lan", conn.intf)
+	require.EqualValues(t, "0000000F", conn.hexKey)
 
 	var testsWithServer = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
-		//SEL              | 72h | ns  |  7.1 | No Reading
+		// SEL              | 72h | ns  |  7.1 | No Reading
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(0),
 			},
 			map[string]string{
@@ -441,12 +443,12 @@ func TestGatherV2(t *testing.T) {
 	require.NoError(t, acc.GatherError(i.Gather))
 
 	var testsWithoutServer = []struct {
-		fields map[string]interface{}
+		fields map[string]any
 		tags   map[string]string
 	}{
-		//SEL              | 72h | ns  |  7.1 | No Reading
+		// SEL              | 72h | ns  |  7.1 | No Reading
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(0),
 			},
 			map[string]string{
@@ -456,9 +458,9 @@ func TestGatherV2(t *testing.T) {
 				"status_desc": "no_reading",
 			},
 		},
-		//Intrusion        | 73h | ok  |  7.1 |
+		// Intrusion        | 73h | ok  |  7.1 |
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(0),
 			},
 			map[string]string{
@@ -468,9 +470,9 @@ func TestGatherV2(t *testing.T) {
 				"status_desc": "ok",
 			},
 		},
-		//Fan1             | 30h | ok  |  7.1 | 5040 RPM
+		// Fan1             | 30h | ok  |  7.1 | 5040 RPM
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(5040),
 			},
 			map[string]string{
@@ -480,9 +482,9 @@ func TestGatherV2(t *testing.T) {
 				"unit":        "rpm",
 			},
 		},
-		//Inlet Temp       | 04h | ok  |  7.1 | 25 degrees C
+		// Inlet Temp       | 04h | ok  |  7.1 | 25 degrees C
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(25),
 			},
 			map[string]string{
@@ -492,9 +494,9 @@ func TestGatherV2(t *testing.T) {
 				"unit":        "degrees_c",
 			},
 		},
-		//USB Cable Pres   | 50h | ok  |  7.1 | Connected
+		// USB Cable Pres   | 50h | ok  |  7.1 | Connected
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(0),
 			},
 			map[string]string{
@@ -504,9 +506,9 @@ func TestGatherV2(t *testing.T) {
 				"status_desc": "connected",
 			},
 		},
-		//Current 1        | 6Ah | ok  | 10.1 | 7.20 Amps
+		// Current 1        | 6Ah | ok  | 10.1 | 7.20 Amps
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(7.2),
 			},
 			map[string]string{
@@ -516,9 +518,9 @@ func TestGatherV2(t *testing.T) {
 				"unit":        "amps",
 			},
 		},
-		//Power Supply 1   | 03h | ok  | 10.1 | 110 Watts, Presence detected
+		// Power Supply 1   | 03h | ok  | 10.1 | 110 Watts, Presence detected
 		{
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(110),
 			},
 			map[string]string{
@@ -536,10 +538,11 @@ func TestGatherV2(t *testing.T) {
 	}
 }
 
-// fackeExecCommandV2 is a helper function that mock
+// fakeExecCommandV2 is a helper function that mock
 // the exec.Command call (and call the test binary)
 func fakeExecCommandV2(command string, args ...string) *exec.Cmd {
-	cs := []string{"-test.run=TestHelperProcessV2", "--", command}
+	cs := make([]string, 0, len(args)+3)
+	cs = append(cs, "-test.run=TestHelperProcessV2", "--", command)
 	cs = append(cs, args...)
 	cmd := exec.Command(os.Args[0], cs...)
 	cmd.Env = []string{"GO_WANT_HELPER_PROCESS=1"}
@@ -633,7 +636,7 @@ func Test_parseV1(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       args
-		wantFields map[string]interface{}
+		wantFields map[string]any
 		wantErr    bool
 	}{
 		{
@@ -643,7 +646,7 @@ func Test_parseV1(t *testing.T) {
 				measuredAt: time.Now(),
 				cmdOut:     []byte("PS1 Status       | 0x02              | ok"),
 			},
-			wantFields: map[string]interface{}{"value": float64(2), "status": 1},
+			wantFields: map[string]any{"value": float64(2), "status": 1},
 			wantErr:    false,
 		},
 		{
@@ -653,7 +656,7 @@ func Test_parseV1(t *testing.T) {
 				measuredAt: time.Now(),
 				cmdOut:     []byte("Avg Power        | 210 Watts         | ok"),
 			},
-			wantFields: map[string]interface{}{"value": float64(210), "status": 1},
+			wantFields: map[string]any{"value": float64(210), "status": 1},
 			wantErr:    false,
 		},
 	}
@@ -695,7 +698,7 @@ func Test_parseV2(t *testing.T) {
 				measuredAt: time.Now(),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("ipmi_sensor",
+				metric.New("ipmi_sensor",
 					map[string]string{
 						"name":        "power_supply_1",
 						"status_code": "ok",
@@ -704,7 +707,7 @@ func Test_parseV2(t *testing.T) {
 						"unit":        "watts",
 						"status_desc": "presence_detected",
 					},
-					map[string]interface{}{"value": 110.0},
+					map[string]any{"value": 110.0},
 					time.Unix(0, 0),
 				),
 			},
@@ -718,7 +721,7 @@ func Test_parseV2(t *testing.T) {
 				measuredAt: time.Now(),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("ipmi_sensor",
+				metric.New("ipmi_sensor",
 					map[string]string{
 						"name":        "intrusion",
 						"status_code": "ok",
@@ -726,7 +729,7 @@ func Test_parseV2(t *testing.T) {
 						"entity_id":   "7.1",
 						"status_desc": "ok",
 					},
-					map[string]interface{}{"value": 0.0},
+					map[string]any{"value": 0.0},
 					time.Unix(0, 0),
 				),
 			},
@@ -740,7 +743,7 @@ func Test_parseV2(t *testing.T) {
 				measuredAt: time.Now(),
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric("ipmi_sensor",
+				metric.New("ipmi_sensor",
 					map[string]string{
 						"name":        "dimm_thrm_mrgn_1",
 						"status_code": "ok",
@@ -748,7 +751,7 @@ func Test_parseV2(t *testing.T) {
 						"entity_id":   "8.1",
 						"unit":        "degrees_c",
 					},
-					map[string]interface{}{"value": -55.0},
+					map[string]any{"value": -55.0},
 					time.Unix(0, 0),
 				),
 			},
@@ -769,6 +772,124 @@ func Test_parseV2(t *testing.T) {
 			testutil.RequireMetricsEqual(t, tt.expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
 		})
 	}
+}
+
+func Test_parsePowerStatus(t *testing.T) {
+	type args struct {
+		hostname   string
+		cmdOut     []byte
+		measuredAt time.Time
+	}
+	tests := []struct {
+		name     string
+		args     args
+		expected []telegraf.Metric
+	}{
+		{
+			name: "Test correct parse power status off",
+			args: args{
+				hostname:   "host",
+				cmdOut:     []byte("Chassis Power is off"),
+				measuredAt: time.Now(),
+			},
+			expected: []telegraf.Metric{
+				metric.New("ipmi_sensor",
+					map[string]string{
+						"name":   "chassis_power_status",
+						"server": "host",
+					},
+					map[string]any{"value": 0},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "Test correct parse power status on",
+			args: args{
+				hostname:   "host",
+				cmdOut:     []byte("Chassis Power is on"),
+				measuredAt: time.Now(),
+			},
+			expected: []telegraf.Metric{
+				metric.New("ipmi_sensor",
+					map[string]string{
+						"name":   "chassis_power_status",
+						"server": "host",
+					},
+					map[string]any{"value": 1},
+					time.Unix(0, 0),
+				),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var acc testutil.Accumulator
+			err := parseChassisPowerStatus(&acc, tt.args.hostname, tt.args.cmdOut, tt.args.measuredAt)
+			require.NoError(t, err)
+			testutil.RequireMetricsEqual(t, tt.expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+		})
+	}
+}
+
+func Test_parsePowerReading(t *testing.T) {
+	output := `Instantaneous power reading:                   167 Watts
+Minimum during sampling period:                124 Watts
+Maximum during sampling period:                422 Watts
+Average power reading over sample period:      156 Watts
+IPMI timestamp:                           Mon Aug  1 21:22:51 2016
+Sampling period:                          00699043 Seconds.
+Power reading state is:                   activated
+`
+
+	expected := []telegraf.Metric{
+		metric.New("ipmi_sensor",
+			map[string]string{
+				"name":   "instantaneous_power_reading",
+				"server": "host",
+				"unit":   "watts",
+			},
+			map[string]any{"value": float64(167)},
+			time.Unix(0, 0),
+		),
+		metric.New("ipmi_sensor",
+			map[string]string{
+				"name":   "minimum_during_sampling_period",
+				"server": "host",
+				"unit":   "watts",
+			},
+			map[string]any{"value": float64(124)},
+			time.Unix(0, 0),
+		),
+		metric.New("ipmi_sensor",
+			map[string]string{
+				"name":   "maximum_during_sampling_period",
+				"server": "host",
+				"unit":   "watts",
+			},
+			map[string]any{"value": float64(422)},
+			time.Unix(0, 0),
+		),
+		metric.New("ipmi_sensor",
+			map[string]string{
+				"name":   "average_power_reading_over_sample_period",
+				"server": "host",
+				"unit":   "watts",
+			},
+			map[string]any{"value": float64(156)},
+			time.Unix(0, 0),
+		),
+	}
+
+	ipmi := &Ipmi{
+		Log: testutil.Logger{},
+	}
+
+	var acc testutil.Accumulator
+	err := ipmi.parseDCMIPowerReading(&acc, "host", []byte(output), time.Now())
+	require.NoError(t, err)
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
 }
 
 func TestSanitizeIPMICmd(t *testing.T) {
@@ -806,9 +927,7 @@ func TestSanitizeIPMICmd(t *testing.T) {
 			},
 		},
 		{
-			name:     "empty args",
-			args:     []string{},
-			expected: []string{},
+			name: "empty args",
 		},
 	}
 	for _, tt := range tests {

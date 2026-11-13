@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/filter"
@@ -20,7 +21,6 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-// Solr is a plugin to read stats from one or many Solr servers
 type Solr struct {
 	Servers     []string        `toml:"servers"`
 	Username    string          `toml:"username"`
@@ -60,15 +60,13 @@ func (s *Solr) Init() error {
 	return nil
 }
 
-func (s *Solr) Start(_ telegraf.Accumulator) error {
+func (s *Solr) Start(telegraf.Accumulator) error {
 	for _, server := range s.Servers {
 		// Simply fill the cache for all available servers
 		_ = s.getAPIConfig(server)
 	}
 	return nil
 }
-
-func (s *Solr) Stop() {}
 
 func (s *Solr) Gather(acc telegraf.Accumulator) error {
 	var wg sync.WaitGroup
@@ -86,6 +84,8 @@ func (s *Solr) Gather(acc telegraf.Accumulator) error {
 
 	return nil
 }
+
+func (*Solr) Stop() {}
 
 func (s *Solr) getAPIConfig(server string) *apiConfig {
 	if cfg, found := s.configs[server]; found {
@@ -110,7 +110,7 @@ func (s *Solr) getAPIConfig(server string) *apiConfig {
 	case 2:
 		s.configs[server] = newAPIv2Config()
 	default:
-		s.Log.Warnf("Unknown API version %q! Using latest known", version)
+		s.Log.Warnf("Unknown API version %d! Using latest known", version)
 		s.configs[server] = newAPIv2Config()
 	}
 
@@ -120,7 +120,7 @@ func (s *Solr) getAPIConfig(server string) *apiConfig {
 func (s *Solr) collect(acc telegraf.Accumulator, cfg *apiConfig, server string) {
 	now := time.Now()
 
-	var coreStatus AdminCoresStatus
+	var coreStatus adminCoresStatus
 	if err := s.query(cfg.adminEndpoint(server), &coreStatus); err != nil {
 		acc.AddError(err)
 		return
@@ -128,7 +128,7 @@ func (s *Solr) collect(acc telegraf.Accumulator, cfg *apiConfig, server string) 
 
 	var wg sync.WaitGroup
 	for core, metrics := range coreStatus.Status {
-		fields := map[string]interface{}{
+		fields := map[string]any{
 			"deleted_docs":  metrics.Index.DeletedDocs,
 			"max_docs":      metrics.Index.MaxDoc,
 			"num_docs":      metrics.Index.NumDocs,
@@ -145,7 +145,7 @@ func (s *Solr) collect(acc telegraf.Accumulator, cfg *apiConfig, server string) 
 		go func(server string, core string) {
 			defer wg.Done()
 
-			var data MBeansData
+			var data mBeansData
 			if err := s.query(cfg.mbeansEndpoint(server, core), &data); err != nil {
 				acc.AddError(err)
 				return
@@ -160,7 +160,7 @@ func (s *Solr) collect(acc telegraf.Accumulator, cfg *apiConfig, server string) 
 	wg.Wait()
 }
 
-func (s *Solr) query(endpoint string, v interface{}) error {
+func (s *Solr) query(endpoint string, v any) error {
 	req, reqErr := http.NewRequest(http.MethodGet, endpoint, nil)
 	if reqErr != nil {
 		return reqErr
@@ -186,7 +186,7 @@ func (s *Solr) query(endpoint string, v interface{}) error {
 
 func (s *Solr) determineServerAPIVersion(server string) (int, error) {
 	endpoint := server + "/solr/admin/info/system?wt=json"
-	var info map[string]interface{}
+	var info map[string]any
 	if err := s.query(endpoint, &info); err != nil {
 		return 0, err
 	}
@@ -195,7 +195,7 @@ func (s *Solr) determineServerAPIVersion(server string) (int, error) {
 	if !found {
 		return 0, nil
 	}
-	lucene, ok := lraw.(map[string]interface{})
+	lucene, ok := lraw.(map[string]any)
 	if !ok {
 		return 0, nil
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/testutil"
@@ -38,7 +38,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name": "trivial",
 						"name":         "child",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(53106) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360851331000).UTC(),
@@ -52,11 +52,11 @@ func TestZipkinPlugin(t *testing.T) {
 						"trace_id":       "22c4fc8ab3669045",
 						"name":           "child",
 						"service_name":   "trivial",
-						"annotation":     "trivial", //base64: dHJpdmlhbA==
+						"annotation":     "trivial", // base64: dHJpdmlhbA==
 						"endpoint_host":  "127.0.0.1",
 						"annotation_key": "lc",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(53106) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360851331000).UTC(),
@@ -71,7 +71,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name": "trivial",
 						"name":         "child",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(50410) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360904552000).UTC(),
@@ -85,11 +85,11 @@ func TestZipkinPlugin(t *testing.T) {
 						"trace_id":       "22c4fc8ab3669045",
 						"name":           "child",
 						"service_name":   "trivial",
-						"annotation":     "trivial", //base64: dHJpdmlhbA==
+						"annotation":     "trivial", // base64: dHJpdmlhbA==
 						"endpoint_host":  "127.0.0.1",
 						"annotation_key": "lc",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(50410) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360904552000).UTC(),
@@ -104,7 +104,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name": "trivial",
 						"name":         "parent",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(103680) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360851318000).UTC(),
@@ -121,7 +121,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"trace_id":      "22c4fc8ab3669045",
 						"name":          "parent",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(103680) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360851318000).UTC(),
@@ -138,7 +138,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"trace_id":      "22c4fc8ab3669045",
 						"name":          "parent",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(103680) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360851318000).UTC(),
@@ -155,7 +155,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"endpoint_host": "127.0.0.1",
 						"id":            "5195e96239641e",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(103680) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360851318000).UTC(),
@@ -166,14 +166,14 @@ func TestZipkinPlugin(t *testing.T) {
 					Tags: map[string]string{
 						"trace_id":       "22c4fc8ab3669045",
 						"service_name":   "trivial",
-						"annotation":     "trivial", //base64: dHJpdmlhbA==
+						"annotation":     "trivial", // base64: dHJpdmlhbA==
 						"annotation_key": "lc",
 						"id":             "5195e96239641e",
 						"parent_id":      "5195e96239641e",
 						"name":           "parent",
 						"endpoint_host":  "127.0.0.1",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(103680) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1498688360851318000).UTC(),
@@ -196,7 +196,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name": "go-zipkin-testclient",
 						"name":         "main.dud",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(1) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1433330263415871*int64(time.Microsecond)).UTC(),
@@ -213,7 +213,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"name":          "main.dud",
 						"service_name":  "go-zipkin-testclient",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(1) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1433330263415871*int64(time.Microsecond)).UTC(),
@@ -230,7 +230,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"name":          "main.dud",
 						"service_name":  "go-zipkin-testclient",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": (time.Duration(1) * time.Microsecond).Nanoseconds(),
 					},
 					Time: time.Unix(0, 1433330263415871*int64(time.Microsecond)).UTC(),
@@ -252,7 +252,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name": "test",
 						"trace_id":     "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(3000000),
 					},
 					Time: time.Unix(0, 1503031538791000*int64(time.Microsecond)).UTC(),
@@ -269,7 +269,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":  "test",
 						"trace_id":      "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(3000000),
 					},
 					Time: time.Unix(0, 1503031538791000*int64(time.Microsecond)).UTC(),
@@ -286,7 +286,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":  "test",
 						"trace_id":      "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(3000000),
 					},
 					Time: time.Unix(0, 1503031538791000*int64(time.Microsecond)).UTC(),
@@ -304,7 +304,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(3000000),
 					},
 					Time: time.Unix(0, 1503031538791000*int64(time.Microsecond)).UTC(),
@@ -322,7 +322,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(3000000),
 					},
 					Time: time.Unix(0, 1503031538791000*int64(time.Microsecond)).UTC(),
@@ -340,7 +340,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(3000000),
 					},
 					Time: time.Unix(0, 1503031538791000*int64(time.Microsecond)).UTC(),
@@ -355,7 +355,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name": "test",
 						"trace_id":     "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -372,7 +372,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":  "test",
 						"trace_id":      "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -389,7 +389,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":  "test",
 						"trace_id":      "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -407,7 +407,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -425,7 +425,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -443,7 +443,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -461,7 +461,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -479,7 +479,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(10000000),
 					},
 					Time: time.Unix(0, 1503031538786000*int64(time.Microsecond)).UTC(),
@@ -494,7 +494,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name": "test",
 						"trace_id":     "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(23393000),
 					},
 					Time: time.Unix(0, 1503031538778000*int64(time.Microsecond)).UTC(),
@@ -511,7 +511,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":  "test",
 						"trace_id":      "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(23393000),
 					},
 					Time: time.Unix(0, 1503031538778000*int64(time.Microsecond)).UTC(),
@@ -528,7 +528,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":  "test",
 						"trace_id":      "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(23393000),
 					},
 					Time: time.Unix(0, 1503031538778000*int64(time.Microsecond)).UTC(),
@@ -546,7 +546,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(23393000),
 					},
 					Time: time.Unix(0, 1503031538778000*int64(time.Microsecond)).UTC(),
@@ -564,7 +564,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(23393000),
 					},
 					Time: time.Unix(0, 1503031538778000*int64(time.Microsecond)).UTC(),
@@ -582,7 +582,7 @@ func TestZipkinPlugin(t *testing.T) {
 						"service_name":   "test",
 						"trace_id":       "7312f822d43d0fd8",
 					},
-					Fields: map[string]interface{}{
+					Fields: map[string]any{
 						"duration_ns": int64(23393000),
 					},
 					Time: time.Unix(0, 1503031538778000*int64(time.Microsecond)).UTC(),
@@ -617,18 +617,17 @@ func TestZipkinPlugin(t *testing.T) {
 			}
 			mockAcc.Wait(
 				len(tt.want),
-			) //Since the server is running concurrently, we need to wait for the number of data points we want to test to be added to the Accumulator.
+			) // Since the server is running concurrently, we need to wait for the number of data points we want to test to be added to the Accumulator.
 			if len(mockAcc.Errors) > 0 != tt.wantErr {
 				t.Fatalf("Got unexpected errors. want error = %v, errors = %v\n", tt.wantErr, mockAcc.Errors)
 			}
 
-			var got []testutil.Metric
+			got := make([]testutil.Metric, 0, len(mockAcc.Metrics))
 			for _, m := range mockAcc.Metrics {
 				got = append(got, *m)
 			}
-			if !cmp.Equal(tt.want, got) {
-				t.Fatalf("Got != Want\n %s", cmp.Diff(tt.want, got))
-			}
+
+			require.Equal(t, tt.want, got)
 		})
 	}
 	mockAcc.ClearMetrics()
@@ -645,18 +644,18 @@ func postThriftData(datafile, address, contentType string) error {
 		return fmt.Errorf("could not read from data file %s", datafile)
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/api/v1/spans", address), bytes.NewReader(dat))
+	endpoint := fmt.Sprintf("http://%s/api/v1/spans", address)
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(dat))
 	if err != nil {
-		return fmt.Errorf("HTTP request creation failed")
+		return fmt.Errorf("unable to create new POST request for %q: %w", endpoint, err)
 	}
 
 	req.Header.Set("Content-Type", contentType)
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("HTTP POST request to zipkin endpoint %q failed: %w", address, err)
+		return fmt.Errorf("error while making HTTP POST request to zipkin endpoint %q: %w", endpoint, err)
 	}
-
 	defer resp.Body.Close()
 
 	return nil

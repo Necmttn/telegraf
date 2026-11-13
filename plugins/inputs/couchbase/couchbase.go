@@ -7,20 +7,22 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 
-	couchbaseClient "github.com/couchbase/go-couchbase"
+	"github.com/couchbase/go-couchbase"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/filter"
-	"github.com/influxdata/telegraf/internal/choice"
 	"github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
+
+var regexpURI = regexp.MustCompile(`(\S+://)?(\S+\:\S+@)`)
 
 type Couchbase struct {
 	Servers             []string `toml:"servers"`
@@ -42,13 +44,40 @@ type autoFailover struct {
 	Timeout  int  `json:"timeout"`
 }
 
-var regexpURI = regexp.MustCompile(`(\S+://)?(\S+\:\S+@)`)
-
 func (*Couchbase) SampleConfig() string {
 	return sampleConfig
 }
 
-// Reads stats from all configured clusters. Accumulates stats.
+func (cb *Couchbase) Init() error {
+	f, err := filter.NewIncludeExcludeFilter(cb.BucketStatsIncluded, nil)
+	if err != nil {
+		return err
+	}
+
+	cb.bucketInclude = f
+
+	tlsConfig, err := cb.TLSConfig()
+	if err != nil {
+		return err
+	}
+
+	cb.client = &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConnsPerHost: couchbase.MaxIdleConnsPerHost,
+			TLSClientConfig:     tlsConfig,
+		},
+	}
+
+	couchbase.SetSkipVerify(cb.ClientConfig.InsecureSkipVerify)
+	couchbase.SetCertFile(cb.ClientConfig.TLSCert)
+	couchbase.SetKeyFile(cb.ClientConfig.TLSKey)
+	couchbase.SetRootFile(cb.ClientConfig.TLSCA)
+
+	return nil
+}
+
+// Gather reads stats from all configured clusters. Accumulates stats.
 // Returns one of the errors encountered while gathering stats (if any).
 func (cb *Couchbase) Gather(acc telegraf.Accumulator) error {
 	if len(cb.Servers) == 0 {
@@ -72,7 +101,7 @@ func (cb *Couchbase) Gather(acc telegraf.Accumulator) error {
 func (cb *Couchbase) gatherServer(acc telegraf.Accumulator, addr string) error {
 	escapedAddr := regexpURI.ReplaceAllString(addr, "${1}")
 
-	client, err := couchbaseClient.Connect(addr)
+	client, err := couchbase.Connect(addr)
 	if err != nil {
 		return err
 	}
@@ -89,7 +118,7 @@ func (cb *Couchbase) gatherServer(acc telegraf.Accumulator, addr string) error {
 	for i := 0; i < len(pool.Nodes); i++ {
 		node := pool.Nodes[i]
 		tags := map[string]string{"cluster": escapedAddr, "hostname": node.Hostname}
-		fields := make(map[string]interface{})
+		fields := make(map[string]any)
 		fields["memory_free"] = node.MemoryFree
 		fields["memory_total"] = node.MemoryTotal
 		acc.AddFields("couchbase_node", fields, tags)
@@ -124,7 +153,7 @@ func (cb *Couchbase) gatherServer(acc telegraf.Accumulator, addr string) error {
 		}
 	}
 
-	if choice.Contains("autofailover", cb.AdditionalStats) {
+	if slices.Contains(cb.AdditionalStats, "autofailover") {
 		tags := map[string]string{"cluster": cluster}
 		fields, err := cb.gatherAutoFailoverStats(addr)
 		if err != nil {
@@ -168,8 +197,8 @@ func (cb *Couchbase) gatherAutoFailoverStats(server string) (map[string]any, err
 }
 
 // basicBucketStats gets the basic bucket statistics
-func (cb *Couchbase) basicBucketStats(basicStats map[string]interface{}) map[string]interface{} {
-	fields := make(map[string]interface{})
+func (cb *Couchbase) basicBucketStats(basicStats map[string]any) map[string]any {
+	fields := make(map[string]any)
 	cb.addBucketField(fields, "quota_percent_used", basicStats["quotaPercentUsed"])
 	cb.addBucketField(fields, "ops_per_sec", basicStats["opsPerSec"])
 	cb.addBucketField(fields, "disk_fetches", basicStats["diskFetches"])
@@ -180,8 +209,8 @@ func (cb *Couchbase) basicBucketStats(basicStats map[string]interface{}) map[str
 	return fields
 }
 
-func (cb *Couchbase) gatherDetailedBucketStats(server, bucket string, nodeHostname string, fields map[string]interface{}) error {
-	extendedBucketStats := &BucketStats{}
+func (cb *Couchbase) gatherDetailedBucketStats(server, bucket, nodeHostname string, fields map[string]any) error {
+	extendedBucketStats := &bucketStats{}
 	err := cb.queryDetailedBucketStats(server, bucket, nodeHostname, extendedBucketStats)
 	if err != nil {
 		return err
@@ -405,7 +434,7 @@ func (cb *Couchbase) gatherDetailedBucketStats(server, bucket string, nodeHostna
 	return nil
 }
 
-func (cb *Couchbase) addBucketField(fields map[string]interface{}, fieldKey string, value interface{}) {
+func (cb *Couchbase) addBucketField(fields map[string]any, fieldKey string, value any) {
 	if !cb.bucketInclude.Match(fieldKey) {
 		return
 	}
@@ -413,7 +442,7 @@ func (cb *Couchbase) addBucketField(fields map[string]interface{}, fieldKey stri
 	fields[fieldKey] = value
 }
 
-func (cb *Couchbase) addBucketFieldChecked(fields map[string]interface{}, fieldKey string, values []float64) {
+func (cb *Couchbase) addBucketFieldChecked(fields map[string]any, fieldKey string, values []float64) {
 	if values == nil {
 		return
 	}
@@ -421,7 +450,7 @@ func (cb *Couchbase) addBucketFieldChecked(fields map[string]interface{}, fieldK
 	cb.addBucketField(fields, fieldKey, values[len(values)-1])
 }
 
-func (cb *Couchbase) queryDetailedBucketStats(server, bucket string, nodeHostname string, bucketStats *BucketStats) error {
+func (cb *Couchbase) queryDetailedBucketStats(server, bucket, nodeHostname string, bucketStats *bucketStats) error {
 	url := server + "/pools/default/buckets/" + bucket
 	if nodeHostname != "" {
 		url += "/nodes/" + nodeHostname
@@ -442,35 +471,6 @@ func (cb *Couchbase) queryDetailedBucketStats(server, bucket string, nodeHostnam
 	defer r.Body.Close()
 
 	return json.NewDecoder(r.Body).Decode(bucketStats)
-}
-
-func (cb *Couchbase) Init() error {
-	f, err := filter.NewIncludeExcludeFilter(cb.BucketStatsIncluded, []string{})
-	if err != nil {
-		return err
-	}
-
-	cb.bucketInclude = f
-
-	tlsConfig, err := cb.TLSConfig()
-	if err != nil {
-		return err
-	}
-
-	cb.client = &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConnsPerHost: couchbaseClient.MaxIdleConnsPerHost,
-			TLSClientConfig:     tlsConfig,
-		},
-	}
-
-	couchbaseClient.SetSkipVerify(cb.ClientConfig.InsecureSkipVerify)
-	couchbaseClient.SetCertFile(cb.ClientConfig.TLSCert)
-	couchbaseClient.SetKeyFile(cb.ClientConfig.TLSKey)
-	couchbaseClient.SetRootFile(cb.ClientConfig.TLSCA)
-
-	return nil
 }
 
 func init() {

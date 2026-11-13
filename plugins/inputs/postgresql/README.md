@@ -1,22 +1,27 @@
 # PostgreSQL Input Plugin
 
-The `postgresql` plugin provides metrics for your PostgreSQL Server instance.
+This plugin provides metrics for a [PostgreSQL][postgres] Server instance.
 Recorded metrics are lightweight and use Dynamic Management Views supplied
 by PostgreSQL.
 
+⭐ Telegraf v0.10.3
+🏷️ datastore
+💻 all
+
+[postgres]: https://www.postgresql.org/
+
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `address` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+This plugin supports secrets from secret stores for the `address` option.
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -109,6 +114,19 @@ databases are gathered.  Do NOT use with the 'ignored_databases' option.
 ```text
 databases = ["app_production", "testing"]`
 ```
+
+### Permissions
+
+The plugins gathers metrics from the `pg_stat_database` and `pg_stat_bgwriter`
+views. To grant a user access to the views run:
+
+```sql
+GRANT pg_read_all_stats TO user;
+```
+
+See the [PostgreSQL docs][] for more information on the predefined roles.
+
+[PostgreSQL docs]: https://www.postgresql.org/docs/current/predefined-roles.html
 
 ### TLS Configuration
 

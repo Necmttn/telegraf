@@ -10,16 +10,16 @@ import (
 	"github.com/influxdata/telegraf/testutil"
 )
 
-func NSDControl(output string) func(string, config.Duration, bool, string, string) (*bytes.Buffer, error) {
+func nsdControl(output string) func(string, config.Duration, bool, string, string) (*bytes.Buffer, error) {
 	return func(string, config.Duration, bool, string, string) (*bytes.Buffer, error) {
-		return bytes.NewBuffer([]byte(output)), nil
+		return bytes.NewBufferString(output), nil
 	}
 }
 
 func TestParseFullOutput(t *testing.T) {
 	acc := &testutil.Accumulator{}
 	v := &NSD{
-		run: NSDControl(fullOutput),
+		run: nsdControl(fullOutput),
 	}
 	err := v.Gather(acc)
 
@@ -35,11 +35,11 @@ func TestParseFullOutput(t *testing.T) {
 	acc.AssertContainsFields(t, "nsd_servers", parsedFullOutputServerAsTag)
 }
 
-var parsedFullOutputServerAsTag = map[string]interface{}{
+var parsedFullOutputServerAsTag = map[string]any{
 	"queries": float64(75576),
 }
 
-var parsedFullOutput = map[string]interface{}{
+var parsedFullOutput = map[string]any{
 	"num_queries":         float64(75557),
 	"time_boot":           float64(2944405.500253),
 	"time_elapsed":        float64(2944405.500253),

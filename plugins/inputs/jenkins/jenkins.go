@@ -4,6 +4,7 @@ package jenkins
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -23,26 +24,27 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-// Jenkins plugin gathers information about the nodes and jobs running in a jenkins instance.
+const (
+	measurementJenkins = "jenkins"
+	measurementNode    = "jenkins_node"
+	measurementJob     = "jenkins_job"
+)
+
 type Jenkins struct {
-	URL      string
-	Username string
-	Password string
-	Source   string
-	Port     string
+	URL      string `toml:"url"`
+	Username string `toml:"username"`
+	Password string `toml:"password"`
 	// HTTP Timeout specified as a string - 3s, 1m, 1h
-	ResponseTimeout config.Duration
-
-	tls.ClientConfig
-	client *client
-
-	Log telegraf.Logger
+	ResponseTimeout config.Duration `toml:"response_timeout"`
+	source          string
+	port            string
 
 	MaxConnections    int             `toml:"max_connections"`
 	MaxBuildAge       config.Duration `toml:"max_build_age"`
 	MaxSubJobDepth    int             `toml:"max_subjob_depth"`
 	MaxSubJobPerLayer int             `toml:"max_subjob_per_layer"`
 	NodeLabelsAsTag   bool            `toml:"node_labels_as_tag"`
+	BuildTags         []string        `toml:"build_tags"`
 	JobExclude        []string        `toml:"job_exclude"`
 	JobInclude        []string        `toml:"job_include"`
 	jobFilter         filter.Filter
@@ -51,21 +53,29 @@ type Jenkins struct {
 	NodeInclude []string `toml:"node_include"`
 	nodeFilter  filter.Filter
 
+	tls.ClientConfig
+	client *client
+
+	Log telegraf.Logger `toml:"-"`
+
 	semaphore chan struct{}
 }
-
-// measurement
-const (
-	measurementJenkins = "jenkins"
-	measurementNode    = "jenkins_node"
-	measurementJob     = "jenkins_job"
-)
 
 func (*Jenkins) SampleConfig() string {
 	return sampleConfig
 }
 
-// Gather implements telegraf.Input interface
+func (j *Jenkins) Init() error {
+	for _, t := range j.BuildTags {
+		switch t {
+		case "display_name", "description":
+		default:
+			return fmt.Errorf("invalid value %q in build_tags", t)
+		}
+	}
+	return nil
+}
+
 func (j *Jenkins) Gather(acc telegraf.Accumulator) error {
 	if j.client == nil {
 		client, err := j.newHTTPClient()
@@ -108,14 +118,14 @@ func (j *Jenkins) initialize(client *http.Client) error {
 	}
 	if u.Port() == "" {
 		if u.Scheme == "http" {
-			j.Port = "80"
+			j.port = "80"
 		} else if u.Scheme == "https" {
-			j.Port = "443"
+			j.port = "443"
 		}
 	} else {
-		j.Port = u.Port()
+		j.port = u.Port()
 	}
-	j.Source = u.Hostname()
+	j.source = u.Hostname()
 
 	// init filters
 	j.jobFilter, err = filter.NewIncludeExcludeFilter(j.JobInclude, j.JobExclude)
@@ -145,12 +155,11 @@ func (j *Jenkins) initialize(client *http.Client) error {
 }
 
 func (j *Jenkins) gatherNodeData(n node, acc telegraf.Accumulator) error {
-	tags := map[string]string{}
 	if n.DisplayName == "" {
-		return fmt.Errorf("error empty node name")
+		return errors.New("error empty node name")
 	}
 
-	tags["node_name"] = n.DisplayName
+	tags := map[string]string{"node_name": n.DisplayName}
 
 	// filter out excluded or not included node_name
 	if !j.nodeFilter.Match(tags["node_name"]) {
@@ -168,10 +177,10 @@ func (j *Jenkins) gatherNodeData(n node, acc telegraf.Accumulator) error {
 		tags["status"] = "offline"
 	}
 
-	tags["source"] = j.Source
-	tags["port"] = j.Port
+	tags["source"] = j.source
+	tags["port"] = j.port
 
-	fields := make(map[string]interface{})
+	fields := make(map[string]any)
 	fields["num_executors"] = n.NumExecutors
 
 	if j.NodeLabelsAsTag {
@@ -218,8 +227,8 @@ func (j *Jenkins) gatherNodesData(acc telegraf.Accumulator) {
 	}
 
 	// get total and busy executors
-	tags := map[string]string{"source": j.Source, "port": j.Port}
-	fields := make(map[string]interface{})
+	tags := map[string]string{"source": j.source, "port": j.port}
+	fields := make(map[string]any)
 	fields["busy_executors"] = nodeResp.BusyExecutors
 	fields["total_executors"] = nodeResp.TotalExecutors
 
@@ -247,9 +256,8 @@ func (j *Jenkins) gatherJobs(acc telegraf.Accumulator) {
 		go func(name string, wg *sync.WaitGroup, acc telegraf.Accumulator) {
 			defer wg.Done()
 			if err := j.getJobDetail(jobRequest{
-				name:    name,
-				parents: []string{},
-				layer:   0,
+				name:  name,
+				layer: 0,
 			}, acc); err != nil {
 				acc.AddError(err)
 			}
@@ -294,31 +302,41 @@ func (j *Jenkins) getJobDetail(jr jobRequest, acc telegraf.Accumulator) error {
 	}
 
 	// collect build info
-	number := js.LastBuild.Number
-	if number < 1 {
-		// no build info
-		return nil
+	builds := js.Builds
+	if len(builds) == 0 {
+		if js.LastBuild.Number < 1 {
+			return nil
+		}
+		builds = []jobBuild{js.LastBuild}
 	}
-	build, err := j.client.getBuild(context.Background(), jr, number)
-	if err != nil {
-		return err
-	}
-
-	if build.Building {
-		j.Log.Debugf("Ignore running build on %s, build %v", jr.name, number)
-		return nil
+	if len(builds) > maxBuildsPerJob {
+		builds = builds[:maxBuildsPerJob]
 	}
 
-	// stop if build is too old
-	// Higher up in gatherJobs
 	cutoff := time.Now().Add(-1 * time.Duration(j.MaxBuildAge))
 
-	// Here we just test
-	if build.GetTimestamp().Before(cutoff) {
-		return nil
-	}
+	for _, jb := range builds {
+		if jb.Number < 1 {
+			continue
+		}
 
-	j.gatherJobBuild(jr, build, acc)
+		build, err := j.client.getBuild(context.Background(), jr, jb.Number)
+		if err != nil {
+			acc.AddError(err)
+			continue
+		}
+
+		if build.Building {
+			j.Log.Debugf("Ignore running build on %s, build %v", jr.name, jb.Number)
+			continue
+		}
+
+		if build.getTimestamp().Before(cutoff) {
+			continue
+		}
+
+		j.gatherJobBuild(jr, build, acc)
+	}
 	return nil
 }
 
@@ -366,6 +384,7 @@ type swapSpaceMonitor struct {
 
 type jobResponse struct {
 	LastBuild jobBuild   `json:"lastBuild"`
+	Builds    []jobBuild `json:"builds"`
 	Jobs      []innerJob `json:"jobs"`
 	Name      string     `json:"name"`
 }
@@ -382,14 +401,16 @@ type jobBuild struct {
 }
 
 type buildResponse struct {
-	Building  bool   `json:"building"`
-	Duration  int64  `json:"duration"`
-	Number    int64  `json:"number"`
-	Result    string `json:"result"`
-	Timestamp int64  `json:"timestamp"`
+	Building    bool   `json:"building"`
+	Duration    int64  `json:"duration"`
+	Number      int64  `json:"number"`
+	Result      string `json:"result"`
+	Timestamp   int64  `json:"timestamp"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description"`
 }
 
-func (b *buildResponse) GetTimestamp() time.Time {
+func (b *buildResponse) getTimestamp() time.Time {
 	return time.Unix(0, b.Timestamp*int64(time.Millisecond))
 }
 
@@ -418,7 +439,7 @@ func (jr jobRequest) combinedEscaped() []string {
 	return jobs
 }
 
-func (jr jobRequest) URL() string {
+func (jr jobRequest) url() string {
 	return "/job/" + strings.Join(jr.combinedEscaped(), "/job/") + jobPath
 }
 
@@ -435,13 +456,25 @@ func (jr jobRequest) parentsString() string {
 }
 
 func (j *Jenkins) gatherJobBuild(jr jobRequest, b *buildResponse, acc telegraf.Accumulator) {
-	tags := map[string]string{"name": jr.name, "parents": jr.parentsString(), "result": b.Result, "source": j.Source, "port": j.Port}
-	fields := make(map[string]interface{})
+	tags := map[string]string{"name": jr.name, "parents": jr.parentsString(), "result": b.Result, "source": j.source, "port": j.port}
+	for _, t := range j.BuildTags {
+		switch t {
+		case "display_name":
+			if b.DisplayName != "" {
+				tags["display_name"] = b.DisplayName
+			}
+		case "description":
+			if b.Description != "" {
+				tags["description"] = b.Description
+			}
+		}
+	}
+	fields := make(map[string]any)
 	fields["duration"] = b.Duration
 	fields["result_code"] = mapResultCode(b.Result)
 	fields["number"] = b.Number
 
-	acc.AddFields(measurementJob, fields, tags, b.GetTimestamp())
+	acc.AddFields(measurementJob, fields, tags, b.getTimestamp())
 }
 
 // perform status mapping

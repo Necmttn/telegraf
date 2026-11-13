@@ -12,21 +12,22 @@ import (
 	"github.com/influxdata/telegraf/plugins/common/auth"
 )
 
-type PapertrailWebhook struct {
+type Webhook struct {
 	Path string
 	acc  telegraf.Accumulator
 	log  telegraf.Logger
 	auth.BasicAuth
 }
 
-func (pt *PapertrailWebhook) Register(router *mux.Router, acc telegraf.Accumulator, log telegraf.Logger) {
+// Register registers the webhook with the provided router
+func (pt *Webhook) Register(router *mux.Router, acc telegraf.Accumulator, log telegraf.Logger) {
 	router.HandleFunc(pt.Path, pt.eventHandler).Methods("POST")
 	pt.log = log
 	pt.log.Infof("Started the papertrail_webhook on %s", pt.Path)
 	pt.acc = acc
 }
 
-func (pt *PapertrailWebhook) eventHandler(w http.ResponseWriter, r *http.Request) {
+func (pt *Webhook) eventHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
 		http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
 		return
@@ -43,7 +44,7 @@ func (pt *PapertrailWebhook) eventHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var payload Payload
+	var payload payload
 	err := json.Unmarshal([]byte(data), &payload)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -58,7 +59,7 @@ func (pt *PapertrailWebhook) eventHandler(w http.ResponseWriter, r *http.Request
 				"host":  e.Hostname,
 				"event": payload.SavedSearch.Name,
 			}
-			fields := map[string]interface{}{
+			fields := map[string]any{
 				"count":       uint64(1),
 				"id":          e.ID,
 				"source_ip":   e.SourceIP,
@@ -81,7 +82,7 @@ func (pt *PapertrailWebhook) eventHandler(w http.ResponseWriter, r *http.Request
 					"host":  c.SourceName,
 					"event": payload.SavedSearch.Name,
 				}
-				fields := map[string]interface{}{
+				fields := map[string]any{
 					"count": count,
 				}
 				pt.acc.AddFields("papertrail", fields, tags, time.Unix(ts, 0))

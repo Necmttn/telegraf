@@ -1,34 +1,39 @@
-# Stackdriver Google Cloud Monitoring Output Plugin
+# Google Cloud Monitoring Output Plugin
 
-This plugin writes to the [Google Cloud Monitoring API][stackdriver] (formerly
-Stackdriver) and requires [authentication][] with Google Cloud using either a
-service account or user credentials
+This plugin writes metrics to a `project` in
+[Google Cloud Monitoring][stackdriver] (formerly called Stackdriver).
+[Authentication][authentication] with Google Cloud is required using either a
+service account or user credentials.
 
-This plugin accesses APIs which are [chargeable][pricing]; you might incur
-costs.
+> [!IMPORTANT]
+> This plugin accesses APIs which are [chargeable][pricing] and might incur
+> costs.
 
-Requires `project` to specify where Stackdriver metrics will be delivered to.
-
-By default, Metrics are grouped by the `namespace` variable and metric key -
+By default, Metrics are grouped by the `namespace` variable and metric key,
 eg: `custom.googleapis.com/telegraf/system/load5`. However, this is not the
 best practice. Setting `metric_name_format = "official"` will produce a more
 easily queried format of: `metric_type_prefix/[namespace_]name_key/kind`. If
 the global namespace is not set, it is omitted as well.
 
-[Resource type](https://cloud.google.com/monitoring/api/resources) is configured
-by the `resource_type` variable (default `global`).
-
-Additional resource labels can be configured by `resource_labels`. By default
-the required `project_id` label is always set to the `project` variable.
+⭐ Telegraf v1.9.0
+🏷️ cloud, datastore
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
+
+## Secret store support
+
+This plugin supports secrets from secret stores for the `token` option.
+See the [secret store documentation][SECRETSTORE] for more details on how
+to use them.
+
+[SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
 
 ## Configuration
 
@@ -37,6 +42,16 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 [[outputs.stackdriver]]
   ## GCP Project
   project = "erudite-bloom-151019"
+
+  ## GCP access token for authorizing calls to Cloud Monitoring APIs
+  # token = "@{gcp_auth:token}"
+
+  ## Quota Project
+  ## Specifies the Google Cloud project that should be billed for metric ingestion.
+  ## If omitted, the quota is charged to the service account’s default project.
+  ## This is useful when sending metrics to multiple projects using a single service account.
+  ## The caller must have the `serviceusage.services.use` permission on the specified project.
+  # quota_project = ""
 
   ## The namespace for the metric descriptor
   ## This is optional and users are encouraged to set the namespace as a
@@ -112,9 +127,6 @@ of the stackdriver API.  This cache is not GCed: if you remove a large number of
 counters from the input side, you may wish to restart telegraf to clear it.
 
 [basicstats]: /plugins/aggregators/basicstats/README.md
-
 [stackdriver]: https://cloud.google.com/monitoring/api/v3/
-
 [authentication]: https://cloud.google.com/docs/authentication/getting-started
-
 [pricing]: https://cloud.google.com/stackdriver/pricing#google-clouds-operations-suite-pricing

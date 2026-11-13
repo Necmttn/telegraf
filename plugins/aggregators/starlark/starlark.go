@@ -102,13 +102,10 @@ func (s *Starlark) Reset() {
 	}
 }
 
-// init initializes starlark aggregator plugin
 func init() {
 	aggregators.Add("starlark", func() telegraf.Aggregator {
 		return &Starlark{
-			Common: common.Common{
-				StarlarkLoadFunc: common.LoadFunc,
-			},
+			StarlarkLoadFunc: common.LoadFunc,
 		}
 	})
 }

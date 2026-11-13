@@ -35,7 +35,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(0, 0),
@@ -50,7 +50,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(0, 0),
@@ -65,7 +65,7 @@ var ptests = []struct {
 			metric.New(
 				"c pu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -80,7 +80,7 @@ var ptests = []struct {
 			metric.New(
 				"c,pu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -98,7 +98,7 @@ var ptests = []struct {
 					"cpu":  "cpu0",
 					"host": "localhost",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -115,7 +115,7 @@ var ptests = []struct {
 				map[string]string{
 					`ho\st`: "localhost",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -132,7 +132,7 @@ var ptests = []struct {
 				map[string]string{
 					"ho=st": "localhost",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -149,7 +149,7 @@ var ptests = []struct {
 				map[string]string{
 					"ho,st": "localhost",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -166,7 +166,7 @@ var ptests = []struct {
 				map[string]string{
 					"host": "two words",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -183,7 +183,7 @@ var ptests = []struct {
 				map[string]string{
 					"host": `two\ words`,
 				},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -200,7 +200,7 @@ var ptests = []struct {
 				map[string]string{
 					"host": `two\\ words`,
 				},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -215,7 +215,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					`va\lue`: 42.0,
 				},
 				time.Unix(42, 0),
@@ -230,7 +230,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					`va=lue`: 42.0,
 				},
 				time.Unix(42, 0),
@@ -245,7 +245,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					`va,lue`: 42.0,
 				},
 				time.Unix(42, 0),
@@ -260,7 +260,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					`va lue`: 42.0,
 				},
 				time.Unix(42, 0),
@@ -275,7 +275,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42,
 				},
 				time.Unix(42, 0),
@@ -302,7 +302,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": int64(9223372036854775807),
 				},
 				time.Unix(42, 0),
@@ -317,7 +317,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": uint64(42),
 				},
 				time.Unix(42, 0),
@@ -344,7 +344,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": uint64(18446744073709551615),
 				},
 				time.Unix(42, 0),
@@ -359,7 +359,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": true,
 				},
 				time.Unix(42, 0),
@@ -374,7 +374,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": "42",
 				},
 				time.Unix(42, 0),
@@ -389,7 +389,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					`value`: `how"dy`,
 				},
 				time.Unix(42, 0),
@@ -404,7 +404,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					`value`: `how\dy`,
 				},
 				time.Unix(42, 0),
@@ -419,7 +419,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": "4\n2",
 				},
 				time.Unix(42, 0),
@@ -434,7 +434,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -452,7 +452,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 123456789),
@@ -467,7 +467,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -475,7 +475,7 @@ var ptests = []struct {
 			metric.New(
 				"cpu",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": 42.0,
 				},
 				time.Unix(42, 0),
@@ -517,7 +517,7 @@ var ptests = []struct {
 					"exe":          "bash",
 					"process_name": "bash",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"cpu_time":                      0,
 					"cpu_time_guest":                float64(0),
 					"cpu_time_guest_nice":           float64(0),
@@ -576,6 +576,19 @@ var ptests = []struct {
 		},
 		err: nil,
 	},
+	{
+		name:    "backslash only",
+		input:   []byte(`\\`),
+		metrics: nil,
+		err: &ParseError{
+			Offset:     2,
+			LineOffset: 0,
+			LineNumber: 1,
+			Column:     3,
+			msg:        "expected tag",
+			buf:        `\\`,
+		},
+	},
 }
 
 func TestParser(t *testing.T) {
@@ -591,7 +604,7 @@ func TestParser(t *testing.T) {
 			metrics, err := parser.Parse(tt.input)
 			require.Equal(t, tt.err, err)
 
-			require.Equal(t, len(tt.metrics), len(metrics))
+			require.Len(t, metrics, len(tt.metrics))
 			for i, expected := range tt.metrics {
 				require.Equal(t, expected.Name(), metrics[i].Name())
 				require.Equal(t, expected.Tags(), metrics[i].Tags())
@@ -690,7 +703,7 @@ func TestParserTimestampPrecision(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := config.Duration(0)
 			require.NoError(t, d.UnmarshalText([]byte(tt.precision)))
-			parser := Parser{InfluxTimestampPrecsion: d}
+			parser := Parser{InfluxTimestampPrecision: d}
 			require.NoError(t, parser.Init())
 
 			metrics, err := parser.Parse(tt.input)
@@ -705,7 +718,7 @@ func TestParserInvalidTimestampPrecision(t *testing.T) {
 	d := config.Duration(0)
 	for _, precision := range []string{"1h", "1d", "2s", "1m", "2ns"} {
 		require.NoError(t, d.UnmarshalText([]byte(precision)))
-		parser := Parser{InfluxTimestampPrecsion: d}
+		parser := Parser{InfluxTimestampPrecision: d}
 		require.ErrorContains(t, parser.Init(), "invalid time precision")
 	}
 }
@@ -761,9 +774,8 @@ func TestSeriesParser(t *testing.T) {
 		err      error
 	}{
 		{
-			name:    "empty",
-			input:   []byte(""),
-			metrics: []telegraf.Metric{},
+			name:  "empty",
+			input: []byte(""),
 		},
 		{
 			name:  "minimal",
@@ -772,7 +784,7 @@ func TestSeriesParser(t *testing.T) {
 				metric.New(
 					"cpu",
 					map[string]string{},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
@@ -787,15 +799,14 @@ func TestSeriesParser(t *testing.T) {
 						"a": "x",
 						"b": "y",
 					},
-					map[string]interface{}{},
+					map[string]any{},
 					time.Unix(0, 0),
 				),
 			},
 		},
 		{
-			name:    "missing tag value",
-			input:   []byte("cpu,a="),
-			metrics: []telegraf.Metric{},
+			name:  "missing tag value",
+			input: []byte("cpu,a="),
 			err: &ParseError{
 				Offset:     6,
 				LineNumber: 1,
@@ -805,9 +816,8 @@ func TestSeriesParser(t *testing.T) {
 			},
 		},
 		{
-			name:    "error with carriage return in long line",
-			input:   []byte("cpu,a=" + strings.Repeat("x", maxErrorBufferSize) + "\rcd,b"),
-			metrics: []telegraf.Metric{},
+			name:  "error with carriage return in long line",
+			input: []byte("cpu,a=" + strings.Repeat("x", maxErrorBufferSize) + "\rcd,b"),
 			err: &ParseError{
 				Offset:     1031,
 				LineNumber: 1,
@@ -833,13 +843,19 @@ func TestSeriesParser(t *testing.T) {
 				require.Equal(t, tt.err.Error(), err.Error())
 			}
 
-			require.Equal(t, len(tt.metrics), len(metrics))
+			require.Len(t, metrics, len(tt.metrics))
 			for i, expected := range tt.metrics {
 				require.Equal(t, expected.Name(), metrics[i].Name())
 				require.Equal(t, expected.Tags(), metrics[i].Tags())
 			}
 		})
 	}
+}
+
+func TestMetricHandlerNilMetric(t *testing.T) {
+	h := NewMetricHandler()
+	h.SetTimeFunc(func() time.Time { return time.Now() })
+	require.Nil(t, h.Metric(), "Metric() should return nil when no measurement was set")
 }
 
 func TestParserErrorString(t *testing.T) {
@@ -923,7 +939,7 @@ func TestStreamParserErrorString(t *testing.T) {
 			parser := NewStreamParser(bytes.NewBuffer(tt.input))
 
 			var errs []error
-			for i := 0; i < 20; i++ {
+			for range 20 {
 				_, err := parser.Next()
 				if errors.Is(err, EOF) {
 					break
@@ -934,7 +950,7 @@ func TestStreamParserErrorString(t *testing.T) {
 				}
 			}
 
-			require.Equal(t, len(tt.errs), len(errs))
+			require.Len(t, errs, len(tt.errs))
 			for i, err := range errs {
 				require.Equal(t, tt.errs[i], err.Error())
 			}
@@ -943,11 +959,11 @@ func TestStreamParserErrorString(t *testing.T) {
 }
 
 type MockReader struct {
-	ReadF func(p []byte) (int, error)
+	ReadF func() (int, error)
 }
 
-func (r *MockReader) Read(p []byte) (int, error) {
-	return r.ReadF(p)
+func (r *MockReader) Read([]byte) (int, error) {
+	return r.ReadF()
 }
 
 // Errors from the Reader are returned from the Parser
@@ -955,7 +971,7 @@ func TestStreamParserReaderError(t *testing.T) {
 	readerErr := errors.New("error but not eof")
 
 	parser := NewStreamParser(&MockReader{
-		ReadF: func(p []byte) (int, error) {
+		ReadF: func() (int, error) {
 			return 0, readerErr
 		},
 	})
@@ -973,9 +989,11 @@ func TestStreamParserProducesAllAvailableMetrics(t *testing.T) {
 	parser := NewStreamParser(r)
 	parser.SetTimeFunc(DefaultTime)
 
+	ch := make(chan error)
 	go func() {
 		_, err := w.Write([]byte("metric value=1\nmetric2 value=1\n"))
-		require.NoError(t, err)
+		ch <- err
+		close(ch)
 	}()
 
 	_, err := parser.Next()
@@ -983,6 +1001,9 @@ func TestStreamParserProducesAllAvailableMetrics(t *testing.T) {
 
 	// should not block on second read
 	_, err = parser.Next()
+	require.NoError(t, err)
+
+	err = <-ch
 	require.NoError(t, err)
 }
 
@@ -1002,7 +1023,7 @@ func TestBenchmarkData(t *testing.T) {
 				"tags_platform": "python",
 				"tags_sdkver":   "3.11.5",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(5),
 			},
 			time.Unix(1653643422, 0),
@@ -1014,7 +1035,7 @@ func TestBenchmarkData(t *testing.T) {
 				"tags_platform": "python",
 				"tags_sdkver":   "3.11.4",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": float64(4),
 			},
 			time.Unix(1653643422, 0),
@@ -1032,6 +1053,7 @@ func BenchmarkParsing(b *testing.B) {
 	require.NoError(b, plugin.Init())
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse([]byte(benchmarkData))
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse([]byte(benchmarkData))
 	}
 }

@@ -19,12 +19,14 @@ user-specified configurations.
   # allow_no_match = false
 
   ## Specify the endianness of the data.
-  ## Available values are "be" (big-endian), "le" (little-endian) and "host",
-  ## where "host" means the same endianness as the machine running Telegraf.
+  ## Available values are "big" or "be" for big-endian, "little" or "le" for
+  ## little-endian and "host" for using the same endianness as the machine
+  ## running Telegraf.
   # endianness = "host"
 
-  ## Interpret input as string containing hex-encoded data.
-  # hex_encoding = false
+  ## Interpret input using the specified encoding
+  ## Available values are "none" (raw bytes), "hex" and "base64"
+  # binary_encoding = "none"
 
   ## Multiple parsing sections are allowed
   [[inputs.file.binary]]
@@ -37,7 +39,7 @@ user-specified configurations.
     ## given.
     ## An entry can have the following properties:
     ##  name        --  Name of the element (e.g. field or tag). Can be omitted
-    ##                  for special assignments (i.e. time & measurement) or if
+    ##                  for special assignments (time and measurement) or if
     ##                  entry is omitted.
     ##  type        --  Data-type of the entry. Can be "int8/16/32/64", "uint8/16/32/64",
     ##                  "float32/64", "bool" and "string".
@@ -65,13 +67,13 @@ user-specified configurations.
     ]
 
     ## Optional: Filter evaluated before applying the configuration.
-    ## This option can be used to mange multiple configuration specific for
+    ## This option can be used to manage multiple configuration specific for
     ## a certain message type. If no filter is given, the configuration is applied.
     # [inputs.file.binary.filter]
     #   ## Filter message by the exact length in bytes (default: N/A).
     #   # length = 0
     #   ## Filter the message by a minimum length in bytes.
-    #   ## Messages longer of of equal length will pass.
+    #   ## Messages longer of equal length will pass.
     #   # length_min = 0
     #   ## List of data parts to match.
     #   ## Only if all selected parts match, the configuration will be
@@ -112,11 +114,17 @@ machine share the same endianness.
 Alternatively, you can explicitly specify big-endian format (`"be"`) or
 little-endian format (`"le"`).
 
-#### `hex_encoding` (optional)
+#### `binary_encoding` (optional)
 
-If `true`, the input data is interpreted as a string containing hex-encoded
-data like `C0 C7 21 A9`. The value is _case insensitive_ and can handle spaces,
-however prefixes like `0x` or `x` are _not_ allowed.
+If this option is not specified or set to `none`, the input data contains the
+binary data as raw bytes. This is the default.
+
+If set to `hex`, the input data is interpreted as a string containing
+hex-encoded data like `C0 C7 21 A9`. The value is _case insensitive_ and can
+handle spaces and prefixes like `0x` or `x`.
+
+If set to `base64` the input data is interpreted as a string containing
+padded base64 data `RDLAAA==`.
 
 ### Non-byte aligned value extraction
 
@@ -162,8 +170,8 @@ determined using the format setting in `type`.
 
 The `timezone` setting allows to convert the extracted time to the
 given value timezone. By default the time will be interpreted as `utc`.
-Other valid values are `local`, i.e. the local timezone configured for
-the machine, or valid timezone-specification e.g. `Europe/Berlin`.
+Other valid values are `local` (the local timezone configured for
+the machine), or valid timezone-specification e.g. `Europe/Berlin`.
 
 ### `tag` specification
 

@@ -33,7 +33,7 @@ func (lb *unlockedBuffer) Size() int {
 	return len(lb.content)
 }
 
-func (lb *unlockedBuffer) Grow(_ int) {
+func (*unlockedBuffer) Grow(int) {
 	// The underlying byte-buffer will grow dynamically
 }
 
@@ -43,7 +43,7 @@ func (lb *unlockedBuffer) Bytes() []byte {
 
 func (lb *unlockedBuffer) TemporaryString() string {
 	//nolint:gosec // G103: Valid use of unsafe call to cast underlying bytes to string
-	return unsafe.String(&lb.content[0], len(lb.content))
+	return unsafe.String(unsafe.SliceData(lb.content), len(lb.content))
 }
 
 func (lb *unlockedBuffer) String() string {
@@ -85,7 +85,7 @@ func (c *unprotectedSecretContainer) Buffer() (SecretBuffer, error) {
 	return newUnlockedBuffer(c.buf.content), nil
 }
 
-func (c *unprotectedSecretContainer) AsBuffer(secret []byte) SecretBuffer {
+func (*unprotectedSecretContainer) AsBuffer(secret []byte) SecretBuffer {
 	return &unlockedBuffer{secret}
 }
 

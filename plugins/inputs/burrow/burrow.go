@@ -31,7 +31,7 @@ const (
 )
 
 type (
-	burrow struct {
+	Burrow struct {
 		tls.ClientConfig
 
 		Servers               []string
@@ -91,17 +91,11 @@ type (
 	}
 )
 
-func init() {
-	inputs.Add("burrow", func() telegraf.Input {
-		return &burrow{}
-	})
-}
-
-func (*burrow) SampleConfig() string {
+func (*Burrow) SampleConfig() string {
 	return sampleConfig
 }
 
-func (b *burrow) Gather(acc telegraf.Accumulator) error {
+func (b *Burrow) Gather(acc telegraf.Accumulator) error {
 	var wg sync.WaitGroup
 
 	if len(b.Servers) == 0 {
@@ -141,7 +135,7 @@ func (b *burrow) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (b *burrow) setDefaults() {
+func (b *Burrow) setDefaults() {
 	if b.APIPrefix == "" {
 		b.APIPrefix = defaultBurrowPrefix
 	}
@@ -153,7 +147,7 @@ func (b *burrow) setDefaults() {
 	}
 }
 
-func (b *burrow) compileGlobs() error {
+func (b *Burrow) compileGlobs() error {
 	var err error
 
 	// compile glob patterns
@@ -172,14 +166,14 @@ func (b *burrow) compileGlobs() error {
 	return nil
 }
 
-func (b *burrow) createClient() (*http.Client, error) {
+func (b *Burrow) createClient() (*http.Client, error) {
 	tlsCfg, err := b.ClientConfig.TLSConfig()
 	if err != nil {
 		return nil, err
 	}
 
 	timeout := time.Duration(b.ResponseTimeout)
-	dialContext := net.Dialer{Timeout: timeout, DualStack: true}
+	dialContext := net.Dialer{Timeout: timeout}
 	transport := http.Transport{
 		DialContext:     dialContext.DialContext,
 		TLSClientConfig: tlsCfg,
@@ -199,7 +193,7 @@ func (b *burrow) createClient() (*http.Client, error) {
 	return client, nil
 }
 
-func (b *burrow) getResponse(u *url.URL) (*apiResponse, error) {
+func (b *Burrow) getResponse(u *url.URL) (*apiResponse, error) {
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -224,7 +218,7 @@ func (b *burrow) getResponse(u *url.URL) (*apiResponse, error) {
 	return ares, dec.Decode(ares)
 }
 
-func (b *burrow) gatherServer(src *url.URL, acc telegraf.Accumulator) error {
+func (b *Burrow) gatherServer(src *url.URL, acc telegraf.Accumulator) error {
 	var wg sync.WaitGroup
 
 	r, err := b.getResponse(src)
@@ -263,7 +257,7 @@ func (b *burrow) gatherServer(src *url.URL, acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (b *burrow) gatherTopics(guard chan struct{}, src *url.URL, cluster string, acc telegraf.Accumulator) {
+func (b *Burrow) gatherTopics(guard chan struct{}, src *url.URL, cluster string, acc telegraf.Accumulator) {
 	var wg sync.WaitGroup
 
 	r, err := b.getResponse(src)
@@ -295,14 +289,14 @@ func (b *burrow) gatherTopics(guard chan struct{}, src *url.URL, cluster string,
 				return
 			}
 
-			b.genTopicMetrics(tr, cluster, topic, acc)
+			genTopicMetrics(tr, cluster, topic, acc)
 		}(topic)
 	}
 
 	wg.Wait()
 }
 
-func (b *burrow) genTopicMetrics(r *apiResponse, cluster, topic string, acc telegraf.Accumulator) {
+func genTopicMetrics(r *apiResponse, cluster, topic string, acc telegraf.Accumulator) {
 	for i, offset := range r.Offsets {
 		tags := map[string]string{
 			"cluster":   cluster,
@@ -312,7 +306,7 @@ func (b *burrow) genTopicMetrics(r *apiResponse, cluster, topic string, acc tele
 
 		acc.AddFields(
 			"burrow_topic",
-			map[string]interface{}{
+			map[string]any{
 				"offset": offset,
 			},
 			tags,
@@ -320,7 +314,7 @@ func (b *burrow) genTopicMetrics(r *apiResponse, cluster, topic string, acc tele
 	}
 }
 
-func (b *burrow) gatherGroups(guard chan struct{}, src *url.URL, cluster string, acc telegraf.Accumulator) {
+func (b *Burrow) gatherGroups(guard chan struct{}, src *url.URL, cluster string, acc telegraf.Accumulator) {
 	var wg sync.WaitGroup
 
 	r, err := b.getResponse(src)
@@ -352,7 +346,7 @@ func (b *burrow) gatherGroups(guard chan struct{}, src *url.URL, cluster string,
 				return
 			}
 
-			b.genGroupStatusMetrics(gr, cluster, group, acc)
+			genGroupStatusMetrics(gr, cluster, group, acc)
 			b.genGroupLagMetrics(gr, cluster, group, acc)
 		}(group)
 	}
@@ -360,7 +354,7 @@ func (b *burrow) gatherGroups(guard chan struct{}, src *url.URL, cluster string,
 	wg.Wait()
 }
 
-func (b *burrow) genGroupStatusMetrics(r *apiResponse, cluster, group string, acc telegraf.Accumulator) {
+func genGroupStatusMetrics(r *apiResponse, cluster, group string, acc telegraf.Accumulator) {
 	partitionCount := r.Status.PartitionCount
 	if partitionCount == 0 {
 		partitionCount = len(r.Status.Partitions)
@@ -383,7 +377,7 @@ func (b *burrow) genGroupStatusMetrics(r *apiResponse, cluster, group string, ac
 
 	acc.AddFields(
 		"burrow_group",
-		map[string]interface{}{
+		map[string]any{
 			"status":          r.Status.Status,
 			"status_code":     mapStatusToCode(r.Status.Status),
 			"partition_count": partitionCount,
@@ -399,14 +393,14 @@ func (b *burrow) genGroupStatusMetrics(r *apiResponse, cluster, group string, ac
 	)
 }
 
-func (b *burrow) genGroupLagMetrics(r *apiResponse, cluster, group string, acc telegraf.Accumulator) {
+func (b *Burrow) genGroupLagMetrics(r *apiResponse, cluster, group string, acc telegraf.Accumulator) {
 	for _, partition := range r.Status.Partitions {
 		if !b.filterTopics.Match(partition.Topic) {
 			continue
 		}
 		acc.AddFields(
 			"burrow_partition",
-			map[string]interface{}{
+			map[string]any{
 				"status":      partition.Status,
 				"status_code": mapStatusToCode(partition.Status),
 				"lag":         partition.CurrentLag,
@@ -454,4 +448,10 @@ func mapStatusToCode(src string) int {
 	default:
 		return 0
 	}
+}
+
+func init() {
+	inputs.Add("burrow", func() telegraf.Input {
+		return &Burrow{}
+	})
 }

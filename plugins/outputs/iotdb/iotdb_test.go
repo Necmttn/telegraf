@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/apache/iotdb-client-go/client"
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -26,7 +25,7 @@ func newMetricWithOrderedFields(
 	fields []telegraf.Field,
 	timestamp time.Time,
 ) telegraf.Metric {
-	m := metric.New(name, map[string]string{}, map[string]interface{}{}, timestamp)
+	m := metric.New(name, map[string]string{}, map[string]any{}, timestamp)
 	for _, tag := range tags {
 		m.AddTag(tag.Key, tag.Value)
 	}
@@ -141,7 +140,7 @@ func TestMetricConversionToRecordsWithTags(t *testing.T) {
 					{"counter", "temperature"},
 					{"temperature", "counter", "unsigned_big", "string", "bool", "int_text"},
 				},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(42.55), int64(987654321)},
 					{int64(123456789), float64(56.24)},
 					{float64(30.33), int64(123456789), int64(math.MaxInt64), "Made in China.", bool(false), "123456789011"},
@@ -180,7 +179,7 @@ func TestMetricConversionToRecordsWithTags(t *testing.T) {
 				),
 				newMetricWithOrderedFields(
 					"root.computer.keyboard",
-					[]telegraf.Tag{},
+					nil,
 					[]telegraf.Field{
 						{Key: "temperature", Value: float64(30.33)},
 						{Key: "counter", Value: int64(123456789)},
@@ -199,14 +198,14 @@ func TestMetricConversionToRecordsWithTags(t *testing.T) {
 			expected: recordsWithTags{
 				DeviceIDList:     []string{"root.computer.uint_to_text"},
 				MeasurementsList: [][]string{{"unsigned_big"}},
-				ValuesList:       [][]interface{}{{strconv.FormatUint(uint64(math.MaxInt64+1000), 10)}},
+				ValuesList:       [][]any{{strconv.FormatUint(uint64(math.MaxInt64+1000), 10)}},
 				DataTypesList:    [][]client.TSDataType{{client.TEXT}},
 				TimestampList:    []int64{testTimestamp.UnixNano()},
 			},
 			metrics: []telegraf.Metric{
 				newMetricWithOrderedFields(
 					"root.computer.uint_to_text",
-					[]telegraf.Tag{},
+					nil,
 					[]telegraf.Field{
 						{Key: "unsigned_big", Value: uint64(math.MaxInt64 + 1000)},
 					},
@@ -220,14 +219,14 @@ func TestMetricConversionToRecordsWithTags(t *testing.T) {
 			expected: recordsWithTags{
 				DeviceIDList:     []string{"root.computer.overflow"},
 				MeasurementsList: [][]string{{"unsigned_big"}},
-				ValuesList:       [][]interface{}{{int64(-9223372036854774809)}},
+				ValuesList:       [][]any{{int64(-9223372036854774809)}},
 				DataTypesList:    [][]client.TSDataType{{client.INT64}},
 				TimestampList:    []int64{testTimestamp.UnixNano()},
 			},
 			metrics: []telegraf.Metric{
 				newMetricWithOrderedFields(
 					"root.computer.overflow",
-					[]telegraf.Tag{},
+					nil,
 					[]telegraf.Field{
 						{Key: "unsigned_big", Value: uint64(math.MaxInt64 + 1000)},
 					},
@@ -241,14 +240,14 @@ func TestMetricConversionToRecordsWithTags(t *testing.T) {
 			expected: recordsWithTags{
 				DeviceIDList:     []string{"root.computer.second"},
 				MeasurementsList: [][]string{{"unsigned_big"}},
-				ValuesList:       [][]interface{}{{int64(math.MaxInt64)}},
+				ValuesList:       [][]any{{int64(math.MaxInt64)}},
 				DataTypesList:    [][]client.TSDataType{{client.INT64}},
 				TimestampList:    []int64{testTimestamp.Unix()},
 			},
 			metrics: []telegraf.Metric{
 				newMetricWithOrderedFields(
 					"root.computer.second",
-					[]telegraf.Tag{},
+					nil,
 					[]telegraf.Field{
 						{Key: "unsigned_big", Value: uint64(math.MaxInt64 + 1000)},
 					},
@@ -279,19 +278,19 @@ func TestTagSanitization(t *testing.T) {
 		expected []string
 		input    []string
 	}{
-		{ //don't sanitize tags containing UnsopportedCharacter on IoTDB V1.3
+		{ // don't sanitize tags containing UnsopportedCharacter on IoTDB V1.3
 			name:     "Don't Sanitize Tags",
 			plugin:   func() *IoTDB { s := newIoTDB(); s.SanitizeTags = "1.3"; return s }(),
 			expected: []string{"word", "`word`", "word_"},
 			input:    []string{"word", "`word`", "word_"},
 		},
-		{ //sanitize tags containing UnsopportedCharacter on IoTDB V1.3 enclosing them in backticks
+		{ // sanitize tags containing UnsupportedCharacter on IoTDB V1.3 enclosing them in backticks
 			name:     "Sanitize Tags",
 			plugin:   func() *IoTDB { s := newIoTDB(); s.SanitizeTags = "1.3"; return s }(),
 			expected: []string{"`wo rd`", "`@`", "`$`", "`#`", "`:`", "`{`", "`}`", "`1`", "`1234`"},
 			input:    []string{"wo rd", "@", "$", "#", ":", "{", "}", "1", "1234"},
 		},
-		{ //test on forbidden word and forbidden syntax
+		{ // test on forbidden word and forbidden syntax
 			name:     "Errors",
 			plugin:   func() *IoTDB { s := newIoTDB(); s.SanitizeTags = "1.3"; return s }(),
 			expected: []string{"", ""},
@@ -303,13 +302,13 @@ func TestTagSanitization(t *testing.T) {
 			expected: []string{"word", "`word`", "word_", "@", "$", "#", ":", "{", "}"},
 			input:    []string{"word", "`word`", "word_", "@", "$", "#", ":", "{", "}"},
 		},
-		{ //sanitize tags containing UnsopportedCharacter on IoTDB V0.13 enclosing them in backticks
+		{ // sanitize tags containing UnsupportedCharacter on IoTDB V0.13 enclosing them in backticks
 			name:     "Sanitize Tags",
 			plugin:   func() *IoTDB { s := newIoTDB(); s.SanitizeTags = "0.13"; return s }(),
 			expected: []string{"`wo rd`", "`\\`"},
 			input:    []string{"wo rd", "\\"},
 		},
-		{ //test on forbidden word and forbidden syntax on IoTDB V0.13
+		{ // test on forbidden word and forbidden syntax on IoTDB V0.13
 			name:     "Errors",
 			plugin:   func() *IoTDB { s := newIoTDB(); s.SanitizeTags = "0.13"; return s }(),
 			expected: []string{"", ""},
@@ -320,11 +319,11 @@ func TestTagSanitization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.plugin.Log = &testutil.Logger{}
-			actuals := []string{}
-
 			require.NoError(t, tt.plugin.Init())
 
+			actuals := make([]string, 0, len(tt.input))
 			for _, input := range tt.input {
+				//nolint:errcheck // error cases handled by expected vs actual comparison
 				actual, _ := tt.plugin.validateTag(input)
 				actuals = append(actuals, actual)
 			}
@@ -344,13 +343,13 @@ func TestTagsHandling(t *testing.T) {
 		expected recordsWithTags
 		input    recordsWithTags
 	}{
-		{ //treat tags as fields. And input Tags are NOT in order.
+		{ // treat tags as fields. And input Tags are NOT in order.
 			name:   "treat tags as fields",
 			plugin: func() *IoTDB { s := newIoTDB(); s.TreatTagsAs = "fields"; return s }(),
 			expected: recordsWithTags{
 				DeviceIDList:     []string{"root.computer.fields"},
 				MeasurementsList: [][]string{{"temperature", "counter", "owner", "price"}},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(42.55), int64(987654321), "cpu", "expensive"},
 				},
 				DataTypesList: [][]client.TSDataType{
@@ -361,7 +360,7 @@ func TestTagsHandling(t *testing.T) {
 			input: recordsWithTags{
 				DeviceIDList:     []string{"root.computer.fields"},
 				MeasurementsList: [][]string{{"temperature", "counter"}},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(42.55), int64(987654321)},
 				},
 				DataTypesList: [][]client.TSDataType{
@@ -374,13 +373,13 @@ func TestTagsHandling(t *testing.T) {
 				}},
 			},
 		},
-		{ //treat tags as device IDs. And input Tags are in order.
+		{ // treat tags as device IDs. And input Tags are in order.
 			name:   "treat tags as device IDs",
 			plugin: func() *IoTDB { s := newIoTDB(); s.TreatTagsAs = "device_id"; return s }(),
 			expected: recordsWithTags{
 				DeviceIDList:     []string{"root.computer.deviceID.cpu.expensive"},
 				MeasurementsList: [][]string{{"temperature", "counter"}},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(42.55), int64(987654321)},
 				},
 				DataTypesList: [][]client.TSDataType{
@@ -391,7 +390,7 @@ func TestTagsHandling(t *testing.T) {
 			input: recordsWithTags{
 				DeviceIDList:     []string{"root.computer.deviceID"},
 				MeasurementsList: [][]string{{"temperature", "counter"}},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(42.55), int64(987654321)},
 				},
 				DataTypesList: [][]client.TSDataType{
@@ -437,7 +436,7 @@ func TestEntireMetricConversion(t *testing.T) {
 				MeasurementsList: [][]string{
 					{"temperature", "counter", "unsigned_big", "string", "bool", "int_text"},
 				},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(30.33), int64(123456789), int64(math.MaxInt64), "Made in China.", bool(false), "123456789011"},
 				},
 				DataTypesList: [][]client.TSDataType{
@@ -473,7 +472,7 @@ func TestEntireMetricConversion(t *testing.T) {
 				MeasurementsList: [][]string{
 					{"temperature", "counter", "unsigned_big", "string", "bool", "int_text"},
 				},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(30.33), int64(123456789), int64(math.MaxInt64), "Made in China.", bool(false), "123456789011"},
 				},
 				DataTypesList: [][]client.TSDataType{
@@ -509,7 +508,7 @@ func TestEntireMetricConversion(t *testing.T) {
 				MeasurementsList: [][]string{
 					{"temperature", "counter"},
 				},
-				ValuesList: [][]interface{}{
+				ValuesList: [][]any{
 					{float64(30.33), int64(123456789)},
 				},
 				DataTypesList: [][]client.TSDataType{
@@ -564,7 +563,7 @@ func TestIntegrationInserts(t *testing.T) {
 		Image:        "apache/iotdb:0.13.0-node",
 		ExposedPorts: []string{iotdbPort},
 		WaitingFor: wait.ForAll(
-			wait.ForListeningPort(nat.Port(iotdbPort)),
+			wait.ForListeningPort(iotdbPort),
 			wait.ForLog("IoTDB has started."),
 		),
 	}
@@ -590,7 +589,7 @@ func TestIntegrationInserts(t *testing.T) {
 	metrics := []telegraf.Metric{
 		newMetricWithOrderedFields(
 			"root.computer.unsigned_big",
-			[]telegraf.Tag{},
+			nil,
 			[]telegraf.Field{
 				{Key: "unsigned_big", Value: uint64(math.MaxInt64 + 1000)},
 			},
@@ -622,7 +621,7 @@ func TestIntegrationInserts(t *testing.T) {
 		),
 		newMetricWithOrderedFields(
 			"root.computer.keyboard",
-			[]telegraf.Tag{},
+			nil,
 			[]telegraf.Field{
 				{Key: "temperature", Value: float64(30.33)},
 				{Key: "counter", Value: int64(123456789)},

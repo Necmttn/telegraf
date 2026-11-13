@@ -2,31 +2,18 @@ package sql
 
 import (
 	"fmt"
-	"math/rand"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
-
-func pwgen(n int) string {
-	charset := []byte("abcdedfghijklmnopqrstABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-	nchars := len(charset)
-
-	buffer := make([]byte, 0, n)
-	for i := 0; i < n; i++ {
-		buffer = append(buffer, charset[rand.Intn(nchars)])
-	}
-
-	return string(buffer)
-}
 
 func TestMariaDBIntegration(t *testing.T) {
 	if testing.Short() {
@@ -36,7 +23,7 @@ func TestMariaDBIntegration(t *testing.T) {
 	logger := testutil.Logger{}
 
 	port := "3306"
-	passwd := pwgen(32)
+	password := testutil.GetRandomString(32)
 	database := "foo"
 
 	// Determine the test-data mountpoint
@@ -47,7 +34,7 @@ func TestMariaDBIntegration(t *testing.T) {
 		Image:        "mariadb",
 		ExposedPorts: []string{port},
 		Env: map[string]string{
-			"MYSQL_ROOT_PASSWORD": passwd,
+			"MYSQL_ROOT_PASSWORD": password,
 			"MYSQL_DATABASE":      database,
 		},
 		Files: map[string]string{
@@ -55,22 +42,21 @@ func TestMariaDBIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("mariadbd: ready for connections.").WithOccurrence(2),
-			wait.ForListeningPort(nat.Port(port)),
+			wait.ForListeningPort(port),
 		),
 	}
-	err = container.Start()
-	require.NoError(t, err, "failed to start container")
+	require.NoError(t, container.Start(), "failed to start container")
 	defer container.Terminate()
 
 	// Define the testset
 	var testset = []struct {
 		name     string
-		queries  []Query
+		queries  []query
 		expected []telegraf.Metric
 	}{
 		{
 			name: "metric_one",
-			queries: []Query{
+			queries: []query{
 				{
 					Query:               "SELECT * FROM metric_one",
 					TagColumnsInclude:   []string{"tag_*"},
@@ -80,13 +66,13 @@ func TestMariaDBIntegration(t *testing.T) {
 				},
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"sql",
 					map[string]string{
 						"tag_one": "tag1",
 						"tag_two": "tag2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"int64_one": int64(1234),
 						"int64_two": int64(2345),
 					},
@@ -99,7 +85,7 @@ func TestMariaDBIntegration(t *testing.T) {
 	for _, tt := range testset {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup the plugin-under-test
-			dsn := fmt.Sprintf("root:%s@tcp(%s:%s)/%s", passwd, container.Address, container.Ports[port], database)
+			dsn := fmt.Sprintf("root:%s@tcp(%s:%s)/%s", password, container.Address, container.Ports[port], database)
 			secret := config.NewSecret([]byte(dsn))
 			plugin := &SQL{
 				Driver:  "maria",
@@ -135,7 +121,7 @@ func TestPostgreSQLIntegration(t *testing.T) {
 	logger := testutil.Logger{}
 
 	port := "5432"
-	passwd := pwgen(32)
+	password := testutil.GetRandomString(32)
 	database := "foo"
 
 	// Determine the test-data mountpoint
@@ -146,7 +132,7 @@ func TestPostgreSQLIntegration(t *testing.T) {
 		Image:        "postgres",
 		ExposedPorts: []string{port},
 		Env: map[string]string{
-			"POSTGRES_PASSWORD": passwd,
+			"POSTGRES_PASSWORD": password,
 			"POSTGRES_DB":       database,
 		},
 		Files: map[string]string{
@@ -154,22 +140,21 @@ func TestPostgreSQLIntegration(t *testing.T) {
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
-			wait.ForListeningPort(nat.Port(port)),
+			wait.ForListeningPort(port),
 		),
 	}
-	err = container.Start()
-	require.NoError(t, err, "failed to start container")
+	require.NoError(t, container.Start(), "failed to start container")
 	defer container.Terminate()
 
 	// Define the testset
 	var testset = []struct {
 		name     string
-		queries  []Query
+		queries  []query
 		expected []telegraf.Metric
 	}{
 		{
 			name: "metric_one",
-			queries: []Query{
+			queries: []query{
 				{
 					Query:               "SELECT * FROM metric_one",
 					TagColumnsInclude:   []string{"tag_*"},
@@ -179,13 +164,13 @@ func TestPostgreSQLIntegration(t *testing.T) {
 				},
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"sql",
 					map[string]string{
 						"tag_one": "tag1",
 						"tag_two": "tag2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"int64_one": int64(1234),
 						"int64_two": int64(2345),
 					},
@@ -198,7 +183,7 @@ func TestPostgreSQLIntegration(t *testing.T) {
 	for _, tt := range testset {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup the plugin-under-test
-			dsn := fmt.Sprintf("postgres://postgres:%v@%v:%v/%v", passwd, container.Address, container.Ports[port], database)
+			dsn := fmt.Sprintf("postgres://postgres:%s@%s:%s/%s", password, container.Address, container.Ports[port], database)
 			secret := config.NewSecret([]byte(dsn))
 			plugin := &SQL{
 				Driver:  "pgx",
@@ -247,24 +232,23 @@ func TestClickHouseIntegration(t *testing.T) {
 			"/docker-entrypoint-initdb.d/expected.sql": testdata,
 		},
 		WaitingFor: wait.ForAll(
-			wait.NewHTTPStrategy("/").WithPort(nat.Port("8123")),
-			wait.ForListeningPort(nat.Port(port)),
+			wait.NewHTTPStrategy("/").WithPort("8123"),
+			wait.ForListeningPort(port),
 			wait.ForLog("Saved preprocessed configuration to '/var/lib/clickhouse/preprocessed_configs/users.xml'.").WithOccurrence(2),
 		),
 	}
-	err = container.Start()
-	require.NoError(t, err, "failed to start container")
+	require.NoError(t, container.Start(), "failed to start container")
 	defer container.Terminate()
 
 	// Define the testset
 	var testset = []struct {
 		name     string
-		queries  []Query
+		queries  []query
 		expected []telegraf.Metric
 	}{
 		{
 			name: "metric_one",
-			queries: []Query{
+			queries: []query{
 				{
 					Query:               "SELECT * FROM default.metric_one",
 					TagColumnsInclude:   []string{"tag_*"},
@@ -274,13 +258,13 @@ func TestClickHouseIntegration(t *testing.T) {
 				},
 			},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"sql",
 					map[string]string{
 						"tag_one": "tag1",
 						"tag_two": "tag2",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"int64_one": int64(1234),
 						"int64_two": int64(2345),
 					},
@@ -293,7 +277,7 @@ func TestClickHouseIntegration(t *testing.T) {
 	for _, tt := range testset {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup the plugin-under-test
-			dsn := fmt.Sprintf("tcp://%v:%v?username=%v", container.Address, container.Ports[port], user)
+			dsn := fmt.Sprintf("tcp://%s:%s?username=%s", container.Address, container.Ports[port], user)
 			secret := config.NewSecret([]byte(dsn))
 			plugin := &SQL{
 				Driver:  "clickhouse",

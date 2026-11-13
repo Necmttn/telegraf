@@ -5,7 +5,9 @@ import (
 	_ "embed"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/influxdata/telegraf"
@@ -37,32 +39,64 @@ type TopK struct {
 	lastAggregation time.Time
 }
 
-func New() *TopK {
-	// Create object
-	topk := TopK{}
-
-	// Setup defaults
-	topk.Period = config.Duration(time.Second * time.Duration(10))
-	topk.K = 10
-	topk.Fields = []string{"value"}
-	topk.Aggregation = "mean"
-	topk.GroupBy = []string{"*"}
-	topk.AddGroupByTag = ""
-	topk.AddRankFields = []string{}
-	topk.AddAggregateFields = []string{}
-
-	// Initialize cache
-	topk.Reset()
-
-	return &topk
-}
-
-type MetricAggregation struct {
-	groupbykey string
+type metricAggregation struct {
+	groupByKey string
 	values     map[string]float64
 }
 
-func sortMetrics(metrics []MetricAggregation, field string, reverse bool) {
+func (*TopK) SampleConfig() string {
+	return sampleConfig
+}
+
+func (t *TopK) Apply(in ...telegraf.Metric) []telegraf.Metric {
+	// Init any internal datastructures that are not initialized yet
+	if t.rankFieldSet == nil {
+		t.rankFieldSet = make(map[string]bool)
+		for _, f := range t.AddRankFields {
+			t.rankFieldSet[f] = true
+		}
+	}
+	if t.aggFieldSet == nil {
+		t.aggFieldSet = make(map[string]bool)
+		for _, f := range t.AddAggregateFields {
+			if f != "" {
+				t.aggFieldSet[f] = true
+			}
+		}
+	}
+
+	// Add the metrics received to our internal cache
+	for _, m := range in {
+		// When tracking metrics this plugin could deadlock the input by
+		// holding undelivered metrics while the input waits for metrics to be
+		// delivered.  Instead, treat all handled metrics as delivered and
+		// produced metrics as untracked in a similar way to aggregators.
+		m.Accept()
+
+		// Check if the metric has any of the fields over which we are aggregating
+		if !slices.ContainsFunc(t.Fields, m.HasField) {
+			continue
+		}
+
+		// Add the metric to the internal cache
+		t.groupBy(m)
+	}
+
+	// If enough time has passed
+	elapsed := time.Since(t.lastAggregation)
+	if elapsed >= time.Duration(t.Period) {
+		return t.push()
+	}
+
+	return nil
+}
+
+func (t *TopK) Reset() {
+	t.cache = make(map[string][]telegraf.Metric)
+	t.lastAggregation = time.Now()
+}
+
+func sortMetrics(metrics []metricAggregation, field string, reverse bool) {
 	less := func(i, j int) bool {
 		iv := metrics[i].values[field]
 		jv := metrics[j].values[field]
@@ -76,15 +110,6 @@ func sortMetrics(metrics []MetricAggregation, field string, reverse bool) {
 	}
 }
 
-func (*TopK) SampleConfig() string {
-	return sampleConfig
-}
-
-func (t *TopK) Reset() {
-	t.cache = make(map[string][]telegraf.Metric)
-	t.lastAggregation = time.Now()
-}
-
 func (t *TopK) generateGroupByKey(m telegraf.Metric) (string, error) {
 	// Create the filter.Filter objects if they have not been created
 	if t.tagsGlobs == nil && len(t.GroupBy) > 0 {
@@ -95,25 +120,33 @@ func (t *TopK) generateGroupByKey(m telegraf.Metric) (string, error) {
 		}
 	}
 
-	groupkey := m.Name() + "&"
+	var b strings.Builder
+	b.WriteString(m.Name())
+	b.WriteString("&")
 
 	if len(t.GroupBy) > 0 {
 		tags := m.Tags()
 		keys := make([]string, 0, len(tags))
+		var kb strings.Builder
 		for tag, value := range tags {
 			if t.tagsGlobs.Match(tag) {
-				keys = append(keys, tag+"="+value+"&")
+				kb.Reset()
+				kb.WriteString(tag)
+				kb.WriteString("=")
+				kb.WriteString(value)
+				kb.WriteString("&")
+				keys = append(keys, kb.String())
 			}
 		}
 		// Sorting the selected tags is necessary because dictionaries
 		// do not ensure any specific or deterministic ordering
 		sort.SliceStable(keys, func(i, j int) bool { return keys[i] < keys[j] })
 		for _, str := range keys {
-			groupkey += str
+			b.WriteString(str)
 		}
 	}
 
-	return groupkey, nil
+	return b.String(), nil
 }
 
 func (t *TopK) groupBy(m telegraf.Metric) {
@@ -140,64 +173,7 @@ func (t *TopK) groupBy(m telegraf.Metric) {
 	}
 }
 
-func (t *TopK) Apply(in ...telegraf.Metric) []telegraf.Metric {
-	// Init any internal datastructures that are not initialized yet
-	if t.rankFieldSet == nil {
-		t.rankFieldSet = make(map[string]bool)
-		for _, f := range t.AddRankFields {
-			t.rankFieldSet[f] = true
-		}
-	}
-	if t.aggFieldSet == nil {
-		t.aggFieldSet = make(map[string]bool)
-		for _, f := range t.AddAggregateFields {
-			if f != "" {
-				t.aggFieldSet[f] = true
-			}
-		}
-	}
-
-	// Add the metrics received to our internal cache
-	for _, m := range in {
-		// When tracking metrics this plugin could deadlock the input by
-		// holding undelivered metrics while the input waits for metrics to be
-		// delivered.  Instead, treat all handled metrics as delivered and
-		// produced metrics as untracked in a similar way to aggregators.
-		m.Drop()
-
-		// Check if the metric has any of the fields over which we are aggregating
-		hasField := false
-		for _, f := range t.Fields {
-			if m.HasField(f) {
-				hasField = true
-				break
-			}
-		}
-		if !hasField {
-			continue
-		}
-
-		// Add the metric to the internal cache
-		t.groupBy(m)
-	}
-
-	// If enough time has passed
-	elapsed := time.Since(t.lastAggregation)
-	if elapsed >= time.Duration(t.Period) {
-		return t.push()
-	}
-
-	return []telegraf.Metric{}
-}
-
-func min(a, b int) int {
-	if a > b {
-		return b
-	}
-	return a
-}
-
-func convert(in interface{}) (float64, bool) {
+func convert(in any) (float64, bool) {
 	switch v := in.(type) {
 	case float64:
 		return v, true
@@ -212,16 +188,16 @@ func convert(in interface{}) (float64, bool) {
 
 func (t *TopK) push() []telegraf.Metric {
 	// Generate aggregations list using the selected fields
-	aggregations := make([]MetricAggregation, 0, 100)
+	aggregations := make([]metricAggregation, 0, 100)
 	aggregator, err := t.getAggregationFunction(t.Aggregation)
 	if err != nil {
 		// If we could not generate the aggregation
 		// function, fail hard by dropping all metrics
 		t.Log.Errorf("%v", err)
-		return []telegraf.Metric{}
+		return nil
 	}
 	for k, ms := range t.cache {
-		aggregations = append(aggregations, MetricAggregation{groupbykey: k, values: aggregator(ms, t.Fields)})
+		aggregations = append(aggregations, metricAggregation{groupByKey: k, values: aggregator(ms, t.Fields)})
 	}
 
 	// The return value that will hold the returned metrics
@@ -236,7 +212,7 @@ func (t *TopK) push() []telegraf.Metric {
 		for i, ag := range aggregations[0:min(t.K, len(aggregations))] {
 			// Check whether of not we need to add fields of tags to the selected metrics
 			if len(t.aggFieldSet) != 0 || len(t.rankFieldSet) != 0 || t.AddGroupByTag != "" {
-				for _, m := range t.cache[ag.groupbykey] {
+				for _, m := range t.cache[ag.groupByKey] {
 					// Add the aggregation final value if requested
 					_, addAggField := t.aggFieldSet[field]
 					if addAggField && m.HasField(field) {
@@ -252,10 +228,10 @@ func (t *TopK) push() []telegraf.Metric {
 			}
 
 			// Add metrics if we have not already appended them to the return value
-			_, ok := addedKeys[ag.groupbykey]
+			_, ok := addedKeys[ag.groupByKey]
 			if !ok {
-				ret = append(ret, t.cache[ag.groupbykey]...)
-				addedKeys[ag.groupbykey] = true
+				ret = append(ret, t.cache[ag.groupByKey]...)
+				addedKeys[ag.groupByKey] = true
 			}
 		}
 	}
@@ -306,7 +282,7 @@ func (t *TopK) getAggregationFunction(aggOperation string) (func([]telegraf.Metr
 
 	case "min":
 		return func(ms []telegraf.Metric, fields []string) map[string]float64 {
-			min := func(agg map[string]float64, val float64, field string) {
+			vmin := func(agg map[string]float64, val float64, field string) {
 				// If this field has not been set, set it to the maximum float64
 				_, ok := agg[field]
 				if !ok {
@@ -318,12 +294,12 @@ func (t *TopK) getAggregationFunction(aggOperation string) (func([]telegraf.Metr
 					agg[field] = val
 				}
 			}
-			return aggregator(ms, fields, min)
+			return aggregator(ms, fields, vmin)
 		}, nil
 
 	case "max":
 		return func(ms []telegraf.Metric, fields []string) map[string]float64 {
-			max := func(agg map[string]float64, val float64, field string) {
+			vmax := func(agg map[string]float64, val float64, field string) {
 				// If this field has not been set, set it to the minimum float64
 				_, ok := agg[field]
 				if !ok {
@@ -335,7 +311,7 @@ func (t *TopK) getAggregationFunction(aggOperation string) (func([]telegraf.Metr
 					agg[field] = val
 				}
 			}
-			return aggregator(ms, fields, max)
+			return aggregator(ms, fields, vmax)
 		}, nil
 
 	case "mean":
@@ -381,8 +357,26 @@ func (t *TopK) getAggregationFunction(aggOperation string) (func([]telegraf.Metr
 	}
 }
 
+func newTopK() *TopK {
+	// Create object
+	topk := TopK{}
+
+	// Setup defaults
+	topk.Period = config.Duration(time.Second * time.Duration(10))
+	topk.K = 10
+	topk.Fields = []string{"value"}
+	topk.Aggregation = "mean"
+	topk.GroupBy = []string{"*"}
+	topk.AddGroupByTag = ""
+
+	// Initialize cache
+	topk.Reset()
+
+	return &topk
+}
+
 func init() {
 	processors.Add("topk", func() telegraf.Processor {
-		return New()
+		return newTopK()
 	})
 }

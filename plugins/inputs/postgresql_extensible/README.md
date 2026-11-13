@@ -1,29 +1,31 @@
 # PostgreSQL Extensible Input Plugin
 
-This postgresql plugin provides metrics for your postgres database. It has been
-designed to parse SQL queries in the plugin section of your `telegraf.conf`.
+This plugin queries a [PostgreSQL][postgres] server and provides metrics for
+the returned result. This is useful when using PostgreSQL extensions to collect
+additional metrics.
 
-The example below has two queries are specified, with the following parameters:
+> [!TIP]
+> Please also check the more generic [sql input plugin][inputs_sql].
 
-* The SQL query itself
-* The minimum PostgreSQL version supported (the numeric display visible in pg_settings)
-* A boolean to define if the query has to be run against some specific database (defined in the `databases` variable of the plugin section)
-* The name of the measurement
-* A list of the columns to be defined as tags
+⭐ Telegraf v0.12.0
+🏷️ datastore
+💻 all
+
+[postgres]: https://www.postgresql.org/
+[inputs_sql]: /plugins/inputs/sql/README.md
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `address` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+This plugin supports secrets from secret stores for the `address` option.
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -45,10 +47,6 @@ to use them.
   # to grab metrics for.
   #
   address = "host=localhost user=postgres sslmode=disable"
-
-  ## A list of databases to pull metrics about.
-  ## deprecated in 1.22.3; use the sqlquery option to specify database to use
-  # databases = ["app_production", "testing"]
 
   ## Whether to use prepared statements when connecting to the database.
   ## This should be set to false when connecting through a PgBouncer instance
@@ -93,7 +91,7 @@ to use them.
   #   timestamp string
   [[inputs.postgresql_extensible.query]]
     measurement="pg_stat_database"
-    sqlquery="SELECT * FROM pg_stat_database where datname"
+    sqlquery="SELECT * FROM pg_stat_database WHERE datname"
     min_version=901
     tagvalue=""
   [[inputs.postgresql_extensible.query]]
@@ -104,16 +102,14 @@ to use them.
 ```
 
 The system can be easily extended using homemade metrics collection tools or
-using postgresql extensions ([pg_stat_statements][1], [pg_proctab][2] or
-[powa][3])
+using the postgresql extensions [pg_stat_statements][pg_stat_statements],
+[pg_proctab][pg_proctab] or [powa][powa].
 
-[1]: http://www.postgresql.org/docs/current/static/pgstatstatements.html
+[pg_stat_statements]: http://www.postgresql.org/docs/current/static/pgstatstatements.html
+[pg_proctab]: https://github.com/markwkm/pg_proctab
+[powa]: http://dalibo.github.io/powa/
 
-[2]: https://github.com/markwkm/pg_proctab
-
-[3]: http://dalibo.github.io/powa/
-
-## Sample Queries
+### Sample Queries
 
 * telegraf.conf postgresql_extensible queries (assuming that you have configured
  correctly your connection)
@@ -135,8 +131,9 @@ using postgresql extensions ([pg_stat_statements][1], [pg_proctab][2] or
   withdbname=false
   tagvalue="db,username,state"
 [[inputs.postgresql_extensible.query]]
-  sqlquery="select setting as max_connections from pg_settings where \
-  name='max_connections'"
+  sqlquery="""\
+  select setting as max_connections from pg_settings where \
+  name='max_connections'"""
   version=801
   withdbname=false
   tagvalue=""
@@ -146,15 +143,17 @@ using postgresql extensions ([pg_stat_statements][1], [pg_proctab][2] or
   withdbname=false
   tagvalue=""
 [[inputs.postgresql_extensible.query]]
-  sqlquery="select setting as shared_buffers from pg_settings where \
-  name='shared_buffers'"
+  sqlquery="""\
+  select setting as shared_buffers from pg_settings where \
+  name='shared_buffers'"""
   version=801
   withdbname=false
   tagvalue=""
 [[inputs.postgresql_extensible.query]]
-  sqlquery="SELECT db, count( distinct blocking_pid ) AS num_blocking_sessions,\
+  sqlquery="""\
+  SELECT db, count( distinct blocking_pid ) AS num_blocking_sessions,\
   count( distinct blocked_pid) AS num_blocked_sessions FROM \
-  public.blocking_procs group by db"
+  public.blocking_procs group by db"""
   version=901
   withdbname=false
   tagvalue="db"
@@ -169,7 +168,7 @@ using postgresql extensions ([pg_stat_statements][1], [pg_proctab][2] or
   tagvalue="type,enabled"
 ```
 
-## Postgresql Side
+### Postgresql Side
 
 postgresql.conf :
 
@@ -192,7 +191,7 @@ create extension pg_proctab;
 * pg_stat_kcache is available on the postgresql.org yum repo
 * pg_proctab is available at : <https://github.com/markwkm/pg_proctab>
 
-## Views
+### Views
 
 * Blocking sessions
 

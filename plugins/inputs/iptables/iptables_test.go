@@ -16,7 +16,7 @@ func TestIptables_Gather(t *testing.T) {
 		chains []string
 		values []string
 		tags   []map[string]string
-		fields [][]map[string]interface{}
+		fields [][]map[string]any
 		err    error
 	}{
 		{ // 1 - no configured table => no results
@@ -43,8 +43,8 @@ func TestIptables_Gather(t *testing.T) {
 		                57     4520 RETURN     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0   /* foobar */
 		                `},
 			tags: []map[string]string{{"table": "filter", "chain": "INPUT", "target": "RETURN", "ruleid": "foobar"}},
-			fields: [][]map[string]interface{}{
-				{map[string]interface{}{"pkts": uint64(57), "bytes": uint64(4520)}},
+			fields: [][]map[string]any{
+				{map[string]any{"pkts": uint64(57), "bytes": uint64(4520)}},
 			},
 		},
 		{ // 4 - missing fields header => no results
@@ -102,10 +102,10 @@ func TestIptables_Gather(t *testing.T) {
 				{"table": "filter", "chain": "FORWARD", "target": "RETURN", "ruleid": "bar"},
 				{"table": "filter", "chain": "FORWARD", "target": "RETURN", "ruleid": "foobar"},
 			},
-			fields: [][]map[string]interface{}{
-				{map[string]interface{}{"pkts": uint64(200), "bytes": uint64(4520)}},
-				{map[string]interface{}{"pkts": uint64(300), "bytes": uint64(4520)}},
-				{map[string]interface{}{"pkts": uint64(500), "bytes": uint64(4520)}},
+			fields: [][]map[string]any{
+				{map[string]any{"pkts": uint64(200), "bytes": uint64(4520)}},
+				{map[string]any{"pkts": uint64(300), "bytes": uint64(4520)}},
+				{map[string]any{"pkts": uint64(500), "bytes": uint64(4520)}},
 			},
 		},
 		{ // 9 - comments are used as ruleid if any
@@ -120,8 +120,8 @@ func TestIptables_Gather(t *testing.T) {
 			tags: []map[string]string{
 				{"table": "filter", "chain": "INPUT", "target": "RETURN", "ruleid": "foobar"},
 			},
-			fields: [][]map[string]interface{}{
-				{map[string]interface{}{"pkts": uint64(57), "bytes": uint64(4520)}},
+			fields: [][]map[string]any{
+				{map[string]any{"pkts": uint64(57), "bytes": uint64(4520)}},
 			},
 		},
 		{ // 10 - allow trailing text
@@ -137,9 +137,9 @@ func TestIptables_Gather(t *testing.T) {
 				{"table": "mangle", "chain": "SHAPER", "target": "ACCEPT", "ruleid": "test"},
 				{"table": "mangle", "chain": "SHAPER", "target": "CLASSIFY", "ruleid": "test2"},
 			},
-			fields: [][]map[string]interface{}{
-				{map[string]interface{}{"pkts": uint64(0), "bytes": uint64(0)}},
-				{map[string]interface{}{"pkts": uint64(0), "bytes": uint64(0)}},
+			fields: [][]map[string]any{
+				{map[string]any{"pkts": uint64(0), "bytes": uint64(0)}},
+				{map[string]any{"pkts": uint64(0), "bytes": uint64(0)}},
 			},
 		},
 		{ // 11 - invalid pkts/bytes
@@ -151,8 +151,6 @@ func TestIptables_Gather(t *testing.T) {
 						a a ACCEPT all -- * * 1.3.5.7 0.0.0.0/0 /* test */
 						a a CLASSIFY all -- * * 1.3.5.7 0.0.0.0/0 /* test2 */ CLASSIFY set 1:4
 						`},
-			tags:   []map[string]string{},
-			fields: [][]map[string]interface{}{},
 		},
 		{ // 11 - all target and ports
 			table:  "all_recv",
@@ -165,8 +163,8 @@ func TestIptables_Gather(t *testing.T) {
 			tags: []map[string]string{
 				{"table": "all_recv", "chain": "accountfwd", "target": "all", "ruleid": "all_recv"},
 			},
-			fields: [][]map[string]interface{}{
-				{map[string]interface{}{"pkts": uint64(123), "bytes": uint64(456)}},
+			fields: [][]map[string]any{
+				{map[string]any{"pkts": uint64(123), "bytes": uint64(456)}},
 			},
 		},
 	}
@@ -177,7 +175,7 @@ func TestIptables_Gather(t *testing.T) {
 			ipt := &Iptables{
 				Table:  tt.table,
 				Chains: tt.chains,
-				lister: func(table, chain string) (string, error) {
+				lister: func(string, string) (string, error) {
 					if len(tt.values) > 0 {
 						v := tt.values[0]
 						tt.values = tt.values[1:]
@@ -241,7 +239,7 @@ func TestIptables_Gather_listerError(t *testing.T) {
 	ipt := &Iptables{
 		Table:  "nat",
 		Chains: []string{"foo", "bar"},
-		lister: func(table, chain string) (string, error) {
+		lister: func(string, string) (string, error) {
 			return "", errFoo
 		},
 	}

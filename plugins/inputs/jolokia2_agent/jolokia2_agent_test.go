@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/influxdata/toml"
 	"github.com/influxdata/toml/ast"
 	"github.com/stretchr/testify/require"
@@ -86,36 +85,36 @@ func TestScalarValues(t *testing.T) {
 
 	server := setupServer(response)
 	defer server.Close()
-	plugin := SetupPlugin(t, fmt.Sprintf(config, server.URL))
+	plugin := setupPlugin(t, fmt.Sprintf(config, server.URL))
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Gather(&acc))
 
-	acc.AssertContainsTaggedFields(t, "scalar_without_attribute", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "scalar_without_attribute", map[string]any{
 		"value": 123.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "scalar_with_attribute", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "scalar_with_attribute", map[string]any{
 		"biz": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "scalar_with_attribute_and_path", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "scalar_with_attribute_and_path", map[string]any{
 		"biz.baz": 789.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "scalar_with_key_pattern", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "scalar_with_key_pattern", map[string]any{
 		"value": 123.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 		"test":              "foo",
 	})
-	acc.AssertContainsTaggedFields(t, "scalar_with_key_pattern", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "scalar_with_key_pattern", map[string]any{
 		"value": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
@@ -165,47 +164,47 @@ func TestObjectValues(t *testing.T) {
 
 	server := setupServer(string(response))
 	defer server.Close()
-	plugin := SetupPlugin(t, fmt.Sprintf(config, server.URL))
+	plugin := setupPlugin(t, fmt.Sprintf(config, server.URL))
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Gather(&acc))
 
-	acc.AssertContainsTaggedFields(t, "object_without_attribute", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "object_without_attribute", map[string]any{
 		"biz": 123.0,
 		"baz": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "object_with_attribute", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "object_with_attribute", map[string]any{
 		"biz.fiz": 123.0,
 		"biz.faz": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "object_with_attribute_and_path", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "object_with_attribute_and_path", map[string]any{
 		"biz.baz.bing": 123.0,
 		"biz.baz.bang": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "object_with_branching_paths", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "object_with_branching_paths", map[string]any{
 		"foo.fiz.bing": 123.0,
 		"foo.faz.bang": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "object_with_key_pattern", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "object_with_key_pattern", map[string]any{
 		"fiz": 123.0,
 	}, map[string]string{
 		"test":              "foo",
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "object_with_key_pattern", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "object_with_key_pattern", map[string]any{
 		"biz": 456.0,
 	}, map[string]string{
 		"test":              "bar",
@@ -253,12 +252,12 @@ func TestStatusCodes(t *testing.T) {
 
 	server := setupServer(response)
 	defer server.Close()
-	plugin := SetupPlugin(t, fmt.Sprintf(config, server.URL))
+	plugin := setupPlugin(t, fmt.Sprintf(config, server.URL))
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Gather(&acc))
 
-	acc.AssertContainsTaggedFields(t, "ok", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "ok", map[string]any{
 		"value": 1.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
@@ -303,12 +302,12 @@ func TestTagRenaming(t *testing.T) {
 
 	server := setupServer(response)
 	defer server.Close()
-	plugin := SetupPlugin(t, fmt.Sprintf(config, server.URL))
+	plugin := setupPlugin(t, fmt.Sprintf(config, server.URL))
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Gather(&acc))
 
-	acc.AssertContainsTaggedFields(t, "default_tag_prefix", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "default_tag_prefix", map[string]any{
 		"value": 123.0,
 	}, map[string]string{
 		"DEFAULT_PREFIX_biz": "baz",
@@ -316,7 +315,7 @@ func TestTagRenaming(t *testing.T) {
 		"jolokia_agent_url":  server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "custom_tag_prefix", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "custom_tag_prefix", map[string]any{
 		"value": 123.0,
 	}, map[string]string{
 		"CUSTOM_PREFIX_biz": "baz",
@@ -396,31 +395,31 @@ func TestFieldRenaming(t *testing.T) {
 
 	server := setupServer(response)
 	defer server.Close()
-	plugin := SetupPlugin(t, fmt.Sprintf(config, server.URL))
+	plugin := setupPlugin(t, fmt.Sprintf(config, server.URL))
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Gather(&acc))
 
-	acc.AssertContainsTaggedFields(t, "default_field_modifiers", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "default_field_modifiers", map[string]any{
 		"DEFAULT_PREFIX_hello_DEFAULT_SEPARATOR_world": 123.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "custom_field_modifiers", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "custom_field_modifiers", map[string]any{
 		"CUSTOM_PREFIX_hello_CUSTOM_SEPARATOR_world": 123.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "field_prefix_substitution", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "field_prefix_substitution", map[string]any{
 		"biz_value": 123.0,
 		"baz_value": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "field_name_substitution", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "field_name_substitution", map[string]any{
 		"biz": 123.0,
 		"baz": 456.0,
 	}, map[string]string{
@@ -504,31 +503,31 @@ func TestMetricMbeanMatching(t *testing.T) {
 
 	server := setupServer(response)
 	defer server.Close()
-	plugin := SetupPlugin(t, fmt.Sprintf(config, server.URL))
+	plugin := setupPlugin(t, fmt.Sprintf(config, server.URL))
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Gather(&acc))
 
-	acc.AssertContainsTaggedFields(t, "mbean_name_and_object_keys", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "mbean_name_and_object_keys", map[string]any{
 		"value": 123.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "mbean_name_and_unordered_object_keys", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "mbean_name_and_unordered_object_keys", map[string]any{
 		"value": 123.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "mbean_name_and_attributes", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "mbean_name_and_attributes", map[string]any{
 		"foo": 123.0,
 		"bar": 456.0,
 	}, map[string]string{
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "mbean_name_and_attribute_with_paths", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "mbean_name_and_attribute_with_paths", map[string]any{
 		"flavor.chocolate":  123.0,
 		"flavor.strawberry": 456.0,
 	}, map[string]string{
@@ -597,12 +596,12 @@ func TestMetricCompaction(t *testing.T) {
 
 	server := setupServer(response)
 	defer server.Close()
-	plugin := SetupPlugin(t, fmt.Sprintf(config, server.URL))
+	plugin := setupPlugin(t, fmt.Sprintf(config, server.URL))
 
 	var acc testutil.Accumulator
 	require.NoError(t, plugin.Gather(&acc))
 
-	acc.AssertContainsTaggedFields(t, "compact_metric", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "compact_metric", map[string]any{
 		"value": 123.0,
 		"foo":   456.0,
 		"bar":   789.0,
@@ -611,7 +610,7 @@ func TestMetricCompaction(t *testing.T) {
 		"jolokia_agent_url": server.URL,
 	})
 
-	acc.AssertContainsTaggedFields(t, "compact_metric", map[string]interface{}{
+	acc.AssertContainsTaggedFields(t, "compact_metric", map[string]any{
 		"value": 999.0,
 	}, map[string]string{
 		"flavor":            "vanilla",
@@ -622,19 +621,28 @@ func TestMetricCompaction(t *testing.T) {
 func TestJolokia2_ClientAuthRequest(t *testing.T) {
 	var username string
 	var password string
-	var requests []map[string]interface{}
+	var requests []map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, password, _ = r.BasicAuth()
 
-		body, _ := io.ReadAll(r.Body)
-		require.NoError(t, json.Unmarshal(body, &requests))
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
+		if err := json.Unmarshal(body, &requests); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	plugin := SetupPlugin(t, fmt.Sprintf(`
+	plugin := setupPlugin(t, fmt.Sprintf(`
 		[jolokia2_agent]
 			urls = ["%s/jolokia"]
 			username = "sally"
@@ -649,29 +657,29 @@ func TestJolokia2_ClientAuthRequest(t *testing.T) {
 
 	require.EqualValuesf(t, "sally", username, "Expected to post with username %s, but was %s", "sally", username)
 	require.EqualValuesf(t, "seashore", password, "Expected to post with password %s, but was %s", "seashore", password)
-	require.NotZero(t, len(requests), "Expected to post a request body, but was empty.")
+	require.NotEmpty(t, requests, "Expected to post a request body, but was empty.")
 
 	request := requests[0]["mbean"]
 	require.EqualValuesf(t, "hello:foo=bar", request, "Expected to query mbean %s, but was %s", "hello:foo=bar", request)
 }
 
 func TestFillFields(t *testing.T) {
-	complexPoint := map[string]interface{}{"Value": []interface{}{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	complexPoint := map[string]any{"Value": []any{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}
-	scalarPoint := []interface{}{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	scalarPoint := []any{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
-	results := map[string]interface{}{}
+	results := map[string]any{}
 	common.NewPointBuilder(common.Metric{Name: "test", Mbean: "complex"}, []string{"this", "that"}, "/").FillFields("", complexPoint, results)
-	require.Equal(t, map[string]interface{}{}, results)
+	require.Equal(t, map[string]any{}, results)
 
-	results = map[string]interface{}{}
+	results = map[string]any{}
 	common.NewPointBuilder(common.Metric{Name: "test", Mbean: "scalar"}, []string{"this", "that"}, "/").FillFields("", scalarPoint, results)
-	require.Equal(t, map[string]interface{}{}, results)
+	require.Equal(t, map[string]any{}, results)
 }
 
 func TestIntegrationArtemis(t *testing.T) {
@@ -685,7 +693,7 @@ func TestIntegrationArtemis(t *testing.T) {
 		ExposedPorts: []string{"61616", "8161"},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("Artemis Console available at"),
-			wait.ForListeningPort(nat.Port("8161")),
+			wait.ForListeningPort("8161"),
 		),
 	}
 	require.NoError(t, container.Start(), "failed to start container")
@@ -713,10 +721,10 @@ func TestIntegrationArtemis(t *testing.T) {
 			"artemis",
 			map[string]string{
 				"jolokia_agent_url": endpoint,
-				"queue":             "ExpiryQueue",
+				"queue":             "$sys.mqtt.sessions",
 				"subcomponent":      "queues",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"AcknowledgeAttempts":             float64(0),
 				"Address":                         "ExpiryQueue",
 				"AutoDelete":                      false,
@@ -743,6 +751,65 @@ func TestIntegrationArtemis(t *testing.T) {
 				"GroupRebalance":                  false,
 				"GroupRebalancePauseDispatch":     false,
 				"ID":                              float64(0),
+				"InternalQueue":                   false,
+				"LastValue":                       false,
+				"LastValueKey":                    "",
+				"MaxConsumers":                    float64(0),
+				"MessageCount":                    float64(0),
+				"MessagesAcknowledged":            float64(0),
+				"MessagesAdded":                   float64(0),
+				"MessagesExpired":                 float64(0),
+				"MessagesKilled":                  float64(0),
+				"Name":                            "ExpiryQueue",
+				"Paused":                          false,
+				"PersistedPause":                  false,
+				"PersistentSize":                  float64(0),
+				"PreparedTransactionMessageCount": float64(0),
+				"PurgeOnNoConsumers":              false,
+				"RetroactiveResource":             false,
+				"RingSize":                        float64(0),
+				"RoutingType":                     "ANYCAST",
+				"ScheduledCount":                  float64(0),
+				"ScheduledSize":                   float64(0),
+				"Temporary":                       false,
+			},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"artemis",
+			map[string]string{
+				"jolokia_agent_url": endpoint,
+				"queue":             "ExpiryQueue",
+				"subcomponent":      "queues",
+			},
+			map[string]any{
+				"AcknowledgeAttempts":             float64(0),
+				"Address":                         "ExpiryQueue",
+				"AutoDelete":                      false,
+				"ConfigurationManaged":            false,
+				"ConsumerCount":                   float64(0),
+				"ConsumersBeforeDispatch":         float64(0),
+				"DeadLetterAddress":               "DLQ",
+				"DelayBeforeDispatch":             float64(0),
+				"DeliveringCount":                 float64(0),
+				"DeliveringSize":                  float64(0),
+				"Durable":                         false,
+				"DurableDeliveringCount":          float64(0),
+				"DurableDeliveringSize":           float64(0),
+				"DurableMessageCount":             float64(0),
+				"DurablePersistentSize":           float64(0),
+				"DurableScheduledCount":           float64(0),
+				"DurableScheduledSize":            float64(0),
+				"Enabled":                         true,
+				"Exclusive":                       true,
+				"ExpiryAddress":                   "ExpiryQueue",
+				"FirstMessageAsJSON":              "[{}]",
+				"GroupBuckets":                    float64(0),
+				"GroupCount":                      float64(0),
+				"GroupRebalance":                  false,
+				"GroupRebalancePauseDispatch":     false,
+				"ID":                              float64(0),
+				"InternalQueue":                   false,
 				"LastValue":                       false,
 				"MaxConsumers":                    float64(0),
 				"MessageCount":                    float64(0),
@@ -752,6 +819,7 @@ func TestIntegrationArtemis(t *testing.T) {
 				"MessagesKilled":                  float64(0),
 				"Name":                            "ExpiryQueue",
 				"Paused":                          false,
+				"PersistedPause":                  false,
 				"PersistentSize":                  float64(0),
 				"PreparedTransactionMessageCount": float64(0),
 				"PurgeOnNoConsumers":              false,
@@ -771,7 +839,7 @@ func TestIntegrationArtemis(t *testing.T) {
 				"queue":             "DLQ",
 				"subcomponent":      "queues",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"AcknowledgeAttempts":             float64(0),
 				"Address":                         "DLQ",
 				"AutoDelete":                      false,
@@ -798,6 +866,7 @@ func TestIntegrationArtemis(t *testing.T) {
 				"GroupRebalance":                  false,
 				"GroupRebalancePauseDispatch":     false,
 				"ID":                              float64(0),
+				"InternalQueue":                   false,
 				"LastValue":                       false,
 				"MaxConsumers":                    float64(0),
 				"MessageCount":                    float64(0),
@@ -807,6 +876,7 @@ func TestIntegrationArtemis(t *testing.T) {
 				"MessagesKilled":                  float64(0),
 				"Name":                            "DLQ",
 				"Paused":                          false,
+				"PersistedPause":                  false,
 				"PersistentSize":                  float64(0),
 				"PreparedTransactionMessageCount": float64(0),
 				"PurgeOnNoConsumers":              false,
@@ -830,13 +900,13 @@ func TestIntegrationArtemis(t *testing.T) {
 }
 
 func setupServer(resp string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, resp)
 	}))
 }
 
-func SetupPlugin(t *testing.T, conf string) telegraf.Input {
+func setupPlugin(t *testing.T, conf string) telegraf.Input {
 	table, err := toml.Parse([]byte(conf))
 	if err != nil {
 		t.Fatalf("Unable to parse config! %v", err)
@@ -846,7 +916,6 @@ func SetupPlugin(t *testing.T, conf string) telegraf.Input {
 		object := table.Fields[name]
 		if name == "jolokia2_agent" {
 			plugin := jolokia2_agent.JolokiaAgent{
-				Metrics:               []common.MetricConfig{},
 				DefaultFieldSeparator: ".",
 			}
 

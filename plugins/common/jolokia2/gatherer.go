@@ -2,6 +2,7 @@ package jolokia2
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -54,7 +55,7 @@ func (g *Gatherer) gatherResponses(responses []ReadResponse, tags map[string]str
 			points = make([]point, 0)
 		}
 
-		responsePoints, responseErrors := g.generatePoints(metric, responses)
+		responsePoints, responseErrors := generatePoints(metric, responses)
 		points = append(points, responsePoints...)
 		for _, err := range responseErrors {
 			acc.AddError(err)
@@ -71,9 +72,8 @@ func (g *Gatherer) gatherResponses(responses []ReadResponse, tags map[string]str
 	}
 }
 
-// generatePoints creates points for the supplied metric from the ReadResponse
-// objects returned by the Jolokia client.
-func (g *Gatherer) generatePoints(metric Metric, responses []ReadResponse) ([]point, []error) {
+// generatePoints creates points for the supplied metric from the ReadResponse objects returned by the Jolokia client.
+func generatePoints(metric Metric, responses []ReadResponse) ([]point, []error) {
 	points := make([]point, 0)
 	errors := make([]error, 0)
 
@@ -161,9 +161,7 @@ func compactPoints(points []point) []point {
 			}
 
 			keepPoint = false
-			for key, val := range sourcePoint.Fields {
-				compactPoint.Fields[key] = val
-			}
+			maps.Copy(compactPoint.Fields, sourcePoint.Fields)
 		}
 
 		if keepPoint {
@@ -200,7 +198,7 @@ func makeReadRequests(metrics []Metric) []ReadRequest {
 		if len(metric.Paths) == 0 {
 			requests = append(requests, ReadRequest{
 				Mbean:      metric.Mbean,
-				Attributes: []string{},
+				Attributes: make([]string, 0),
 			})
 		} else {
 			attributes := make(map[string][]string)

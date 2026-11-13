@@ -15,6 +15,7 @@ const (
 	LevelWarn  = 'W'
 	LevelInfo  = 'I'
 	LevelDebug = 'D'
+	LevelTrace = 'T'
 )
 
 type Entry struct {
@@ -49,44 +50,57 @@ func (l *CaptureLogger) loga(level byte, args ...any) {
 	l.print(Entry{level, l.Name, fmt.Sprint(args...)})
 }
 
-// Errorf logs an error message, patterned after log.Printf.
-func (l *CaptureLogger) Errorf(format string, args ...interface{}) {
+func (*CaptureLogger) Level() telegraf.LogLevel {
+	return telegraf.Trace
+}
+
+// AddAttribute is not supported by the test-logger
+func (*CaptureLogger) AddAttribute(string, any) {}
+
+func (l *CaptureLogger) Errorf(format string, args ...any) {
 	l.logf(LevelError, format, args...)
 }
 
-// Error logs an error message, patterned after log.Print.
-func (l *CaptureLogger) Error(args ...interface{}) {
+func (l *CaptureLogger) Error(args ...any) {
 	l.loga(LevelError, args...)
 }
 
-// Debugf logs a debug message, patterned after log.Printf.
-func (l *CaptureLogger) Debugf(format string, args ...interface{}) {
-	l.logf(LevelDebug, format, args...)
-}
-
-// Debug logs a debug message, patterned after log.Print.
-func (l *CaptureLogger) Debug(args ...interface{}) {
-	l.loga(LevelDebug, args...)
-}
-
-// Warnf logs a warning message, patterned after log.Printf.
-func (l *CaptureLogger) Warnf(format string, args ...interface{}) {
+func (l *CaptureLogger) Warnf(format string, args ...any) {
 	l.logf(LevelWarn, format, args...)
 }
 
-// Warn logs a warning message, patterned after log.Print.
-func (l *CaptureLogger) Warn(args ...interface{}) {
+func (l *CaptureLogger) Warn(args ...any) {
 	l.loga(LevelWarn, args...)
 }
 
-// Infof logs an information message, patterned after log.Printf.
-func (l *CaptureLogger) Infof(format string, args ...interface{}) {
+func (l *CaptureLogger) Infof(format string, args ...any) {
 	l.logf(LevelInfo, format, args...)
 }
 
-// Info logs an information message, patterned after log.Print.
-func (l *CaptureLogger) Info(args ...interface{}) {
+func (l *CaptureLogger) Info(args ...any) {
 	l.loga(LevelInfo, args...)
+}
+
+func (l *CaptureLogger) Debugf(format string, args ...any) {
+	l.logf(LevelDebug, format, args...)
+}
+
+func (l *CaptureLogger) Debug(args ...any) {
+	l.loga(LevelDebug, args...)
+}
+
+func (l *CaptureLogger) Tracef(format string, args ...any) {
+	l.logf(LevelTrace, format, args...)
+}
+
+func (l *CaptureLogger) Trace(args ...any) {
+	l.loga(LevelTrace, args...)
+}
+
+func (l *CaptureLogger) NMessages() int {
+	l.Lock()
+	defer l.Unlock()
+	return len(l.messages)
 }
 
 func (l *CaptureLogger) Messages() []Entry {

@@ -2,11 +2,12 @@ package mysql
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -29,7 +30,7 @@ func TestMysqlDefaultsToLocalIntegration(t *testing.T) {
 		ExposedPorts: []string{servicePort},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("/usr/sbin/mysqld: ready for connections").WithOccurrence(2),
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 		),
 	}
 
@@ -38,8 +39,10 @@ func TestMysqlDefaultsToLocalIntegration(t *testing.T) {
 
 	dsn := fmt.Sprintf("root@tcp(%s:%s)/", container.Address, container.Ports[servicePort])
 	s := config.NewSecret([]byte(dsn))
+	defer s.Destroy()
 	m := &Mysql{
 		Servers: []*config.Secret{&s},
+		Log:     &testutil.Logger{},
 	}
 	require.NoError(t, m.Init())
 
@@ -65,7 +68,7 @@ func TestMysqlMultipleInstancesIntegration(t *testing.T) {
 		ExposedPorts: []string{servicePort},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("/usr/sbin/mysqld: ready for connections").WithOccurrence(2),
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 		),
 	}
 
@@ -74,11 +77,13 @@ func TestMysqlMultipleInstancesIntegration(t *testing.T) {
 
 	dsn := fmt.Sprintf("root@tcp(%s:%s)/?tls=false", container.Address, container.Ports[servicePort])
 	s := config.NewSecret([]byte(dsn))
+	defer s.Destroy()
 	m := &Mysql{
 		Servers:          []*config.Secret{&s},
 		IntervalSlow:     config.Duration(30 * time.Second),
 		GatherGlobalVars: true,
 		MetricVersion:    2,
+		Log:              &testutil.Logger{},
 	}
 	require.NoError(t, m.Init())
 
@@ -93,6 +98,7 @@ func TestMysqlMultipleInstancesIntegration(t *testing.T) {
 	m2 := &Mysql{
 		Servers:       []*config.Secret{&s2},
 		MetricVersion: 2,
+		Log:           &testutil.Logger{},
 	}
 	require.NoError(t, m2.Init())
 
@@ -102,6 +108,83 @@ func TestMysqlMultipleInstancesIntegration(t *testing.T) {
 	require.True(t, acc2.HasMeasurement("mysql"))
 	// acc2 should not have global variables
 	require.False(t, acc2.HasMeasurement("mysql_variables"))
+}
+
+func TestPercona8Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	container := testutil.Container{
+		Image: "percona:8",
+		Env: map[string]string{
+			"MYSQL_ROOT_PASSWORD": "secret",
+		},
+		Cmd:          []string{"--userstat=ON"},
+		ExposedPorts: []string{servicePort},
+		WaitingFor: wait.ForAll(
+			wait.ForLog("/usr/sbin/mysqld: ready for connections").WithOccurrence(2),
+			wait.ForListeningPort(servicePort),
+		),
+	}
+	require.NoError(t, container.Start(), "failed to start container")
+	defer container.Terminate()
+
+	dsn := fmt.Sprintf("root:secret@tcp(%s:%s)/", container.Address, container.Ports[servicePort])
+	s := config.NewSecret([]byte(dsn))
+	defer s.Destroy()
+	plugin := &Mysql{
+		Servers:              []*config.Secret{&s},
+		GatherUserStatistics: true,
+		Log:                  &testutil.Logger{},
+	}
+	require.NoError(t, plugin.Init())
+
+	var acc testutil.Accumulator
+	require.NoError(t, plugin.Gather(&acc))
+	require.Empty(t, acc.Errors)
+	require.True(t, acc.HasMeasurement("mysql_user_stats"))
+	require.True(t, acc.HasFloatField("mysql_user_stats", "connected_time"))
+	require.True(t, acc.HasFloatField("mysql_user_stats", "cpu_time"))
+	require.True(t, acc.HasFloatField("mysql_user_stats", "busy_time"))
+}
+
+func TestGaleraIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	container := testutil.Container{
+		Image:        "bitnamilegacy/mariadb-galera",
+		Env:          map[string]string{"ALLOW_EMPTY_PASSWORD": "yes"},
+		ExposedPorts: []string{servicePort},
+		WaitingFor: wait.ForAll(
+			wait.ForLog("Synchronized with group, ready for connections"),
+			wait.ForListeningPort(servicePort),
+		),
+	}
+	require.NoError(t, container.Start(), "failed to start container")
+	defer container.Terminate()
+
+	dsn := fmt.Sprintf("root@tcp(%s:%s)/", container.Address, container.Ports[servicePort])
+	s := config.NewSecret([]byte(dsn))
+	defer s.Destroy()
+	plugin := &Mysql{
+		Servers: []*config.Secret{&s},
+		Log:     &testutil.Logger{},
+	}
+	require.NoError(t, plugin.Init())
+
+	var acc testutil.Accumulator
+	require.NoError(t, plugin.Gather(&acc))
+	require.Empty(t, acc.Errors)
+	require.True(t, acc.HasIntField("mysql", "wsrep_ready"))
+	for _, m := range acc.GetTelegrafMetrics() {
+		if v, found := m.GetField("wsrep_ready"); found {
+			require.EqualValues(t, 1, v, "invalid value for field wsrep_ready")
+			break
+		}
+	}
 }
 
 func TestMysqlGetDSNTag(t *testing.T) {
@@ -213,9 +296,118 @@ func TestMysqlDNSAddTimeout(t *testing.T) {
 				Servers: []*config.Secret{&s},
 			}
 			require.NoError(t, m.Init())
-			equal, err := m.Servers[0].EqualTo([]byte(tt.output))
+			require.Len(t, m.Servers, 1)
+			dsn, err := m.Servers[0].Get()
 			require.NoError(t, err)
-			require.True(t, equal)
+			defer dsn.Destroy()
+			require.Equal(t, tt.output, dsn.TemporaryString())
+		})
+	}
+}
+
+func TestMysqlTLSCustomization(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		errmsg   string
+	}{
+		{
+			name:     "custom only param",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=custom",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=5s&tls=custom-<id>",
+		},
+		{
+			name:     "custom start param",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=custom&timeout=20s",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=20s&tls=custom-<id>",
+		},
+		{
+			name:     "custom end param",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?timeout=20s&tls=custom",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=20s&tls=custom-<id>",
+		},
+		{
+			name:     "custom middle param",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?timeout=20s&tls=custom&foo=bar",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=20s&tls=custom-<id>&foo=bar",
+		},
+		{
+			name:     "non-custom param false",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=false",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=5s&tls=false",
+		},
+		{
+			name:     "non-custom param true",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=true",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=5s&tls=true",
+		},
+		{
+			name:     "non-custom param skip-verify",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=skip-verify",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=5s&tls=skip-verify",
+		},
+		{
+			name:     "non-custom param preferred",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=preferred",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?allowFallbackToPlaintext=true&timeout=5s&tls=preferred",
+		},
+		{
+			name:     "non-custom param customcfg",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=customcfg",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?tls=customcfg",
+			errmsg:   "invalid value / unknown config name: customcfg",
+		},
+		{
+			name:     "non-custom param custom-cfg",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=custom-cfg",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?tls=custom-cfg",
+			errmsg:   "invalid value / unknown config name: custom-cfg",
+		},
+		{
+			name:     "non-custom param custom-cfg and following",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?tls=custom-cfg&timeout=20s",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?tls=custom-cfg&timeout=20s",
+			errmsg:   "invalid value / unknown config name: custom-cfg",
+		},
+		{
+			name:     "non-custom param notls keyword",
+			input:    "root:passwd@tcp(192.168.1.1:3306)/?timeout=20s&notls=custom",
+			expected: "root:passwd@tcp(192.168.1.1:3306)/?timeout=20s&notls=custom",
+		},
+	}
+
+	customIDRe := regexp.MustCompile(`[\?&]tls=custom-([\w-]*)(?:$|&)`)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := config.NewSecret([]byte(test.input))
+			plugin := &Mysql{
+				Servers:            []*config.Secret{&s},
+				InsecureSkipVerify: true,
+			}
+			err := plugin.Init()
+			if test.errmsg != "" {
+				require.ErrorContains(t, err, test.errmsg)
+			} else {
+				require.NoError(t, err)
+			}
+
+			require.Len(t, plugin.Servers, 1)
+			rs, err := plugin.Servers[0].Get()
+			require.NoError(t, err)
+			defer rs.Destroy()
+
+			// Replace the `<id>` part with a potential actual ID
+			actual := rs.String()
+			expected := test.expected
+			if strings.Contains(expected, "<id>") {
+				matches := customIDRe.FindStringSubmatch(actual)
+				if len(matches) == 2 {
+					expected = strings.Replace(expected, "<id>", matches[1], 1)
+				}
+			}
+
+			require.Equal(t, expected, actual)
 		})
 	}
 }
@@ -237,7 +429,7 @@ func TestGatherGlobalVariables(t *testing.T) {
 	type fields []struct {
 		key         string
 		rawValue    string
-		parsedValue interface{}
+		parsedValue any
 	}
 	type tags map[string]string
 	testCases := []struct {

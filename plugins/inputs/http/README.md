@@ -1,25 +1,27 @@
 # HTTP Input Plugin
 
-The HTTP input plugin collects metrics from one or more HTTP(S) endpoints.  The
-endpoint should have metrics formatted in one of the supported [input data
-formats](../../../docs/DATA_FORMATS_INPUT.md).  Each data format has its own
-unique set of configuration options which can be added to the input
-configuration.
+This plugin collects metrics from one or more HTTP endpoints providing data in
+one of the supported [data formats][data_formats].
+
+⭐ Telegraf v1.6.0
+🏷️ applications, server
+💻 all
+
+[data_formats]: /docs/DATA_FORMATS_INPUT.md
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `username`, `password`
-and `token` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+This plugin supports secrets from secret stores for the `username`, `password`,
+`token`, `headers`, and `cookie_auth_headers` option.
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -57,17 +59,23 @@ to use them.
   # username = "username"
   # password = "pa$$word"
 
-  ## OAuth2 Client Credentials. The options 'client_id', 'client_secret', and 'token_url' are required to use OAuth2.
-  # client_id = "clientid"
-  # client_secret = "secret"
-  # token_url = "https://indentityprovider/oauth2/v1/token"
-  # scopes = ["urn:opc:idm:__myscopes__"]
+  ## Amount of time allowed to complete the HTTP request
+  # timeout = "5s"
 
-  ## HTTP Proxy support
+  ## HTTP connection settings
+  # idle_conn_timeout = "0s"
+  # max_idle_conn = 0
+  # max_idle_conn_per_host = 0
+  # response_timeout = "0s"
+
+  ## Use the local address for connecting, assigned by the OS by default
+  # local_address = ""
+
+  ## Optional proxy settings
   # use_system_proxy = false
   # http_proxy_url = ""
 
-  ## Optional TLS Config
+  ## Optional TLS settings
   ## Set to true/false to enforce TLS being enabled/disabled. If not set,
   ## enable TLS only if any of the other options are specified.
   # tls_enable =
@@ -77,10 +85,28 @@ to use them.
   # tls_cert = "/path/to/certfile"
   ## Used for TLS client certificate authentication
   # tls_key = "/path/to/keyfile"
+  ## Password for the key file if it is encrypted
+  # tls_key_pwd = ""
   ## Send the specified TLS server name via SNI
   # tls_server_name = "kubernetes.example.com"
+  ## Minimal TLS version to accept by the client
+  # tls_min_version = "TLS12"
+  ## List of ciphers to accept, by default all secure ciphers will be accepted
+  ## See https://pkg.go.dev/crypto/tls#pkg-constants for supported values.
+  ## Use "all", "secure" and "insecure" to add all support ciphers, secure
+  ## suites or insecure suites respectively.
+  # tls_cipher_suites = ["secure"]
+  ## Renegotiation method, "never", "once" or "freely"
+  # tls_renegotiation_method = "never"
   ## Use TLS but skip chain & host verification
   # insecure_skip_verify = false
+
+  ## OAuth2 Client Credentials. The options 'client_id', 'client_secret', and 'token_url' are required to use OAuth2.
+  # client_id = "clientid"
+  # client_secret = "secret"
+  # token_url = "https://indentityprovider/oauth2/v1/token"
+  # audience = ""
+  # scopes = ["urn:opc:idm:__myscopes__"]
 
   ## Optional Cookie authentication
   # cookie_auth_url = "https://localhost/authMe"
@@ -90,10 +116,7 @@ to use them.
   # cookie_auth_headers = { Content-Type = "application/json", X-MY-HEADER = "hello" }
   # cookie_auth_body = '{"username": "user", "password": "pa$$word", "authenticate": "me"}'
   ## cookie_auth_renewal not set or set to "0" will auth once and never renew the cookie
-  # cookie_auth_renewal = "5m"
-
-  ## Amount of time allowed to complete the HTTP request
-  # timeout = "5s"
+  # cookie_auth_renewal = "0s"
 
   ## List of success status codes
   # success_status_codes = [200]
@@ -121,7 +144,7 @@ by a colon (":").
 
 This example output was taken from [this instructional article][1].
 
-[1]: https://docs.influxdata.com/telegraf/v1.21/guides/using_http/
+[1]: https://docs.influxdata.com/telegraf/v1/configure_plugins/input_plugins/using_http/
 
 ```text
 citibike,station_id=4703 eightd_has_available_keys=false,is_installed=1,is_renting=1,is_returning=1,legacy_id="4703",num_bikes_available=6,num_bikes_disabled=2,num_docks_available=26,num_docks_disabled=0,num_ebikes_available=0,station_status="active" 1641505084000000000

@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,8 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
+	"github.com/influxdata/telegraf/internal/choice"
+	"github.com/influxdata/telegraf/plugins/common/sudo"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
@@ -30,24 +33,24 @@ var (
 	reV2ParseLine        = regexp.MustCompile(`^(?P<name>[^|]*)\|[^|]+\|(?P<status_code>[^|]*)\|(?P<entity_id>[^|]*)\|(?:(?P<description>[^|]+))?`)
 	reV2ParseDescription = regexp.MustCompile(`^(?P<analogValue>-?[0-9.]+)\s(?P<analogUnit>.*)|(?P<status>.+)|^$`)
 	reV2ParseUnit        = regexp.MustCompile(`^(?P<realAnalogUnit>[^,]+)(?:,\s*(?P<statusDesc>.*))?`)
+	dcmiPowerReading     = regexp.MustCompile(`^(?P<name>[^|]*)\:(?P<value>.* Watts)?`)
 )
 
-// Ipmi stores the configuration values for the ipmi_sensor input plugin
-type Ipmi struct {
-	Path          string
-	Privilege     string
-	HexKey        string `toml:"hex_key"`
-	Servers       []string
-	Timeout       config.Duration
-	MetricVersion int
-	UseSudo       bool
-	UseCache      bool
-	CachePath     string
-
-	Log telegraf.Logger `toml:"-"`
-}
-
 const cmd = "ipmitool"
+
+type Ipmi struct {
+	Path          string          `toml:"path"`
+	Privilege     string          `toml:"privilege"`
+	HexKey        string          `toml:"hex_key"`
+	Servers       []string        `toml:"servers"`
+	Sensors       []string        `toml:"sensors"`
+	Timeout       config.Duration `toml:"timeout"`
+	MetricVersion int             `toml:"metric_version"`
+	UseSudo       bool            `toml:"use_sudo"`
+	UseCache      bool            `toml:"use_cache"`
+	CachePath     string          `toml:"cache_path"`
+	Log           telegraf.Logger `toml:"-"`
+}
 
 func (*Ipmi) SampleConfig() string {
 	return sampleConfig
@@ -65,6 +68,12 @@ func (m *Ipmi) Init() error {
 	if m.CachePath == "" {
 		m.CachePath = os.TempDir()
 	}
+	if len(m.Sensors) == 0 {
+		m.Sensors = []string{"sdr"}
+	}
+	if err := choice.CheckSlice(m.Sensors, []string{"sdr", "chassis_power_status", "dcmi_power_reading"}); err != nil {
+		return err
+	}
 
 	// Check parameters
 	if m.Path == "" {
@@ -74,10 +83,9 @@ func (m *Ipmi) Init() error {
 	return nil
 }
 
-// Gather is the main execution function for the plugin
 func (m *Ipmi) Gather(acc telegraf.Accumulator) error {
 	if len(m.Path) == 0 {
-		return fmt.Errorf("ipmitool not found: verify that ipmitool is installed and that ipmitool is in your PATH")
+		return errors.New("ipmitool not found: verify that ipmitool is installed and that ipmitool is in your PATH")
 	}
 
 	if len(m.Servers) > 0 {
@@ -86,32 +94,47 @@ func (m *Ipmi) Gather(acc telegraf.Accumulator) error {
 			wg.Add(1)
 			go func(a telegraf.Accumulator, s string) {
 				defer wg.Done()
-				err := m.parse(a, s)
-				if err != nil {
-					a.AddError(err)
+				for _, sensor := range m.Sensors {
+					a.AddError(m.parse(a, s, sensor))
 				}
 			}(acc, server)
 		}
 		wg.Wait()
 	} else {
-		err := m.parse(acc, "")
-		if err != nil {
-			return err
+		for _, sensor := range m.Sensors {
+			err := m.parse(acc, "", sensor)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (m *Ipmi) parse(acc telegraf.Accumulator, server string) error {
+func (m *Ipmi) parse(acc telegraf.Accumulator, server, sensor string) error {
+	var command []string
+	switch sensor {
+	case "sdr":
+		command = append(command, "sdr")
+	case "chassis_power_status":
+		command = append(command, "chassis", "power", "status")
+	case "dcmi_power_reading":
+		command = append(command, "dcmi", "power", "reading")
+	default:
+		return fmt.Errorf("unknown sensor type %q", sensor)
+	}
+
 	opts := make([]string, 0)
 	hostname := ""
 	if server != "" {
-		conn := NewConnection(server, m.Privilege, m.HexKey)
-		hostname = conn.Hostname
+		conn := newConnection(server, m.Privilege, m.HexKey)
+		hostname = conn.hostname
 		opts = conn.options()
 	}
-	opts = append(opts, "sdr")
+
+	opts = append(opts, command...)
+
 	if m.UseCache {
 		cacheFile := filepath.Join(m.CachePath, server+"_ipmi_cache")
 		_, err := os.Stat(cacheFile)
@@ -123,7 +146,7 @@ func (m *Ipmi) parse(acc telegraf.Accumulator, server string) error {
 			if m.UseSudo {
 				// -n - avoid prompting the user for input of any kind
 				dumpOpts = append([]string{"-n", name}, dumpOpts...)
-				name = "sudo"
+				name = sudo.Binary()
 			}
 			cmd := execCommand(name, dumpOpts...)
 			out, err := internal.CombinedOutputTimeout(cmd, time.Duration(m.Timeout))
@@ -133,14 +156,14 @@ func (m *Ipmi) parse(acc telegraf.Accumulator, server string) error {
 		}
 		opts = append(opts, "-S", cacheFile)
 	}
-	if m.MetricVersion == 2 {
+	if m.MetricVersion == 2 && sensor == "sdr" {
 		opts = append(opts, "elist")
 	}
 	name := m.Path
 	if m.UseSudo {
 		// -n - avoid prompting the user for input of any kind
 		opts = append([]string{"-n", name}, opts...)
-		name = "sudo"
+		name = sudo.Binary()
 	}
 	cmd := execCommand(name, opts...)
 	out, err := internal.CombinedOutputTimeout(cmd, time.Duration(m.Timeout))
@@ -148,10 +171,77 @@ func (m *Ipmi) parse(acc telegraf.Accumulator, server string) error {
 	if err != nil {
 		return fmt.Errorf("failed to run command %q: %w - %s", strings.Join(sanitizeIPMICmd(cmd.Args), " "), err, string(out))
 	}
-	if m.MetricVersion == 2 {
-		return m.parseV2(acc, hostname, out, timestamp)
+
+	switch sensor {
+	case "sdr":
+		if m.MetricVersion == 2 {
+			return m.parseV2(acc, hostname, out, timestamp)
+		}
+		return m.parseV1(acc, hostname, out, timestamp)
+	case "chassis_power_status":
+		return parseChassisPowerStatus(acc, hostname, out, timestamp)
+	case "dcmi_power_reading":
+		return m.parseDCMIPowerReading(acc, hostname, out, timestamp)
 	}
-	return m.parseV1(acc, hostname, out, timestamp)
+
+	return fmt.Errorf("unknown sensor type %q", sensor)
+}
+
+func parseChassisPowerStatus(acc telegraf.Accumulator, hostname string, cmdOut []byte, measuredAt time.Time) error {
+	// each line will look something like
+	// Chassis Power is on
+	// Chassis Power is off
+	scanner := bufio.NewScanner(bytes.NewReader(cmdOut))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Chassis Power is on") {
+			acc.AddFields("ipmi_sensor", map[string]any{"value": 1}, map[string]string{"name": "chassis_power_status", "server": hostname}, measuredAt)
+		} else if strings.Contains(line, "Chassis Power is off") {
+			acc.AddFields("ipmi_sensor", map[string]any{"value": 0}, map[string]string{"name": "chassis_power_status", "server": hostname}, measuredAt)
+		}
+	}
+
+	return scanner.Err()
+}
+
+func (m *Ipmi) parseDCMIPowerReading(acc telegraf.Accumulator, hostname string, cmdOut []byte, measuredAt time.Time) error {
+	// each line will look something like
+	// Current Power Reading : 0.000
+	scanner := bufio.NewScanner(bytes.NewReader(cmdOut))
+	for scanner.Scan() {
+		ipmiFields := m.extractFieldsFromRegex(dcmiPowerReading, scanner.Text())
+		if len(ipmiFields) != 2 {
+			continue
+		}
+
+		tags := map[string]string{
+			"name": transform(ipmiFields["name"]),
+		}
+
+		// tag the server is we have one
+		if hostname != "" {
+			tags["server"] = hostname
+		}
+
+		fields := make(map[string]any)
+		valunit := strings.Split(ipmiFields["value"], " ")
+		if len(valunit) != 2 {
+			continue
+		}
+
+		var err error
+		fields["value"], err = aToFloat(valunit[0])
+		if err != nil {
+			continue
+		}
+		if len(valunit) > 1 {
+			tags["unit"] = transform(valunit[1])
+		}
+
+		acc.AddFields("ipmi_sensor", fields, tags, measuredAt)
+	}
+
+	return scanner.Err()
 }
 
 func (m *Ipmi) parseV1(acc telegraf.Accumulator, hostname string, cmdOut []byte, measuredAt time.Time) error {
@@ -173,7 +263,7 @@ func (m *Ipmi) parseV1(acc telegraf.Accumulator, hostname string, cmdOut []byte,
 			tags["server"] = hostname
 		}
 
-		fields := make(map[string]interface{})
+		fields := make(map[string]any)
 		if strings.EqualFold("ok", trim(ipmiFields["status_code"])) {
 			fields["status"] = 1
 		} else {
@@ -233,7 +323,7 @@ func (m *Ipmi) parseV2(acc telegraf.Accumulator, hostname string, cmdOut []byte,
 		}
 		tags["entity_id"] = transform(ipmiFields["entity_id"])
 		tags["status_code"] = trim(ipmiFields["status_code"])
-		fields := make(map[string]interface{})
+		fields := make(map[string]any)
 		descriptionResults := m.extractFieldsFromRegex(reV2ParseDescription, trim(ipmiFields["description"]))
 		// This is an analog value with a unit
 		if descriptionResults["analogValue"] != "" && len(descriptionResults["analogUnit"]) >= 1 {

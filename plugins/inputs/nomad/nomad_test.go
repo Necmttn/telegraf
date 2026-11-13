@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestNomadStats(t *testing.T) {
@@ -21,12 +23,12 @@ func TestNomadStats(t *testing.T) {
 		{
 			name: "Metrics",
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"nomad.nomad.rpc.query",
 					map[string]string{
 						"host": "node1",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"count": int(7),
 						"max":   float64(1),
 						"min":   float64(1),
@@ -38,7 +40,7 @@ func TestNomadStats(t *testing.T) {
 					time.Unix(1636843140, 0),
 					1,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"nomad.client.allocated.cpu",
 					map[string]string{
 						"node_scheduling_eligibility": "eligible",
@@ -48,18 +50,18 @@ func TestNomadStats(t *testing.T) {
 						"node_class":                  "none",
 						"node_status":                 "ready",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value": float32(500),
 					},
 					time.Unix(1636843140, 0),
 					2,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"nomad.memberlist.gossip",
 					map[string]string{
 						"host": "node1",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"count":  int(20),
 						"max":    float64(0.03747599944472313),
 						"mean":   float64(0.013159099989570678),
@@ -80,10 +82,19 @@ func TestNomadStats(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.RequestURI == "/v1/metrics" {
+					responseKeyMetrics, err := os.ReadFile("testdata/response_key_metrics.json")
+					if err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+						return
+					}
+
+					if _, err = fmt.Fprintln(w, string(responseKeyMetrics)); err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+						return
+					}
 					w.WriteHeader(http.StatusOK)
-					responseKeyMetrics, _ := os.ReadFile("testdata/response_key_metrics.json")
-					_, err := fmt.Fprintln(w, string(responseKeyMetrics))
-					require.NoError(t, err)
 				}
 			}))
 			defer ts.Close()

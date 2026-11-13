@@ -60,11 +60,11 @@ func (*Zabbix) SampleConfig() string {
 // Connect does nothing, Write() would initiate connection in each call.
 // Checking if Zabbix server is alive in this step does not allow Telegraf
 // to start if there is a temporal connection problem with the server.
-func (z *Zabbix) Connect() error {
+func (*Zabbix) Connect() error {
 	return nil
 }
 
-// Init initilizes LLD and autoregister maps. Copy config values to them. Configure Logger.
+// Init initializes LLD and autoregister maps. Copy config values to them. Configure Logger.
 func (z *Zabbix) Init() error {
 	// Add port to address if not present
 	if _, _, err := net.SplitHostPort(z.Address); err != nil {
@@ -87,7 +87,7 @@ func (z *Zabbix) Init() error {
 	return nil
 }
 
-func (z *Zabbix) Close() error {
+func (*Zabbix) Close() error {
 	return nil
 }
 
@@ -180,7 +180,7 @@ func (z Zabbix) processMetric(metric telegraf.Metric) []*zabbix.Metric {
 }
 
 // buildZabbixMetric builds a Zabbix metric from a Telegraf metric, for one particular value.
-func (z Zabbix) buildZabbixMetric(metric telegraf.Metric, fieldName string, value interface{}) (*zabbix.Metric, error) {
+func (z Zabbix) buildZabbixMetric(metric telegraf.Metric, fieldName string, value any) (*zabbix.Metric, error) {
 	hostname, err := getHostname(z.HostTag, metric)
 	if err != nil {
 		return nil, fmt.Errorf("error getting hostname: %w", err)

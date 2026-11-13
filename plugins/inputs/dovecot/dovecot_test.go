@@ -3,7 +3,6 @@ package dovecot
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"net"
 	"net/textproto"
@@ -12,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -24,7 +22,7 @@ func TestDovecotIntegration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"reset_timestamp":        time.Unix(1453969886, 0),
 		"last_update":            time.Unix(1454603963, 39864),
 		"num_logins":             int64(7503897),
@@ -59,25 +57,38 @@ func TestDovecotIntegration(t *testing.T) {
 		defer close(waitCh)
 
 		la, err := net.ResolveUnixAddr("unix", addr)
-		require.NoError(t, err)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 
 		l, err := net.ListenUnix("unix", la)
-		require.NoError(t, err)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 		defer l.Close()
 		defer os.Remove(addr)
 
 		waitCh <- 0
 		conn, err := l.Accept()
-		require.NoError(t, err)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 		defer conn.Close()
 
 		readertp := textproto.NewReader(bufio.NewReader(conn))
-		_, err = readertp.ReadLine()
-		require.NoError(t, err)
+		if _, err = readertp.ReadLine(); err != nil {
+			t.Error(err)
+			return
+		}
 
 		buf := bytes.NewBufferString(sampleGlobal)
-		_, err = io.Copy(conn, buf)
-		require.NoError(t, err)
+		if _, err = io.Copy(conn, buf); err != nil {
+			t.Error(err)
+			return
+		}
 	}()
 
 	// Wait for server to start
@@ -94,31 +105,25 @@ func TestDovecotIntegration(t *testing.T) {
 	tags = map[string]string{"server": "dovecot.test", "type": "global"}
 	buf := bytes.NewBufferString(sampleGlobal)
 
-	err = gatherStats(buf, &acc, "dovecot.test", "global")
-	require.NoError(t, err)
-
+	gatherStats(buf, &acc, "dovecot.test", "global")
 	acc.AssertContainsTaggedFields(t, "dovecot", fields, tags)
 
 	// Test type=domain
 	tags = map[string]string{"server": "dovecot.test", "type": "domain", "domain": "domain.test"}
 	buf = bytes.NewBufferString(sampleDomain)
 
-	err = gatherStats(buf, &acc, "dovecot.test", "domain")
-	require.NoError(t, err)
-
+	gatherStats(buf, &acc, "dovecot.test", "domain")
 	acc.AssertContainsTaggedFields(t, "dovecot", fields, tags)
 
 	// Test type=ip
 	tags = map[string]string{"server": "dovecot.test", "type": "ip", "ip": "192.168.0.100"}
 	buf = bytes.NewBufferString(sampleIP)
 
-	err = gatherStats(buf, &acc, "dovecot.test", "ip")
-	require.NoError(t, err)
-
+	gatherStats(buf, &acc, "dovecot.test", "ip")
 	acc.AssertContainsTaggedFields(t, "dovecot", fields, tags)
 
 	// Test type=user
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"reset_timestamp":  time.Unix(1453969886, 0),
 		"last_update":      time.Unix(1454603963, 39864),
 		"num_logins":       int64(7503897),
@@ -146,9 +151,7 @@ func TestDovecotIntegration(t *testing.T) {
 	tags = map[string]string{"server": "dovecot.test", "type": "user", "user": "user.1@domain.test"}
 	buf = bytes.NewBufferString(sampleUser)
 
-	err = gatherStats(buf, &acc, "dovecot.test", "user")
-	require.NoError(t, err)
-
+	gatherStats(buf, &acc, "dovecot.test", "user")
 	acc.AssertContainsTaggedFields(t, "dovecot", fields, tags)
 }
 
@@ -190,24 +193,23 @@ func TestDovecotContainerIntegration(t *testing.T) {
 
 	servicePort := "24242"
 	container := testutil.Container{
-		Image:        "dovecot/dovecot",
+		Image:        "dovecot/dovecot:2.3-latest",
 		ExposedPorts: []string{servicePort},
 		Files: map[string]string{
 			"/etc/dovecot/dovecot.conf": testdata,
 		},
 		WaitingFor: wait.ForAll(
 			wait.ForLog("starting up for imap"),
-			wait.ForListeningPort(nat.Port(servicePort)),
+			wait.ForListeningPort(servicePort),
 		),
 	}
+	require.NoError(t, container.Start(), "failed to start container")
 	defer container.Terminate()
 
-	err = container.Start()
-	require.NoError(t, err, "failed to start container")
-
-	d := &Dovecot{Servers: []string{
-		fmt.Sprintf("%s:%s", container.Address, container.Ports[servicePort]),
-	}, Type: "global"}
+	d := &Dovecot{
+		Servers: []string{container.Address + ":" + container.Ports[servicePort]},
+		Type:    "global",
+	}
 
 	var acc testutil.Accumulator
 	require.NoError(t, d.Gather(&acc))

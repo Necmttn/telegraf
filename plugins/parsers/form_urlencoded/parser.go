@@ -2,7 +2,8 @@ package form_urlencoded
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
+	"maps"
 	"net/url"
 	"strconv"
 	"time"
@@ -12,13 +13,27 @@ import (
 	"github.com/influxdata/telegraf/plugins/parsers"
 )
 
-var ErrNoMetric = fmt.Errorf("no metric in line")
+var ErrNoMetric = errors.New("no metric in line")
 
 // Parser decodes "application/x-www-form-urlencoded" data into metrics
 type Parser struct {
 	MetricName  string            `toml:"-"`
 	TagKeys     []string          `toml:"form_urlencoded_tag_keys"`
 	DefaultTags map[string]string `toml:"-"`
+
+	timeFunc func() time.Time
+}
+
+func (p *Parser) Init() error {
+	if p.timeFunc == nil {
+		p.timeFunc = time.Now
+	}
+
+	return nil
+}
+
+func (p *Parser) SetTimeFunc(fn func() time.Time) {
+	p.timeFunc = fn
 }
 
 // Parse converts a slice of bytes in "application/x-www-form-urlencoded" format into metrics
@@ -34,13 +49,11 @@ func (p Parser) Parse(buf []byte) ([]telegraf.Metric, error) {
 	}
 
 	tags := p.extractTags(values)
-	fields := p.parseFields(values)
+	fields := parseFields(values)
 
-	for key, value := range p.DefaultTags {
-		tags[key] = value
-	}
+	maps.Copy(tags, p.DefaultTags)
 
-	m := metric.New(p.MetricName, tags, fields, time.Now().UTC())
+	m := metric.New(p.MetricName, tags, fields, p.timeFunc())
 
 	return []telegraf.Metric{m}, nil
 }
@@ -80,8 +93,8 @@ func (p Parser) extractTags(values url.Values) map[string]string {
 	return tags
 }
 
-func (p Parser) parseFields(values url.Values) map[string]interface{} {
-	fields := make(map[string]interface{})
+func parseFields(values url.Values) map[string]any {
+	fields := make(map[string]any)
 
 	for key, value := range values {
 		if len(key) == 0 || len(value) == 0 {

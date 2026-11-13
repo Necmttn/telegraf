@@ -33,7 +33,7 @@ func (d FieldDict) String() string {
 	return buf.String()
 }
 
-func (d FieldDict) Type() string {
+func (FieldDict) Type() string {
 	return "Fields"
 }
 
@@ -49,12 +49,12 @@ func (d FieldDict) Truth() starlark.Bool {
 	return len(d.metric.FieldList()) != 0
 }
 
-func (d FieldDict) Hash() (uint32, error) {
+func (FieldDict) Hash() (uint32, error) {
 	return 0, errors.New("not hashable")
 }
 
 // AttrNames implements the starlark.HasAttrs interface.
-func (d FieldDict) AttrNames() []string {
+func (FieldDict) AttrNames() []string {
 	return builtinAttrNames(FieldDictMethods)
 }
 
@@ -97,7 +97,7 @@ func (d FieldDict) Get(key starlark.Value) (v starlark.Value, found bool, err er
 // using x[k]=v syntax, like a dictionary.
 func (d FieldDict) SetKey(k, v starlark.Value) error {
 	if d.fieldIterCount > 0 {
-		return fmt.Errorf("cannot insert during iteration")
+		return errors.New("cannot insert during iteration")
 	}
 
 	key, ok := k.(starlark.String)
@@ -131,7 +131,7 @@ func (d FieldDict) Items() []starlark.Tuple {
 
 func (d FieldDict) Clear() error {
 	if d.fieldIterCount > 0 {
-		return fmt.Errorf("cannot delete during iteration")
+		return errors.New("cannot delete during iteration")
 	}
 
 	keys := make([]string, 0, len(d.metric.FieldList()))
@@ -147,7 +147,7 @@ func (d FieldDict) Clear() error {
 
 func (d FieldDict) PopItem() (starlark.Value, error) {
 	if d.fieldIterCount > 0 {
-		return nil, fmt.Errorf("cannot delete during iteration")
+		return nil, errors.New("cannot delete during iteration")
 	}
 
 	if len(d.metric.FieldList()) == 0 {
@@ -163,7 +163,7 @@ func (d FieldDict) PopItem() (starlark.Value, error) {
 	sk := starlark.String(k)
 	sv, err := asStarlarkValue(v)
 	if err != nil {
-		return nil, fmt.Errorf("could not convert to starlark value")
+		return nil, errors.New("could not convert to starlark value")
 	}
 
 	return starlark.Tuple{sk, sv}, nil
@@ -171,7 +171,7 @@ func (d FieldDict) PopItem() (starlark.Value, error) {
 
 func (d FieldDict) Delete(k starlark.Value) (v starlark.Value, found bool, err error) {
 	if d.fieldIterCount > 0 {
-		return nil, false, fmt.Errorf("cannot delete during iteration")
+		return nil, false, errors.New("cannot delete during iteration")
 	}
 
 	if key, ok := k.(starlark.String); ok {
@@ -217,13 +217,13 @@ func (i *FieldIterator) Done() {
 }
 
 // AsStarlarkValue converts a field value to a starlark.Value.
-func asStarlarkValue(value interface{}) (starlark.Value, error) {
+func asStarlarkValue(value any) (starlark.Value, error) {
 	v := reflect.ValueOf(value)
 	switch v.Kind() {
 	case reflect.Slice:
 		length := v.Len()
 		array := make([]starlark.Value, 0, length)
-		for i := 0; i < length; i++ {
+		for i := range length {
 			sVal, err := asStarlarkValue(v.Index(i).Interface())
 			if err != nil {
 				return starlark.None, err
@@ -260,18 +260,18 @@ func asStarlarkValue(value interface{}) (starlark.Value, error) {
 		return starlark.Bool(v.Bool()), nil
 	}
 
-	return starlark.None, errors.New("invalid type")
+	return nil, fmt.Errorf("invalid type %T", value)
 }
 
 // AsGoValue converts a starlark.Value to a field value.
-func asGoValue(value interface{}) (interface{}, error) {
+func asGoValue(value any) (any, error) {
 	switch v := value.(type) {
 	case starlark.Float:
 		return float64(v), nil
 	case starlark.Int:
 		n, ok := v.Int64()
 		if !ok {
-			return nil, errors.New("cannot represent integer as int64")
+			return nil, fmt.Errorf("cannot represent integer %v as int64", v)
 		}
 		return n, nil
 	case starlark.String:
@@ -280,28 +280,31 @@ func asGoValue(value interface{}) (interface{}, error) {
 		return bool(v), nil
 	}
 
-	return nil, errors.New("invalid starlark type")
+	return nil, fmt.Errorf("invalid starlark type %T", value)
 }
 
 // ToFields converts a starlark.Value to a map of values.
-func toFields(value starlark.Value) (map[string]interface{}, error) {
+func toFields(value starlark.Value) (map[string]any, error) {
 	if value == nil {
 		return nil, nil
 	}
-	items, err := items(value, "The type %T is unsupported as type of collection of fields")
+	items, err := items(value, "type %T is unsupported as type of collection of fields")
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]interface{}, len(items))
+	result := make(map[string]any, len(items))
 	for _, item := range items {
-		key, err := toString(item[0], "The type %T is unsupported as type of key for fields")
-		if err != nil {
-			return nil, err
+		skey, ok := item[0].(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("type %T is unsupported as type of key for fields", item[0])
 		}
+		key := skey.GoString()
+
 		value, err := asGoValue(item[1])
 		if err != nil {
 			return nil, err
 		}
+
 		result[key] = value
 	}
 	return result, nil

@@ -14,18 +14,23 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	tlsint "github.com/influxdata/telegraf/plugins/common/tls"
+	"github.com/influxdata/telegraf/internal"
+	common_tls "github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
+var once sync.Once
+
 // defaultMaxBodySize is the default maximum request body size, in bytes.
 // if the request body is over this size, we will return an HTTP 413 error.
-// 500 MB
-const defaultMaxBodySize = 500 * 1024 * 1024
-const defaultMaxUndeliveredMessages = 1000
+const (
+	// 500 MB
+	defaultMaxBodySize            = 500 * 1024 * 1024
+	defaultMaxUndeliveredMessages = 1000
+)
 
 type PubSubPush struct {
 	ServiceAddress string
@@ -39,7 +44,7 @@ type PubSubPush struct {
 
 	MaxUndeliveredMessages int `toml:"max_undelivered_messages"`
 
-	tlsint.ServerConfig
+	common_tls.ServerConfig
 	telegraf.Parser
 
 	server *http.Server
@@ -53,24 +58,20 @@ type PubSubPush struct {
 	sem         chan struct{}
 }
 
-// Message defines the structure of a Google Pub/Sub message.
-type Message struct {
+// message defines the structure of a Google Pub/Sub message.
+type message struct {
 	Atts map[string]string `json:"attributes"`
 	Data string            `json:"data"` // Data is base64 encoded data
 }
 
-// Payload is the received Google Pub/Sub data. (https://cloud.google.com/pubsub/docs/push)
-type Payload struct {
-	Msg          Message `json:"message"`
+// payload is the received Google Pub/Sub data. (https://cloud.google.com/pubsub/docs/push)
+type payload struct {
+	Msg          message `json:"message"`
 	Subscription string  `json:"subscription"`
 }
 
 func (*PubSubPush) SampleConfig() string {
 	return sampleConfig
-}
-
-func (p *PubSubPush) Gather(_ telegraf.Accumulator) error {
-	return nil
 }
 
 func (p *PubSubPush) SetParser(parser telegraf.Parser) {
@@ -109,15 +110,9 @@ func (p *PubSubPush) Start(acc telegraf.Accumulator) error {
 	p.undelivered = make(map[telegraf.TrackingID]chan bool)
 	p.mu = &sync.Mutex{}
 
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		p.receiveDelivered()
-	}()
+	p.wg.Go(p.receiveDelivered)
 
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
+	p.wg.Go(func() {
 		if tlsConf != nil {
 			if err := p.server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 				p.Log.Errorf("listening and serving TLS failed: %v", err)
@@ -127,8 +122,12 @@ func (p *PubSubPush) Start(acc telegraf.Accumulator) error {
 				p.Log.Errorf("listening and serving TLS failed: %v", err)
 			}
 		}
-	}()
+	})
 
+	return nil
+}
+
+func (*PubSubPush) Gather(telegraf.Accumulator) error {
 	return nil
 }
 
@@ -141,9 +140,9 @@ func (p *PubSubPush) Stop() {
 
 func (p *PubSubPush) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	if req.URL.Path == p.Path {
-		p.AuthenticateIfSet(p.serveWrite, res, req)
+		p.authenticateIfSet(p.serveWrite, res, req)
 	} else {
-		p.AuthenticateIfSet(http.NotFound, res, req)
+		p.authenticateIfSet(http.NotFound, res, req)
 	}
 }
 
@@ -177,7 +176,7 @@ func (p *PubSubPush) serveWrite(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	var payload Payload
+	var payload payload
 	if err = json.Unmarshal(bytes, &payload); err != nil {
 		p.Log.Errorf("Error decoding payload %s", err.Error())
 		res.WriteHeader(http.StatusBadRequest)
@@ -196,6 +195,12 @@ func (p *PubSubPush) serveWrite(res http.ResponseWriter, req *http.Request) {
 		p.Log.Debug(err.Error())
 		res.WriteHeader(http.StatusBadRequest)
 		return
+	}
+
+	if len(metrics) == 0 {
+		once.Do(func() {
+			p.Log.Debug(internal.NoMetricsCreatedMsg)
+		})
 	}
 
 	if p.AddMeta {
@@ -253,7 +258,7 @@ func (p *PubSubPush) receiveDelivered() {
 	}
 }
 
-func (p *PubSubPush) AuthenticateIfSet(handler http.HandlerFunc, res http.ResponseWriter, req *http.Request) {
+func (p *PubSubPush) authenticateIfSet(handler http.HandlerFunc, res http.ResponseWriter, req *http.Request) {
 	if p.Token != "" {
 		if subtle.ConstantTimeCompare([]byte(req.FormValue("token")), []byte(p.Token)) != 1 {
 			http.Error(res, "Unauthorized.", http.StatusUnauthorized)

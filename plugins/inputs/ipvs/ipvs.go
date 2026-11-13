@@ -20,17 +20,15 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-// IPVS holds the state for this input plugin
 type IPVS struct {
+	Log    telegraf.Logger `toml:"-"`
 	handle *ipvs.Handle
-	Log    telegraf.Logger
 }
 
 func (*IPVS) SampleConfig() string {
 	return sampleConfig
 }
 
-// Gather gathers the stats
 func (i *IPVS) Gather(acc telegraf.Accumulator) error {
 	if i.handle == nil {
 		h, err := ipvs.New("") // TODO: make the namespace configurable
@@ -47,7 +45,7 @@ func (i *IPVS) Gather(acc telegraf.Accumulator) error {
 		return fmt.Errorf("failed to list IPVS services: %w", err)
 	}
 	for _, s := range services {
-		fields := map[string]interface{}{
+		fields := map[string]any{
 			"connections": s.Stats.Connections,
 			"pkts_in":     s.Stats.PacketsIn,
 			"pkts_out":    s.Stats.PacketsOut,
@@ -66,7 +64,7 @@ func (i *IPVS) Gather(acc telegraf.Accumulator) error {
 		}
 
 		for _, d := range destinations {
-			fields := map[string]interface{}{
+			fields := map[string]any{
 				"active_connections":   d.ActiveConnections,
 				"inactive_connections": d.InactiveConnections,
 				"connections":          d.Stats.Connections,

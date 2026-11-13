@@ -4,37 +4,45 @@ package mem
 import (
 	_ "embed"
 	"fmt"
+	"maps"
 	"runtime"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/plugins/common/psutil"
 	"github.com/influxdata/telegraf/plugins/inputs"
-	"github.com/influxdata/telegraf/plugins/inputs/system"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-type MemStats struct {
-	ps       system.PS
+type Mem struct {
+	CollectExtended bool            `toml:"collect_extended"`
+	Log             telegraf.Logger `toml:"-"`
+
+	ps       psutil.PS
 	platform string
 }
 
-func (*MemStats) SampleConfig() string {
+func (*Mem) SampleConfig() string {
 	return sampleConfig
 }
 
-func (ms *MemStats) Init() error {
+func (ms *Mem) Init() error {
 	ms.platform = runtime.GOOS
+	if ms.CollectExtended && !extendedMemorySupported {
+		ms.Log.Warn("collect_extended is not supported on this platform, ignoring")
+		ms.CollectExtended = false
+	}
 	return nil
 }
 
-func (ms *MemStats) Gather(acc telegraf.Accumulator) error {
+func (ms *Mem) Gather(acc telegraf.Accumulator) error {
 	vm, err := ms.ps.VMStat()
 	if err != nil {
 		return fmt.Errorf("error getting virtual memory info: %w", err)
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"total":             vm.Total,
 		"available":         vm.Available,
 		"used":              vm.Used,
@@ -50,7 +58,7 @@ func (ms *MemStats) Gather(acc telegraf.Accumulator) error {
 		fields["wired"] = vm.Wired
 	case "openbsd":
 		fields["active"] = vm.Active
-		fields["cached"] = vm.Cached
+		fields["cached"] = vm.Buffers
 		fields["free"] = vm.Free
 		fields["inactive"] = vm.Inactive
 		fields["wired"] = vm.Wired
@@ -94,14 +102,23 @@ func (ms *MemStats) Gather(acc telegraf.Accumulator) error {
 		fields["write_back"] = vm.WriteBack
 	}
 
+	if ms.CollectExtended {
+		extended, err := getExtendedMemoryFields()
+		if err != nil {
+			acc.AddError(fmt.Errorf("getting extended virtual memory info failed: %w", err))
+		} else {
+			maps.Copy(fields, extended)
+		}
+	}
+
 	acc.AddGauge("mem", fields, nil)
 
 	return nil
 }
 
 func init() {
-	ps := system.NewSystemPS()
+	ps := psutil.NewSystemPS()
 	inputs.Add("mem", func() telegraf.Input {
-		return &MemStats{ps: ps}
+		return &Mem{ps: ps}
 	})
 }

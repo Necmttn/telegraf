@@ -6,12 +6,13 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/influxdata/telegraf/plugins/common/sudo"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 type measurementResult struct {
 	tags   map[string]string
-	fields map[string]interface{}
+	fields map[string]any
 }
 
 func TestPfctlInvocation(t *testing.T) {
@@ -31,7 +32,7 @@ func TestPfctlInvocation(t *testing.T) {
 		// 1: with sudo
 		{
 			config: PF{UseSudo: true},
-			cmd:    "fakesudo",
+			cmd:    "fake" + sudo.Binary(),
 			args:   []string{"fakepfctl", "-s", "info"},
 		},
 	}
@@ -151,7 +152,7 @@ Counters
 `,
 			measurements: []measurementResult{
 				{
-					fields: map[string]interface{}{
+					fields: map[string]any{
 						"entries":        int64(2),
 						"searches":       int64(11325),
 						"inserts":        int64(5),
@@ -211,7 +212,7 @@ Counters
 `,
 			measurements: []measurementResult{
 				{
-					fields: map[string]interface{}{
+					fields: map[string]any{
 						"entries":        int64(649),
 						"searches":       int64(18421725761),
 						"inserts":        int64(156762508),

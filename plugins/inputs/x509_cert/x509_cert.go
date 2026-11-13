@@ -5,6 +5,9 @@ package x509_cert
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
@@ -21,14 +24,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pion/dtls/v2"
+	"github.com/pion/dtls/v3"
+	dtlsnet "github.com/pion/dtls/v3/pkg/net"
 	"golang.org/x/crypto/ocsp"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal/globpath"
 	"github.com/influxdata/telegraf/plugins/common/proxy"
-	commontls "github.com/influxdata/telegraf/plugins/common/tls"
+	common_tls "github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
@@ -38,14 +42,15 @@ var sampleConfig string
 // Regexp for handling file URIs containing a drive letter and leading slash
 var reDriveLetter = regexp.MustCompile(`^/([a-zA-Z]:/)`)
 
-// X509Cert holds the configuration of the plugin.
 type X509Cert struct {
 	Sources          []string        `toml:"sources"`
 	Timeout          config.Duration `toml:"timeout"`
 	ServerName       string          `toml:"server_name"`
+	Password         config.Secret   `toml:"password"`
 	ExcludeRootCerts bool            `toml:"exclude_root_certs"`
+	PadSerial        bool            `toml:"pad_serial_with_zeroes"`
 	Log              telegraf.Logger `toml:"-"`
-	commontls.ClientConfig
+	common_tls.ClientConfig
 	proxy.TCPProxy
 
 	tlsCfg    *tls.Config
@@ -91,10 +96,10 @@ func (c *X509Cert) Init() error {
 	return nil
 }
 
-// Gather adds metrics into the accumulator.
 func (c *X509Cert) Gather(acc telegraf.Accumulator) error {
 	now := time.Now()
 
+	// Handle all certificates in files and/or URLs
 	collectedUrls := append(c.locations, c.collectCertURLs()...)
 	for _, location := range collectedUrls {
 		certs, ocspresp, err := c.getCert(location, time.Duration(c.Timeout))
@@ -132,17 +137,16 @@ func (c *X509Cert) Gather(acc telegraf.Accumulator) error {
 
 		for i, cert := range certs {
 			fields := getFields(cert, now)
-			tags := getTags(cert, location.String())
+			tags := c.getTags(cert, location.String())
 
 			// Extract the verification result
-			err := results[i]
-			if err == nil {
+			if err := results[i]; err == nil {
 				tags["verification"] = "valid"
 				fields["verification_code"] = 0
 			} else {
 				tags["verification"] = "invalid"
 				fields["verification_code"] = 1
-				fields["verification_error"] = err.Error()
+				fields["verification_error"] = strings.Trim(strings.TrimSpace(err.Error()), ":")
 			}
 			// OCSPResponse only for leaf cert
 			if i == 0 && ocspresp != nil && len(*ocspresp) > 0 {
@@ -215,11 +219,13 @@ func (c *X509Cert) Gather(acc telegraf.Accumulator) error {
 func (c *X509Cert) processCertificate(certificate *x509.Certificate, opts x509.VerifyOptions) error {
 	chains, err := certificate.Verify(opts)
 	if err != nil {
-		c.Log.Debugf("Invalid certificate %v", certificate.SerialNumber.Text(16))
+		c.Log.Debugf("Invalid certificate %v", c.getSerialNumberString(certificate))
 		c.Log.Debugf("  cert DNS names:    %v", certificate.DNSNames)
 		c.Log.Debugf("  cert IP addresses: %v", certificate.IPAddresses)
 		c.Log.Debugf("  cert subject:      %v", certificate.Subject)
 		c.Log.Debugf("  cert issuer:       %v", certificate.Issuer)
+		c.Log.Debugf("  cert not before:   %v", certificate.NotBefore)
+		c.Log.Debugf("  cert not after:    %v", certificate.NotAfter)
 		c.Log.Debugf("  opts.DNSName:      %v", opts.DNSName)
 		c.Log.Debugf("  verify options:    %v", opts)
 		c.Log.Debugf("  verify error:      %v", err)
@@ -231,10 +237,12 @@ func (c *X509Cert) processCertificate(certificate *x509.Certificate, opts x509.V
 	// The only reliable way to distinguish root certificates from
 	// intermediates is the fact that root certificates are self-signed,
 	// i.e. you can verify the certificate with its own public key.
-	rootErr := certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
-	if rootErr == nil {
-		sig := hex.EncodeToString(certificate.Signature)
-		c.classification[sig] = "root"
+	if certificate.RawTBSCertificate != nil {
+		rootErr := certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
+		if rootErr == nil {
+			sig := hex.EncodeToString(certificate.Signature)
+			c.classification[sig] = "root"
+		}
 	}
 
 	// Identify intermediate certificates
@@ -260,11 +268,13 @@ func (c *X509Cert) processCertificate(certificate *x509.Certificate, opts x509.V
 			// The only reliable way to distinguish root certificates from
 			// intermediates is the fact that root certificates are self-signed,
 			// i.e. you can verify the certificate with its own public key.
-			rootErr := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature)
-			if rootErr != nil {
-				c.classification[sig] = "intermediate"
-			} else {
-				c.classification[sig] = "root"
+			if cert.RawTBSCertificate != nil {
+				rootErr := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature)
+				if rootErr != nil {
+					c.classification[sig] = "intermediate"
+				} else {
+					c.classification[sig] = "root"
+				}
 			}
 		}
 	}
@@ -274,7 +284,8 @@ func (c *X509Cert) processCertificate(certificate *x509.Certificate, opts x509.V
 
 func (c *X509Cert) sourcesToURLs() error {
 	for _, source := range c.Sources {
-		if strings.HasPrefix(source, "file://") || strings.HasPrefix(source, "/") {
+		switch {
+		case strings.HasPrefix(source, "file://") || strings.HasPrefix(source, "/"):
 			source = filepath.ToSlash(strings.TrimPrefix(source, "file://"))
 			// Removing leading slash in Windows path containing a drive-letter
 			// like "file:///C:/Windows/..."
@@ -284,7 +295,10 @@ func (c *X509Cert) sourcesToURLs() error {
 				return fmt.Errorf("could not compile glob %q: %w", source, err)
 			}
 			c.globpaths = append(c.globpaths, g)
-		} else {
+		case strings.HasPrefix(source, "wincertstore://"):
+			path := strings.TrimPrefix(source, "wincertstore://")
+			c.locations = append(c.locations, &url.URL{Scheme: "wincertstore", Path: path})
+		default:
 			if strings.Index(source, ":\\") == 1 {
 				source = "file://" + filepath.ToSlash(source)
 			}
@@ -316,19 +330,30 @@ func (c *X509Cert) getCert(u *url.URL, timeout time.Duration) ([]*x509.Certifica
 		}
 		defer ipConn.Close()
 
-		dtlsCfg := &dtls.Config{
-			InsecureSkipVerify: true,
-			Certificates:       c.tlsCfg.Certificates,
-			RootCAs:            c.tlsCfg.RootCAs,
-			ServerName:         c.serverName(u),
+		dtlsOpts := []dtls.ClientOption{
+			dtls.WithInsecureSkipVerify(true),
+			dtls.WithRootCAs(c.tlsCfg.RootCAs),
+			dtls.WithServerName(c.serverName(u)),
 		}
-		conn, err := dtls.Client(ipConn, dtlsCfg)
+		if len(c.tlsCfg.Certificates) > 0 {
+			dtlsOpts = append(dtlsOpts, dtls.WithCertificates(c.tlsCfg.Certificates...))
+		}
+
+		conn, err := dtls.ClientWithOptions(dtlsnet.PacketConnFromConn(ipConn), ipConn.RemoteAddr(), dtlsOpts...)
 		if err != nil {
 			return nil, nil, err
 		}
 		defer conn.Close()
 
-		rawCerts := conn.ConnectionState().PeerCertificates
+		if err := conn.Handshake(); err != nil {
+			return nil, nil, err
+		}
+
+		state, ok := conn.ConnectionState()
+		if !ok {
+			return nil, nil, errors.New("failed to get DTLS connection state after handshake")
+		}
+		rawCerts := state.PeerCertificates
 		var certs []*x509.Certificate
 		for _, rawCert := range rawCerts {
 			parsed, err := x509.ParseCertificate(rawCert)
@@ -384,7 +409,7 @@ func (c *X509Cert) getCert(u *url.URL, timeout time.Duration) ([]*x509.Certifica
 		for {
 			block, rest := pem.Decode(bytes.TrimSpace(content))
 			if block == nil {
-				return nil, nil, fmt.Errorf("failed to parse certificate PEM")
+				return nil, nil, errors.New("failed to parse certificate PEM")
 			}
 
 			if block.Type == "CERTIFICATE" {
@@ -445,32 +470,51 @@ func (c *X509Cert) getCert(u *url.URL, timeout time.Duration) ([]*x509.Certifica
 		ocspresp := tlsConn.ConnectionState().OCSPResponse
 
 		return certs, &ocspresp, nil
+	case "jks":
+		certs, err := c.processJKS(u.Path)
+		return certs, nil, err
+	case "pkcs12":
+		certs, err := c.processPKCS12(u.Path)
+		return certs, nil, err
+	case "wincertstore":
+		certs, err := c.processWinCertStore(u.Path)
+		return certs, nil, err
 	default:
 		return nil, nil, fmt.Errorf("unsupported scheme %q in location %s", u.Scheme, u.String())
 	}
 }
 
-func getFields(cert *x509.Certificate, now time.Time) map[string]interface{} {
+func getFields(cert *x509.Certificate, now time.Time) map[string]any {
 	age := int(now.Sub(cert.NotBefore).Seconds())
 	expiry := int(cert.NotAfter.Sub(now).Seconds())
 	startdate := cert.NotBefore.Unix()
 	enddate := cert.NotAfter.Unix()
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"age":       age,
 		"expiry":    expiry,
 		"startdate": startdate,
 		"enddate":   enddate,
 	}
 
+	// Determine the bit-length of the public key for algorithms that support it
+	switch v := cert.PublicKey.(type) {
+	case *rsa.PublicKey:
+		fields["public_key_length"] = 8 * uint64(v.Size())
+	case *ecdsa.PublicKey:
+		fields["public_key_length"] = uint64(v.Params().BitSize)
+	case ed25519.PublicKey:
+		fields["public_key_length"] = 8 * uint64(ed25519.PublicKeySize)
+	}
+
 	return fields
 }
 
-func getTags(cert *x509.Certificate, location string) map[string]string {
+func (c *X509Cert) getTags(cert *x509.Certificate, location string) map[string]string {
 	tags := map[string]string{
 		"source":               location,
 		"common_name":          cert.Subject.CommonName,
-		"serial_number":        cert.SerialNumber.Text(16),
+		"serial_number":        c.getSerialNumberString(cert),
 		"signature_algorithm":  cert.SignatureAlgorithm.String(),
 		"public_key_algorithm": cert.PublicKeyAlgorithm.String(),
 	}
@@ -511,7 +555,7 @@ func (c *X509Cert) collectCertURLs() []*url.URL {
 
 	for _, path := range c.globpaths {
 		files := path.Match()
-		if len(files) <= 0 {
+		if len(files) == 0 {
 			c.Log.Errorf("could not find file: %v", path.GetRoots())
 			continue
 		}
@@ -522,6 +566,13 @@ func (c *X509Cert) collectCertURLs() []*url.URL {
 	}
 
 	return urls
+}
+
+func (c *X509Cert) getSerialNumberString(cert *x509.Certificate) string {
+	if c.PadSerial {
+		return fmt.Sprintf("%016x", cert.SerialNumber)
+	}
+	return cert.SerialNumber.Text(16)
 }
 
 func init() {

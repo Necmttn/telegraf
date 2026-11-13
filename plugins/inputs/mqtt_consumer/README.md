@@ -1,12 +1,19 @@
 # MQTT Consumer Input Plugin
 
-The [MQTT][mqtt] consumer plugin reads from the specified MQTT topics
-and creates metrics using one of the supported [input data formats][].
+This service plugin consumes messages from [MQTT][mqtt] brokers for the
+configured topics in one of the supported [data formats][data_formats].
+
+⭐ Telegraf v0.10.3
+🏷️ messaging
+💻 all
+
+[mqtt]: https://mqtt.org
+[data_formats]: /docs/DATA_FORMATS_INPUT.md
 
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -14,20 +21,44 @@ normal plugins:
 2. The CLI options of `--test`, `--test-wait`, and `--once` may not produce
    output for this plugin
 
+## Tracking metric support <!-- @/docs/includes/plugin_tracking_metrics.md -->
+
+This plugin supports [tracking metrics][METRICS.md], which allows the plugin
+to be notified when metrics have been delivered to all outputs, enabling proper
+acknowledgment back to the source.
+
+[METRICS.md]: ../../../docs/METRICS.md#tracking-metrics
+
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Startup error behavior options <!-- @/docs/includes/startup_error_behavior.md -->
 
-This plugin supports secrets from secret-stores for the `username` and
+In addition to the plugin-specific and global configuration settings the plugin
+supports options for specifying the behavior when experiencing startup errors
+using the `startup_error_behavior` setting. Available values are:
+
+- `error`:  Telegraf with stop and exit in case of startup errors. This is the
+            default behavior.
+- `ignore`: Telegraf will ignore startup errors for this plugin and disables it
+            but continues processing for all other plugins.
+- `retry`:  Telegraf will try to startup the plugin in every gather or write
+            cycle in case of startup errors. The plugin is disabled until
+            the startup succeeds.
+- `probe`:  Telegraf will probe the plugin's function (if possible) and disables
+            the plugin in case probing fails. If the plugin does not support
+            probing, Telegraf will behave as if `ignore` was set instead.
+
+## Secret store support
+
+This plugin supports secrets from secret stores for the `username` and
 `password` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -67,6 +98,19 @@ to use them.
   ## Connection timeout for initial connection in seconds
   # connection_timeout = "30s"
 
+  ## Maximum interval between reconnection attempts after a connection loss.
+  ## The MQTT library uses exponential backoff starting at 1 second up to this
+  ## ceiling. The library default is 10 minutes, which can cause long delays
+  ## before message flow resumes after a network outage.
+  # max_reconnect_interval = "30s"
+
+  ## Interval and ping timeout for keep-alive messages
+  ## The sum of those options defines when a connection loss is detected.
+  ## Note: The keep-alive interval needs to be greater or equal one second and
+  ## fractions of a second are not supported.
+  # keepalive = "60s"
+  # ping_timeout = "10s"
+
   ## Max undelivered messages
   ## This plugin uses tracking metrics, which ensure messages are read to
   ## outputs before acknowledging them to the original broker to ensure data
@@ -87,6 +131,10 @@ to use them.
   ## connection topics and not subscribe to any new topics even after
   ## reconnecting or restarting without a change in client ID.
   # persistent_session = false
+
+  ## Omit retained messages from collection to prevents duplicate metrics from
+  ## being created when Telegraf restarts
+  # omit_retained = false
 
   ## If unset, a random client ID will be generated.
   # client_id = ""
@@ -115,14 +163,15 @@ to use them.
   data_format = "influx"
 
   ## Enable extracting tag values from MQTT topics
-  ## _ denotes an ignored entry in the topic path
+  ## _ denotes an ignored entry in the topic path,
+  ## # denotes a variable length path element (can only be used once per setting)
   # [[inputs.mqtt_consumer.topic_parsing]]
   #   topic = ""
   #   measurement = ""
   #   tags = ""
   #   fields = ""
   ## Value supported is int, float, unit
-  #   [[inputs.mqtt_consumer.topic.types]]
+  #   [inputs.mqtt_consumer.topic_parsing.types]
   #      key = type
 ```
 
@@ -181,10 +230,8 @@ cpu,host=pop-os,tag=telegraf,topic=telegraf/one/cpu/23 value=45,test=23i 1637014
 
 ## Field Pivoting Example
 
-You can use the pivot processor to rotate single
-valued metrics into a multi field metric.
-For more info check out the pivot processors
-[here][1].
+You can use the pivot processor to rotate single valued metrics into a
+multi-field metric. For more info check out the [pivot processor][plugin_pivot].
 
 For this example these are the topics:
 
@@ -224,7 +271,7 @@ Will result in the following metric:
 sensors,site=CLE,version=v1,device_name=device5 temp=390,rpm=45.0,ph=1.45
 ```
 
-[1]: <https://github.com/influxdata/telegraf/tree/master/plugins/processors/pivot> "Pivot Processor"
+[plugin_pivot]: /plugins/processors/pivot/README.md
 
 ## Metrics
 
@@ -234,14 +281,13 @@ sensors,site=CLE,version=v1,device_name=device5 temp=390,rpm=45.0,ph=1.45
 - example when [[inputs.mqtt_consumer.topic_parsing]] is set
 
 - when [[inputs.internal]] is set:
-  - payload_size (int): get the cumulative size in bytes that have been received from incoming messages
-  - messages_received (int): count of the number of messages that have been received from mqtt
+  - payload_size (int): get the cumulative size in bytes that have been received
+                        from incoming messages
+  - messages_received (int): count of the number of messages that have been
+                            received from mqtt
 
 This will result in the following metric:
 
 ```text
 internal_mqtt_consumer host=pop-os version=1.24.0 messages_received=622i payload_size=37942i 1657282270000000000
 ```
-
-[mqtt]: https://mqtt.org
-[input data formats]: /docs/DATA_FORMATS_INPUT.md

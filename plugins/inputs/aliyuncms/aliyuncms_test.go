@@ -18,6 +18,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/inputs"
 	"github.com/influxdata/telegraf/testutil"
 )
@@ -26,10 +27,10 @@ const inputTitle = "inputs.aliyuncms"
 
 type mockGatherAliyunCMSClient struct{}
 
-func (m *mockGatherAliyunCMSClient) DescribeMetricList(request *cms.DescribeMetricListRequest) (*cms.DescribeMetricListResponse, error) {
+func (*mockGatherAliyunCMSClient) DescribeMetricList(request *cms.DescribeMetricListRequest) (*cms.DescribeMetricListResponse, error) {
 	resp := new(cms.DescribeMetricListResponse)
 
-	//switch request.Metric {
+	// switch request.Metric {
 	switch request.MetricName {
 	case "InstanceActiveConnection":
 		resp.Code = "200"
@@ -193,7 +194,7 @@ func TestPluginInitialize(t *testing.T) {
 			} else {
 				require.NoError(t, plugin.Init())
 			}
-			if len(tt.regions) == 0 { //Check if set to default
+			if len(tt.regions) == 0 { // Check if set to default
 				require.Equal(t, plugin.Regions, aliyunRegionList)
 			}
 		})
@@ -240,7 +241,7 @@ func TestPluginMetricsInitialize(t *testing.T) {
 		expectedErrorString string
 		regions             []string
 		discoveryRegions    []string
-		metrics             []*Metric
+		metrics             []*metricDef
 	}{
 		{
 			name:            "Valid project",
@@ -248,10 +249,9 @@ func TestPluginMetricsInitialize(t *testing.T) {
 			regions:         []string{"cn-shanghai"},
 			accessKeyID:     "dummy",
 			accessKeySecret: "dummy",
-			metrics: []*Metric{
+			metrics: []*metricDef{
 				{
-					MetricNames: []string{},
-					Dimensions:  `{"instanceId": "i-abcdefgh123456"}`,
+					Dimensions: `{"instanceId": "i-abcdefgh123456"}`,
 				},
 			},
 		},
@@ -261,10 +261,9 @@ func TestPluginMetricsInitialize(t *testing.T) {
 			regions:         []string{"cn-shanghai"},
 			accessKeyID:     "dummy",
 			accessKeySecret: "dummy",
-			metrics: []*Metric{
+			metrics: []*metricDef{
 				{
-					MetricNames: []string{},
-					Dimensions:  `[{"instanceId": "p-example"},{"instanceId": "q-example"}]`,
+					Dimensions: `[{"instanceId": "p-example"},{"instanceId": "q-example"}]`,
 				},
 			},
 		},
@@ -275,10 +274,9 @@ func TestPluginMetricsInitialize(t *testing.T) {
 			accessKeyID:         "dummy",
 			accessKeySecret:     "dummy",
 			expectedErrorString: `cannot parse dimensions (neither obj, nor array) "[": unexpected end of JSON input`,
-			metrics: []*Metric{
+			metrics: []*metricDef{
 				{
-					MetricNames: []string{},
-					Dimensions:  `[`,
+					Dimensions: `[`,
 				},
 			},
 		},
@@ -302,7 +300,8 @@ func TestPluginMetricsInitialize(t *testing.T) {
 }
 
 func TestUpdateWindow(t *testing.T) {
-	duration, _ := time.ParseDuration("1m")
+	duration, err := time.ParseDuration("1m")
+	require.NoError(t, err)
 	internalDuration := config.Duration(duration)
 
 	plugin := &AliyunCMS{
@@ -342,9 +341,8 @@ func TestGatherMetric(t *testing.T) {
 		Regions:     []string{"cn-shanghai"},
 	}
 
-	metric := &Metric{
-		MetricNames: []string{},
-		Dimensions:  `"instanceId": "i-abcdefgh123456"`,
+	md := &metricDef{
+		Dimensions: `"instanceId": "i-abcdefgh123456"`,
 	}
 
 	tests := []struct {
@@ -367,21 +365,20 @@ func TestGatherMetric(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var acc telegraf.Accumulator
-			require.EqualError(t, plugin.gatherMetric(acc, tt.metricName, metric), tt.expectedErrorString)
+			require.EqualError(t, plugin.gatherMetric(acc, tt.metricName, md), tt.expectedErrorString)
 		})
 	}
 }
 
 func TestGather(t *testing.T) {
-	metric := &Metric{
-		MetricNames: []string{},
-		Dimensions:  `{"instanceId": "i-abcdefgh123456"}`,
+	m := &metricDef{
+		Dimensions: `{"instanceId": "i-abcdefgh123456"}`,
 	}
 	plugin := &AliyunCMS{
 		AccessKeyID:     "my_access_key_id",
 		AccessKeySecret: "my_access_key_secret",
 		Project:         "acs_slb_dashboard",
-		Metrics:         []*Metric{metric},
+		Metrics:         []*metricDef{m},
 		RateLimit:       200,
 		measurement:     formatMeasurement("acs_slb_dashboard"),
 		Regions:         []string{"cn-shanghai"},
@@ -389,18 +386,18 @@ func TestGather(t *testing.T) {
 		Log:             testutil.Logger{Name: inputTitle},
 	}
 
-	//test table:
+	// test table:
 	tests := []struct {
-		name          string
-		hasMeasurment bool
-		metricNames   []string
-		expected      []telegraf.Metric
+		name           string
+		hasMeasurement bool
+		metricNames    []string
+		expected       []telegraf.Metric
 	}{
 		{
 			name:        "Empty data point",
 			metricNames: []string{"EmptyDatapoint"},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"aliyuncms_acs_slb_dashboard",
 					nil,
 					nil,
@@ -408,17 +405,17 @@ func TestGather(t *testing.T) {
 			},
 		},
 		{
-			name:          "Data point with fields & tags",
-			hasMeasurment: true,
-			metricNames:   []string{"InstanceActiveConnection"},
+			name:           "Data point with fields & tags",
+			hasMeasurement: true,
+			metricNames:    []string{"InstanceActiveConnection"},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"aliyuncms_acs_slb_dashboard",
 					map[string]string{
 						"instanceId": "i-abcdefgh123456",
 						"userId":     "1234567898765432",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"instance_active_connection_minimum": float64(100),
 						"instance_active_connection_maximum": float64(200),
 						"instance_active_connection_average": float64(150),
@@ -433,9 +430,9 @@ func TestGather(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var acc testutil.Accumulator
 			plugin.Metrics[0].MetricNames = tt.metricNames
-			require.Empty(t, acc.GatherError(plugin.Gather))
-			require.Equal(t, acc.HasMeasurement("aliyuncms_acs_slb_dashboard"), tt.hasMeasurment)
-			if tt.hasMeasurment {
+			require.NoError(t, acc.GatherError(plugin.Gather))
+			require.Equal(t, acc.HasMeasurement("aliyuncms_acs_slb_dashboard"), tt.hasMeasurement)
+			if tt.hasMeasurement {
 				acc.AssertContainsTaggedFields(t, "aliyuncms_acs_slb_dashboard", tt.expected[0].Fields(), tt.expected[0].Tags())
 			}
 		})
@@ -443,13 +440,13 @@ func TestGather(t *testing.T) {
 }
 
 func TestGetDiscoveryDataAcrossRegions(t *testing.T) {
-	//test table:
+	// test table:
 	tests := []struct {
 		name                string
 		project             string
 		region              string
 		httpResp            *http.Response
-		discData            map[string]interface{}
+		discData            map[string]any
 		totalCount          int
 		pageSize            int
 		pageNumber          int
@@ -487,7 +484,7 @@ func TestGetDiscoveryDataAcrossRegions(t *testing.T) {
 						"PageNumber": 1
 						}`)),
 			},
-			discData:            map[string]interface{}{"bla": map[string]interface{}{"LoadBalancerId": "bla"}},
+			discData:            map[string]any{"bla": map[string]any{"LoadBalancerId": "bla"}},
 			totalCount:          1,
 			pageSize:            1,
 			pageNumber:          1,

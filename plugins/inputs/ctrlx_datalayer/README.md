@@ -1,19 +1,22 @@
-# ctrlX Data Layer Input Plugin
+# Bosch Rexroth ctrlX Data Layer Input Plugin
 
-The `ctrlx_datalayer` plugin gathers data from the ctrlX Data Layer,
-a communication middleware running on
-[ctrlX CORE devices](https://ctrlx-core.com) from
-[Bosch Rexroth](https://boschrexroth.com). The platform is used for
-professional automation applications like industrial automation, building
-automation, robotics, IoT Gateways or as classical PLC. For more
-information, see [ctrlX AUTOMATION](https://ctrlx-automation.com).
+This plugin gathers data from the [ctrlX Data Layer][ctrlx] a communication
+middleware running on Bosch Rexroth's [ctrlX CORE devices][core_devs]. The
+platform is used for professional automation applications like industrial
+automation, building automation, robotics, IoT Gateways or as classical PLC.
+
+⭐ Telegraf v1.27.0
+🏷️ iot, messaging
+💻 all
+
+[ctrlx]: https://ctrlx-automation.com
+[core_devs]: https://ctrlx-core.com
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -52,11 +55,11 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
       ## address - node address in ctrlX Data Layer (mandatory)
       ## name    - field name to use in the output (optional, default: base name of address)
       ## tags    - extra node tags to be added to the output metric (optional)
-      ## Note: 
+      ## Note:
       ## Use either the inline notation or the bracketed notation, not both.
       ## The tags property is only supported in bracketed notation due to toml parser restrictions
       ## Examples:
-      ## Inline notation 
+      ## Inline notation
       nodes=[
          {name="available", address="framework/metrics/system/memavailable-mb"},
          {name="used", address="framework/metrics/system/memused-mb"},
@@ -73,7 +76,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
       #    name   ="used"
       #    address="framework/metrics/system/memused-mb"
 
-      ## The switch "output_json_string" enables output of the measurement as json. 
+      ## The switch "output_json_string" enables output of the measurement as json.
       ## That way it can be used in in a subsequent processor plugin, e.g. "Starlark Processor Plugin".
       # output_json_string = false
 
@@ -96,7 +99,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
       ## The interval that defines the fastest rate at which the node values should be sampled and values captured. (default: 1s)
       ## The sampling frequency should be adjusted to the dynamics of the signal to be sampled.
-      ## Higher sampling frequence increases load on ctrlX Data Layer.
+      ## Higher sampling frequencies increases load on ctrlX Data Layer.
       ## The sampling frequency can be higher, than the publish interval. Captured samples are put in a queue and sent in publish interval.
       ## Note: The minimum sampling interval can be overruled by a global setting in the ctrlX Data Layer configuration ('datalayer/subscriptions/settings').
       # sampling_interval = "1s"
@@ -106,7 +109,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
       # queue_size = 10
 
       ## The behaviour of the queue if it is full. (default: "DiscardOldest")
-      ## Possible values: 
+      ## Possible values:
       ## - "DiscardOldest"
       ##   The oldest value gets deleted from the queue when it is full.
       ## - "DiscardNewest"
@@ -121,15 +124,15 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
       ## Possible values:
       ## - "Status"
       ##   Capture the value only, when the state of the node changes from or to error state. Value changes are ignored.
-      ## - "StatusValue" 
+      ## - "StatusValue"
       ##   Capture when the value changes or the node changes from or to error state.
       ##   See also 'dead_band_value' for what is considered as a value change.
-      ## - "StatusValueTimestamp": 
+      ## - "StatusValueTimestamp":
       ##   Capture even if the value is the same, but the timestamp of the value is newer.
       ##   Note: This might lead to high load on the network because every sample will be sent as a message
       ##   even if the value of the node did not change.
       # value_change = "StatusValue"
-      
+
 ```
 
 ## Metrics
@@ -306,7 +309,7 @@ Configuration:
 
 Source:
 
-```json
+```text
 "framework/metrics/system/memavailable-mb" : 365.93359375
 "framework/metrics/system/memused-mb" : 567.67578125
 ```
@@ -333,7 +336,7 @@ Configuration:
 
 Source:
 
-```json
+```text
 "alldata/dynamic/array-of-bool8" : [true, false, true]
 "alldata/dynamic/array-of-uint8" : [0, 255]
 ```
@@ -360,7 +363,7 @@ Configuration:
 
 Source:
 
-```json
+```text
 "motion/axs/Axis_1/state/values/actual" : {"actualPos":65.249329860957,"actualVel":5,"actualAcc":0,"actualTorque":0,"distLeft":0,"actualPosUnit":"mm","actualVelUnit":"mm/min","actualAccUnit":"m/s^2","actualTorqueUnit":"Nm","distLeftUnit":"mm"}
 "motion/axs/Axis_2/state/values/actual" : {"actualPos":120,"actualVel":0,"actualAcc":0,"actualTorque":0,"distLeft":0,"actualPosUnit":"deg","actualVelUnit":"rpm","actualAccUnit":"rad/s^2","actualTorqueUnit":"Nm","distLeftUnit":"deg"}
 ```

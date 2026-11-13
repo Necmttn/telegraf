@@ -22,7 +22,7 @@ type Serializer struct {
 	NestedFieldsInclude []string        `toml:"json_nested_fields_include"`
 	NestedFieldsExclude []string        `toml:"json_nested_fields_exclude"`
 
-	nestedfields filter.Filter
+	nestedFields filter.Filter
 }
 
 func (s *Serializer) Init() error {
@@ -48,14 +48,14 @@ func (s *Serializer) Init() error {
 		if err != nil {
 			return err
 		}
-		s.nestedfields = f
+		s.nestedFields = f
 	}
 
 	return nil
 }
 
 func (s *Serializer) Serialize(metric telegraf.Metric) ([]byte, error) {
-	var obj interface{}
+	var obj any
 	obj = s.createObject(metric)
 
 	if s.Transformation != "" {
@@ -70,7 +70,7 @@ func (s *Serializer) Serialize(metric telegraf.Metric) ([]byte, error) {
 
 	serialized, err := json.Marshal(obj)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	serialized = append(serialized, '\n')
 
@@ -78,14 +78,14 @@ func (s *Serializer) Serialize(metric telegraf.Metric) ([]byte, error) {
 }
 
 func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
-	objects := make([]interface{}, 0, len(metrics))
+	objects := make([]any, 0, len(metrics))
 	for _, metric := range metrics {
 		m := s.createObject(metric)
 		objects = append(objects, m)
 	}
 
-	var obj interface{}
-	obj = map[string]interface{}{
+	var obj any
+	obj = map[string]any{
 		"metrics": objects,
 	}
 
@@ -101,15 +101,15 @@ func (s *Serializer) SerializeBatch(metrics []telegraf.Metric) ([]byte, error) {
 
 	serialized, err := json.Marshal(obj)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	serialized = append(serialized, '\n')
 
 	return serialized, nil
 }
 
-func (s *Serializer) createObject(metric telegraf.Metric) map[string]interface{} {
-	m := make(map[string]interface{}, 4)
+func (s *Serializer) createObject(metric telegraf.Metric) map[string]any {
+	m := make(map[string]any, 4)
 
 	tags := make(map[string]string, len(metric.TagList()))
 	for _, tag := range metric.TagList() {
@@ -117,7 +117,7 @@ func (s *Serializer) createObject(metric telegraf.Metric) map[string]interface{}
 	}
 	m["tags"] = tags
 
-	fields := make(map[string]interface{}, len(metric.FieldList()))
+	fields := make(map[string]any, len(metric.FieldList()))
 	for _, field := range metric.FieldList() {
 		val := field.Value
 		switch fv := field.Value.(type) {
@@ -128,10 +128,10 @@ func (s *Serializer) createObject(metric telegraf.Metric) map[string]interface{}
 			}
 		case string:
 			// Check for nested fields if any
-			if s.nestedfields != nil && s.nestedfields.Match(field.Key) {
+			if s.nestedFields != nil && s.nestedFields.Match(field.Key) {
 				bv := []byte(fv)
 				if json.Valid(bv) {
-					var nested interface{}
+					var nested any
 					if err := json.Unmarshal(bv, &nested); err == nil {
 						val = nested
 					}
@@ -151,7 +151,7 @@ func (s *Serializer) createObject(metric telegraf.Metric) map[string]interface{}
 	return m
 }
 
-func (s *Serializer) transform(obj interface{}) (interface{}, error) {
+func (s *Serializer) transform(obj any) (any, error) {
 	transformation, err := jsonata.Compile(s.Transformation)
 	if err != nil {
 		return nil, err
@@ -162,19 +162,8 @@ func (s *Serializer) transform(obj interface{}) (interface{}, error) {
 
 func init() {
 	serializers.Add("json",
-		func() serializers.Serializer {
+		func() telegraf.Serializer {
 			return &Serializer{}
 		},
 	)
-}
-
-// InitFromConfig is a compatibility function to construct the parser the old way
-func (s *Serializer) InitFromConfig(cfg *serializers.Config) error {
-	s.TimestampUnits = config.Duration(cfg.TimestampUnits)
-	s.TimestampFormat = cfg.TimestampFormat
-	s.Transformation = cfg.Transformation
-	s.NestedFieldsInclude = cfg.JSONNestedFieldInclude
-	s.NestedFieldsExclude = cfg.JSONNestedFieldExclude
-
-	return nil
 }

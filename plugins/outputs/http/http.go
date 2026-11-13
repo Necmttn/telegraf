@@ -1,3 +1,4 @@
+//go:generate ../../../tools/config_includer/generator
 //go:generate ../../../tools/readme_config_includer/generator
 package http
 
@@ -11,21 +12,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
-	awsV2 "github.com/aws/aws-sdk-go-v2/aws"
-	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	aws_signer "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/idtoken"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
-	internalaws "github.com/influxdata/telegraf/plugins/common/aws"
-	httpconfig "github.com/influxdata/telegraf/plugins/common/http"
+	common_aws "github.com/influxdata/telegraf/plugins/common/aws"
+	common_gcp "github.com/influxdata/telegraf/plugins/common/gcp"
+	common_http "github.com/influxdata/telegraf/plugins/common/http"
 	"github.com/influxdata/telegraf/plugins/outputs"
-	"github.com/influxdata/telegraf/plugins/serializers"
 )
 
 //go:embed sample.conf
@@ -43,23 +45,23 @@ const (
 )
 
 type HTTP struct {
-	URL                     string            `toml:"url"`
-	Method                  string            `toml:"method"`
-	Username                config.Secret     `toml:"username"`
-	Password                config.Secret     `toml:"password"`
-	Headers                 map[string]string `toml:"headers"`
-	ContentEncoding         string            `toml:"content_encoding"`
-	UseBatchFormat          bool              `toml:"use_batch_format"`
-	AwsService              string            `toml:"aws_service"`
-	NonRetryableStatusCodes []int             `toml:"non_retryable_statuscodes"`
-	httpconfig.HTTPClientConfig
+	URL                     string                    `toml:"url"`
+	Method                  string                    `toml:"method"`
+	Username                config.Secret             `toml:"username"`
+	Password                config.Secret             `toml:"password"`
+	Headers                 map[string]*config.Secret `toml:"headers"`
+	ContentEncoding         string                    `toml:"content_encoding"`
+	UseBatchFormat          bool                      `toml:"use_batch_format"`
+	AwsService              string                    `toml:"aws_service"`
+	NonRetryableStatusCodes []int                     `toml:"non_retryable_statuscodes"`
+	common_http.HTTPClientConfig
 	Log telegraf.Logger `toml:"-"`
 
 	client     *http.Client
-	serializer serializers.Serializer
+	serializer telegraf.Serializer
 
-	awsCfg *awsV2.Config
-	internalaws.CredentialConfig
+	awsCfg *aws.Config
+	common_aws.CredentialConfig
 
 	// Google API Auth
 	CredentialsFile string `toml:"google_application_credentials"`
@@ -70,7 +72,7 @@ func (*HTTP) SampleConfig() string {
 	return sampleConfig
 }
 
-func (h *HTTP) SetSerializer(serializer serializers.Serializer) {
+func (h *HTTP) SetSerializer(serializer telegraf.Serializer) {
 	h.serializer = serializer
 }
 
@@ -102,6 +104,10 @@ func (h *HTTP) Connect() error {
 }
 
 func (h *HTTP) Close() error {
+	if h.client != nil {
+		h.client.CloseIdleConnections()
+	}
+
 	return nil
 }
 
@@ -161,7 +167,7 @@ func (h *HTTP) writeMetric(reqBody []byte) error {
 	}
 
 	if h.awsCfg != nil {
-		signer := v4.NewSigner()
+		signer := aws_signer.NewSigner()
 		ctx := context.Background()
 
 		credentials, err := h.awsCfg.Credentials.Retrieve(ctx)
@@ -204,11 +210,20 @@ func (h *HTTP) writeMetric(reqBody []byte) error {
 	if h.ContentEncoding == "gzip" {
 		req.Header.Set("Content-Encoding", "gzip")
 	}
+
 	for k, v := range h.Headers {
-		if strings.EqualFold(k, "host") {
-			req.Host = v
+		secret, err := v.Get()
+		if err != nil {
+			return err
 		}
-		req.Header.Set(k, v)
+
+		headerVal := secret.String()
+		if strings.EqualFold(k, "host") {
+			req.Host = headerVal
+		}
+		req.Header.Set(k, headerVal)
+
+		secret.Destroy()
 	}
 
 	resp, err := h.client.Do(req)
@@ -218,17 +233,15 @@ func (h *HTTP) writeMetric(reqBody []byte) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		for _, nonRetryableStatusCode := range h.NonRetryableStatusCodes {
-			if resp.StatusCode == nonRetryableStatusCode {
-				h.Log.Errorf("Received non-retryable status %v. Metrics are lost.", resp.StatusCode)
-				return nil
-			}
-		}
-
 		errorLine := ""
 		scanner := bufio.NewScanner(io.LimitReader(resp.Body, maxErrMsgLen))
 		if scanner.Scan() {
 			errorLine = scanner.Text()
+		}
+
+		if slices.Contains(h.NonRetryableStatusCodes, resp.StatusCode) {
+			h.Log.Errorf("Received non-retryable status %v. Metrics are lost. body: %s", resp.StatusCode, errorLine)
+			return nil
 		}
 
 		return fmt.Errorf("when writing to [%s] received status code: %d. body: %s", h.URL, resp.StatusCode, errorLine)
@@ -257,7 +270,12 @@ func (h *HTTP) getAccessToken(ctx context.Context, audience string) (*oauth2.Tok
 		return h.oauth2Token, nil
 	}
 
-	ts, err := idtoken.NewTokenSource(ctx, audience, idtoken.WithCredentialsFile(h.CredentialsFile))
+	credType, err := common_gcp.ParseCredentialType(h.CredentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse credentials file type: %w", err)
+	}
+
+	ts, err := idtoken.NewTokenSource(ctx, audience, idtoken.WithAuthCredentialsFile(idtoken.CredentialsType(credType), h.CredentialsFile))
 	if err != nil {
 		return nil, fmt.Errorf("error creating oauth2 token source: %w", err)
 	}

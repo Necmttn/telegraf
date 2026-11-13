@@ -18,14 +18,15 @@ func TestSyslogMapperWithDefaults(t *testing.T) {
 	m1 := metric.New(
 		"testmetric",
 		map[string]string{},
-		map[string]interface{}{},
+		map[string]any{},
 		time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
 	)
 	hostname, err := os.Hostname()
 	require.NoError(t, err)
 	syslogMessage, err := s.mapper.MapMetricToSyslogMessage(m1)
 	require.NoError(t, err)
-	str, _ := syslogMessage.String()
+	str, err := syslogMessage.String()
+	require.NoError(t, err)
 	require.Equal(t, "<13>1 2010-11-10T23:00:00Z "+hostname+" Telegraf - testmetric -", str, "Wrong syslog message")
 }
 
@@ -41,12 +42,13 @@ func TestSyslogMapperWithHostname(t *testing.T) {
 			"source":   "sourcevalue",
 			"host":     "hostvalue",
 		},
-		map[string]interface{}{},
+		map[string]any{},
 		time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
 	)
 	syslogMessage, err := s.mapper.MapMetricToSyslogMessage(m1)
 	require.NoError(t, err)
-	str, _ := syslogMessage.String()
+	str, err := syslogMessage.String()
+	require.NoError(t, err)
 	require.Equal(t, "<13>1 2010-11-10T23:00:00Z testhost Telegraf - testmetric -", str, "Wrong syslog message")
 }
 func TestSyslogMapperWithHostnameSourceFallback(t *testing.T) {
@@ -60,12 +62,13 @@ func TestSyslogMapperWithHostnameSourceFallback(t *testing.T) {
 			"source": "sourcevalue",
 			"host":   "hostvalue",
 		},
-		map[string]interface{}{},
+		map[string]any{},
 		time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
 	)
 	syslogMessage, err := s.mapper.MapMetricToSyslogMessage(m1)
 	require.NoError(t, err)
-	str, _ := syslogMessage.String()
+	str, err := syslogMessage.String()
+	require.NoError(t, err)
 	require.Equal(t, "<13>1 2010-11-10T23:00:00Z sourcevalue Telegraf - testmetric -", str, "Wrong syslog message")
 }
 
@@ -79,12 +82,13 @@ func TestSyslogMapperWithHostnameHostFallback(t *testing.T) {
 		map[string]string{
 			"host": "hostvalue",
 		},
-		map[string]interface{}{},
+		map[string]any{},
 		time.Date(2010, time.November, 10, 23, 0, 0, 0, time.UTC),
 	)
 	syslogMessage, err := s.mapper.MapMetricToSyslogMessage(m1)
 	require.NoError(t, err)
-	str, _ := syslogMessage.String()
+	str, err := syslogMessage.String()
+	require.NoError(t, err)
 	require.Equal(t, "<13>1 2010-11-10T23:00:00Z hostvalue Telegraf - testmetric -", str, "Wrong syslog message")
 }
 
@@ -102,7 +106,7 @@ func TestSyslogMapperWithDefaultSdid(t *testing.T) {
 			"tag1":               "bar",
 			"default@32473_tag2": "foobar",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"severity_code":        uint64(3),
 			"facility_code":        uint64(3),
 			"msg":                  "Test message",
@@ -119,7 +123,8 @@ func TestSyslogMapperWithDefaultSdid(t *testing.T) {
 
 	syslogMessage, err := s.mapper.MapMetricToSyslogMessage(m1)
 	require.NoError(t, err)
-	str, _ := syslogMessage.String()
+	str, err := syslogMessage.String()
+	require.NoError(t, err)
 	require.Equal(
 		t,
 		"<27>2 2010-11-10T23:30:00Z testhost testapp 25 555 [default@32473 tag1=\"bar\" tag2=\"foobar\" "+
@@ -145,7 +150,7 @@ func TestSyslogMapperWithDefaultSdidAndOtherSdids(t *testing.T) {
 			"default@32473_tag2": "foobar",
 			"bar@123_tag3":       "barfoobar",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"severity_code":        uint64(1),
 			"facility_code":        uint64(3),
 			"msg":                  "Test message",
@@ -163,7 +168,8 @@ func TestSyslogMapperWithDefaultSdidAndOtherSdids(t *testing.T) {
 
 	syslogMessage, err := s.mapper.MapMetricToSyslogMessage(m1)
 	require.NoError(t, err)
-	str, _ := syslogMessage.String()
+	str, err := syslogMessage.String()
+	require.NoError(t, err)
 	require.Equal(
 		t,
 		"<25>2 2010-11-10T23:30:00Z testhost testapp 25 555 [bar@123 tag3=\"barfoobar\" value3=\"2\"][default@32473 "+
@@ -189,7 +195,7 @@ func TestSyslogMapperWithNoSdids(t *testing.T) {
 			"bar@123_tag3":       "barfoobar",
 			"foo@456_tag4":       "foobarfoo",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"severity_code":        uint64(2),
 			"facility_code":        uint64(3),
 			"msg":                  "Test message",
@@ -207,6 +213,7 @@ func TestSyslogMapperWithNoSdids(t *testing.T) {
 
 	syslogMessage, err := s.mapper.MapMetricToSyslogMessage(m1)
 	require.NoError(t, err)
-	str, _ := syslogMessage.String()
+	str, err := syslogMessage.String()
+	require.NoError(t, err)
 	require.Equal(t, "<26>2 2010-11-10T23:30:00Z testhost testapp 25 555 - Test message", str, "Wrong syslog message")
 }

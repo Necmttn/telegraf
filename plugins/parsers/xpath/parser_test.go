@@ -207,10 +207,10 @@ func TestInvalidTypeQueries(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": math.NaN(),
 				},
 				time.Unix(1577923199, 0),
@@ -228,10 +228,10 @@ func TestInvalidTypeQueries(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": true,
 				},
 				time.Unix(1577923199, 0),
@@ -274,10 +274,10 @@ func TestParseTimestamps(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(1577923199, 0),
 			),
 		},
@@ -291,10 +291,10 @@ func TestParseTimestamps(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(1577923199, 0),
 			),
 		},
@@ -308,10 +308,10 @@ func TestParseTimestamps(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(0, int64(1577923199128*1e6)),
 			),
 		},
@@ -325,10 +325,10 @@ func TestParseTimestamps(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(0, int64(1577923199128256*1e3)),
 			),
 		},
@@ -342,10 +342,10 @@ func TestParseTimestamps(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(0, int64(1577923199128256512)),
 			),
 		},
@@ -359,10 +359,10 @@ func TestParseTimestamps(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(1577923199, 0),
 			),
 		},
@@ -409,10 +409,10 @@ func TestParseSingleValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": "98247",
 					"b": "98695.81",
 					"c": "true",
@@ -436,10 +436,10 @@ func TestParseSingleValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": 98247.0,
 					"b": 98695.81,
 					"c": true,
@@ -465,10 +465,10 @@ func TestParseSingleValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": 98247,
 					"b": 98695.81,
 					"c": true,
@@ -490,10 +490,10 @@ func TestParseSingleValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"x": "42",
 					"y": "23",
 				},
@@ -513,10 +513,10 @@ func TestParseSingleValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"x": 42.0,
 					"y": 23.0,
 				},
@@ -536,10 +536,10 @@ func TestParseSingleValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"x": 42,
 					"y": 23,
 				},
@@ -559,13 +559,13 @@ func TestParseSingleValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{
 					"state": "ok",
 					"name":  "TestDevice1",
 				},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(1577923199, 0),
 			),
 		},
@@ -606,10 +606,10 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(1577923199, 0),
 			),
 		},
@@ -623,10 +623,10 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(1577923199, 0),
 			),
 		},
@@ -645,10 +645,10 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": "12345",
 					"b": "12345.678",
 					"c": "true",
@@ -672,10 +672,10 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": 12345.0,
 					"b": 12345.678,
 					"c": true,
@@ -701,10 +701,10 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": 12345,
 					"b": 12345.678,
 					"c": true,
@@ -725,10 +725,10 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"name": "TestDevice1",
 				},
 				time.Unix(1577923199, 0),
@@ -747,13 +747,13 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{
 					"state": "ok",
 					"name":  "TestDevice1",
 				},
-				map[string]interface{}{},
+				map[string]any{},
 				time.Unix(1577923199, 0),
 			),
 		},
@@ -769,10 +769,10 @@ func TestParseSingleAttributes(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": true,
 				},
 				time.Unix(1577923199, 0),
@@ -823,10 +823,10 @@ func TestParseMultiValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": 1.0,
 					"b": 2.0,
 					"c": 3.0,
@@ -854,10 +854,10 @@ func TestParseMultiValues(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"test",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"a": 1,
 					"b": 2,
 					"c": 3,
@@ -918,65 +918,65 @@ func TestParseMultiNodes(t *testing.T) {
 			},
 			defaultTags: map[string]string{},
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"test",
 					map[string]string{
 						"name":  "Device 1",
 						"state": "ok",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value":  42.0,
 						"active": true,
 						"mode":   0,
 					},
 					time.Unix(1577923199, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					"test",
 					map[string]string{
 						"name":  "Device 2",
 						"state": "ok",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value":  42.1,
 						"active": false,
 						"mode":   1,
 					},
 					time.Unix(1577923199, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					"test",
 					map[string]string{
 						"name":  "Device 3",
 						"state": "ok",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value":  42.2,
 						"active": true,
 						"mode":   2,
 					},
 					time.Unix(1577923199, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					"test",
 					map[string]string{
 						"name":  "Device 4",
 						"state": "failed",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value":  42.3,
 						"active": false,
 						"mode":   3,
 					},
 					time.Unix(1577923199, 0),
 				),
-				testutil.MustMetric(
+				metric.New(
 					"test",
 					map[string]string{
 						"name":  "Device 5",
 						"state": "failed",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value":  42.4,
 						"active": true,
 						"mode":   4,
@@ -1026,10 +1026,10 @@ func TestParseMetricQuery(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"state",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": "ok",
 				},
 				time.Unix(1577923199, 0),
@@ -1048,10 +1048,10 @@ func TestParseMetricQuery(t *testing.T) {
 				},
 			},
 			defaultTags: map[string]string{},
-			expected: testutil.MustMetric(
+			expected: metric.New(
 				"the_metric",
 				map[string]string{},
-				map[string]interface{}{
+				map[string]any{
 					"value": "ok",
 				},
 				time.Unix(1577923199, 0),
@@ -1345,9 +1345,10 @@ func TestTestCases(t *testing.T) {
 			require.NoError(t, err)
 
 			// Get the expectations
-			expectedOutputs, err := testutil.ParseMetricsFrom(header, "Expected Output:", parser)
-			require.NoError(t, err)
+			//nolint:errcheck // these may not be set by the testcase, in which case it would error correctly
+			expectedOutputs, _ := testutil.ParseMetricsFrom(header, "Expected Output:", parser)
 
+			//nolint:errcheck // these may not be set by the testcase, in which case it would error correctly
 			expectedErrors, _ := testutil.ParseRawLinesFrom(header, "Expected Error:")
 
 			// Setup the parser and run it.
@@ -1356,12 +1357,12 @@ func TestTestCases(t *testing.T) {
 				metricName = fileformat
 			}
 			parser := &Parser{
-				DefaultMetricName:   metricName,
-				Format:              fileformat,
-				ProtobufMessageDef:  pbmsgdef,
-				ProtobufMessageType: pbmsgtype,
-				Configs:             []Config{*cfg},
-				Log:                 testutil.Logger{Name: "parsers.xml"},
+				DefaultMetricName:    metricName,
+				Format:               fileformat,
+				ProtobufMessageFiles: []string{pbmsgdef},
+				ProtobufMessageType:  pbmsgtype,
+				Configs:              []Config{*cfg},
+				Log:                  testutil.Logger{Name: "parsers.xml"},
 			}
 			require.NoError(t, parser.Init())
 			outputs, err := parser.Parse(content)
@@ -1382,13 +1383,12 @@ func TestTestCases(t *testing.T) {
 func TestProtobufImporting(t *testing.T) {
 	// Setup the parser and run it.
 	parser := &Parser{
-		DefaultMetricName:   "xpath_protobuf",
-		Format:              "xpath_protobuf",
-		ProtobufMessageDef:  "person.proto",
-		ProtobufMessageType: "importtest.Person",
-		ProtobufImportPaths: []string{"testcases/protos"},
-		Configs:             []Config{},
-		Log:                 testutil.Logger{Name: "parsers.protobuf"},
+		DefaultMetricName:    "xpath_protobuf",
+		Format:               "xpath_protobuf",
+		ProtobufMessageFiles: []string{"person.proto"},
+		ProtobufMessageType:  "importtest.Person",
+		ProtobufImportPaths:  []string{"testcases/protos"},
+		Log:                  testutil.Logger{Name: "parsers.protobuf"},
 	}
 	require.NoError(t, parser.Init())
 }
@@ -1485,7 +1485,7 @@ func loadTestConfiguration(filename string) (*Config, []string, error) {
 	}
 
 	header := make([]string, 0)
-	for _, line := range strings.Split(string(buf), "\n") {
+	for line := range strings.SplitSeq(string(buf), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
 			header = append(header, line)
@@ -1504,7 +1504,7 @@ var benchmarkExpectedMetrics = []telegraf.Metric{
 			"tags_platform": "python",
 			"tags_sdkver":   "3.11.5",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 5.0,
 		},
 		time.Unix(1577923199, 0),
@@ -1516,7 +1516,7 @@ var benchmarkExpectedMetrics = []telegraf.Metric{
 			"tags_platform": "python",
 			"tags_sdkver":   "3.11.4",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"value": 4.0,
 		},
 		time.Unix(1577923199, 0),
@@ -1578,7 +1578,8 @@ func BenchmarkParsingXML(b *testing.B) {
 	require.NoError(b, plugin.Init())
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse([]byte(benchmarkDataXML))
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse([]byte(benchmarkDataXML))
 	}
 }
 
@@ -1640,18 +1641,19 @@ func BenchmarkParsingJSON(b *testing.B) {
 	require.NoError(b, plugin.Init())
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse([]byte(benchmarkDataJSON))
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse([]byte(benchmarkDataJSON))
 	}
 }
 
 func BenchmarkParsingProtobuf(b *testing.B) {
 	plugin := &Parser{
-		DefaultMetricName:   "benchmark",
-		Format:              "xpath_protobuf",
-		ProtobufMessageDef:  "benchmark.proto",
-		ProtobufMessageType: "benchmark.BenchmarkData",
-		ProtobufImportPaths: []string{".", "./testcases/protobuf_benchmark"},
-		NativeTypes:         true,
+		DefaultMetricName:    "benchmark",
+		Format:               "xpath_protobuf",
+		ProtobufMessageFiles: []string{"benchmark.proto"},
+		ProtobufMessageType:  "benchmark.BenchmarkData",
+		ProtobufImportPaths:  []string{".", "./testcases/protobuf_benchmark"},
+		NativeTypes:          true,
 		Configs: []Config{
 			{
 				Selection:    "//data",
@@ -1675,7 +1677,8 @@ func BenchmarkParsingProtobuf(b *testing.B) {
 	require.NoError(b, err)
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse(benchmarkData)
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse(benchmarkData)
 	}
 }
 
@@ -1727,7 +1730,7 @@ func TestBenchmarkDataMsgPack(t *testing.T) {
 				"tags_platform": "python",
 				"tags_sdkver":   "3.11.5",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 5.0,
 			},
 			time.Unix(1653643421, 0),
@@ -1739,7 +1742,7 @@ func TestBenchmarkDataMsgPack(t *testing.T) {
 				"tags_platform": "python",
 				"tags_sdkver":   "3.11.4",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 4.0,
 			},
 			time.Unix(1653643421, 0),
@@ -1778,7 +1781,8 @@ func BenchmarkParsingMsgPack(b *testing.B) {
 	require.NoError(b, plugin.Init())
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse(benchmarkDataMsgPack[n%2])
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse(benchmarkDataMsgPack[n%2])
 	}
 }
 
@@ -1810,6 +1814,7 @@ func BenchmarkParsingCBOR(b *testing.B) {
 	require.NoError(b, err)
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse(benchmarkData)
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse(benchmarkData)
 	}
 }

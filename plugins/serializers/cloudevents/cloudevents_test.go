@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/gofrs/uuid/v5"
@@ -21,8 +22,8 @@ import (
 	"github.com/influxdata/telegraf/models"
 	"github.com/influxdata/telegraf/plugins/outputs"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
-	"github.com/influxdata/telegraf/plugins/serializers"
 	"github.com/influxdata/telegraf/testutil"
+	"github.com/influxdata/telegraf/testutil/serializers"
 )
 
 func TestCases(t *testing.T) {
@@ -35,7 +36,7 @@ func TestCases(t *testing.T) {
 
 	// Set up for file inputs
 	outputs.Add("dummy", func() telegraf.Output {
-		return &OutputDummy{}
+		return &outputDummy{}
 	})
 
 	for _, f := range folders {
@@ -58,7 +59,7 @@ func TestCases(t *testing.T) {
 			input, err := testutil.ParseMetricsFromFile(inputFilename, parser)
 			require.NoError(t, err)
 
-			var expected []map[string]interface{}
+			var expected []map[string]any
 			ebuf, err := os.ReadFile(expectedFilename)
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(ebuf, &expected))
@@ -67,7 +68,7 @@ func TestCases(t *testing.T) {
 			cfg := config.NewConfig()
 			require.NoError(t, cfg.LoadConfig(configFilename))
 			require.Len(t, cfg.Outputs, 1, "wrong number of outputs")
-			plugin, ok := cfg.Outputs[0].Output.(*OutputDummy)
+			plugin, ok := cfg.Outputs[0].Output.(*outputDummy)
 			require.True(t, ok)
 			serializer, ok := plugin.serializer.(*models.RunningSerializer).Serializer.(*Serializer)
 			require.True(t, ok)
@@ -89,7 +90,7 @@ func TestCases(t *testing.T) {
 			default:
 				joined = "[" + string(bytes.Join(plugin.output, []byte(","))) + "]"
 			}
-			var actual []map[string]interface{}
+			var actual []map[string]any
 			require.NoError(t, json.Unmarshal([]byte(joined), &actual))
 			require.Len(t, actual, len(expected))
 			require.ElementsMatch(t, expected, actual)
@@ -146,7 +147,7 @@ func checkEvents(messages [][]byte) error {
 		if err != nil {
 			return fmt.Errorf("serializing raw event %d: %w", i, err)
 		}
-		var rawEvent interface{}
+		var rawEvent any
 		if err := json.Unmarshal(serializedEvent, &rawEvent); err != nil {
 			return fmt.Errorf("deserializing raw event %d: %w", i, err)
 		}
@@ -158,26 +159,26 @@ func checkEvents(messages [][]byte) error {
 }
 
 /* Dummy output to allow full config parsing loop */
-type OutputDummy struct {
+type outputDummy struct {
 	Batch      bool `toml:"batch"`
 	serializer telegraf.Serializer
 	output     [][]byte
 }
 
-func (*OutputDummy) SampleConfig() string {
+func (*outputDummy) SampleConfig() string {
 	return "dummy"
 }
 
-func (o *OutputDummy) Connect() error {
+func (o *outputDummy) Connect() error {
 	o.output = make([][]byte, 0)
 	return nil
 }
 
-func (*OutputDummy) Close() error {
+func (*outputDummy) Close() error {
 	return nil
 }
 
-func (o *OutputDummy) Write(metrics []telegraf.Metric) error {
+func (o *outputDummy) Write(metrics []telegraf.Metric) error {
 	if o.Batch {
 		buf, err := o.serializer.SerializeBatch(metrics)
 		if err != nil {
@@ -197,7 +198,7 @@ func (o *OutputDummy) Write(metrics []telegraf.Metric) error {
 	return nil
 }
 
-func (o *OutputDummy) SetSerializer(s telegraf.Serializer) {
+func (o *outputDummy) SetSerializer(s telegraf.Serializer) {
 	o.serializer = s
 }
 
@@ -214,7 +215,7 @@ func (*dummygen) NewV1() (uuid.UUID, error) {
 	return uuid.UUID(id), nil
 }
 
-func (*dummygen) NewV3(_ uuid.UUID, _ string) uuid.UUID {
+func (*dummygen) NewV3(uuid.UUID, string) uuid.UUID {
 	return uuid.UUID([16]byte{})
 }
 
@@ -222,7 +223,7 @@ func (*dummygen) NewV4() (uuid.UUID, error) {
 	return uuid.UUID([16]byte{}), errors.New("wrong type")
 }
 
-func (*dummygen) NewV5(_ uuid.UUID, _ string) uuid.UUID {
+func (*dummygen) NewV5(uuid.UUID, string) uuid.UUID {
 	return uuid.UUID([16]byte{})
 }
 
@@ -234,10 +235,26 @@ func (*dummygen) NewV7() (uuid.UUID, error) {
 	return uuid.UUID([16]byte{}), errors.New("wrong type")
 }
 
+func (*dummygen) NewV1AtTime(time.Time) (uuid.UUID, error) {
+	return uuid.UUID([16]byte{}), errors.New("wrong type")
+}
+
+func (*dummygen) NewV6AtTime(time.Time) (uuid.UUID, error) {
+	return uuid.UUID([16]byte{}), errors.New("wrong type")
+}
+
+func (*dummygen) NewV7AtTime(time.Time) (uuid.UUID, error) {
+	return uuid.UUID([16]byte{}), errors.New("wrong type")
+}
+
+func (*dummygen) NewV8(_, _, _ []byte) (uuid.UUID, error) {
+	return uuid.UUID([16]byte{}), errors.New("wrong type")
+}
+
 func BenchmarkSerialize(b *testing.B) {
 	s := &Serializer{}
 	require.NoError(b, s.Init())
-	metrics := serializers.BenchmarkMetrics(b)
+	metrics := serializers.BenchmarkMetrics()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := s.Serialize(metrics[i%len(metrics)])
@@ -248,7 +265,7 @@ func BenchmarkSerialize(b *testing.B) {
 func BenchmarkSerializeBatch(b *testing.B) {
 	s := &Serializer{}
 	require.NoError(b, s.Init())
-	m := serializers.BenchmarkMetrics(b)
+	m := serializers.BenchmarkMetrics()
 	metrics := m[:]
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

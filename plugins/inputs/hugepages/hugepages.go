@@ -6,7 +6,9 @@ package hugepages
 import (
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,19 +20,6 @@ import (
 
 //go:embed sample.conf
 var sampleConfig string
-
-const (
-	// path to root huge page control directory
-	rootHugepagePath = "/sys/kernel/mm/hugepages"
-	// path where per NUMA node statistics are kept
-	numaNodePath = "/sys/devices/system/node"
-	// path to the meminfo file
-	meminfoPath = "/proc/meminfo"
-
-	rootHugepages    = "root"
-	perNodeHugepages = "per_node"
-	meminfoHugepages = "meminfo"
-)
 
 var (
 	newlineByte = []byte("\n")
@@ -62,6 +51,19 @@ var (
 		"ShmemHugePages":  "shared_kb",
 		"FileHugePages":   "file_kb",
 	}
+)
+
+const (
+	// path to root huge page control directory
+	rootHugepagePath = "/sys/kernel/mm/hugepages"
+	// path where per NUMA node statistics are kept
+	numaNodePath = "/sys/devices/system/node"
+	// path to the meminfo file
+	meminfoPath = "/proc/meminfo"
+
+	rootHugepages    = "root"
+	perNodeHugepages = "per_node"
+	meminfoHugepages = "meminfo"
 )
 
 type Hugepages struct {
@@ -117,7 +119,7 @@ func (h *Hugepages) Gather(acc telegraf.Accumulator) error {
 
 // gatherStatsPerNode collects root hugepages statistics
 func (h *Hugepages) gatherRootStats(acc telegraf.Accumulator) error {
-	return h.gatherFromHugepagePath(acc, "hugepages_"+rootHugepages, h.rootHugepagePath, hugepagesMetricsRoot, nil)
+	return gatherFromHugepagePath(acc, "hugepages_"+rootHugepages, h.rootHugepagePath, hugepagesMetricsRoot, nil)
 }
 
 // gatherStatsPerNode collects hugepages statistics per NUMA node
@@ -143,7 +145,7 @@ func (h *Hugepages) gatherStatsPerNode(acc telegraf.Accumulator) error {
 			"node": nodeNumber,
 		}
 		hugepagesPath := filepath.Join(h.numaNodePath, nodeDir.Name(), "hugepages")
-		err = h.gatherFromHugepagePath(acc, "hugepages_"+perNodeHugepages, hugepagesPath, hugepagesMetricsPerNUMANode, perNodeTags)
+		err = gatherFromHugepagePath(acc, "hugepages_"+perNodeHugepages, hugepagesPath, hugepagesMetricsPerNUMANode, perNodeTags)
 		if err != nil {
 			return err
 		}
@@ -151,12 +153,7 @@ func (h *Hugepages) gatherStatsPerNode(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (h *Hugepages) gatherFromHugepagePath(
-	acc telegraf.Accumulator,
-	measurement, path string,
-	fileFilter map[string]string,
-	defaultTags map[string]string,
-) error {
+func gatherFromHugepagePath(acc telegraf.Accumulator, measurement, path string, fileFilter, defaultTags map[string]string) error {
 	// read metrics from: hugepages/hugepages-*/*
 	hugepagesDirs, err := os.ReadDir(path)
 	if err != nil {
@@ -180,7 +177,7 @@ func (h *Hugepages) gatherFromHugepagePath(
 			return fmt.Errorf("reading metric dir failed: %w", err)
 		}
 
-		metrics := make(map[string]interface{})
+		metrics := make(map[string]any)
 		for _, metricFile := range metricFiles {
 			metricName, ok := fileFilter[metricFile.Name()]
 			if mode := metricFile.Type(); !mode.IsRegular() || !ok {
@@ -205,10 +202,8 @@ func (h *Hugepages) gatherFromHugepagePath(
 			continue
 		}
 
-		tags := make(map[string]string)
-		for key, value := range defaultTags {
-			tags[key] = value
-		}
+		tags := make(map[string]string, len(defaultTags)+1)
+		maps.Copy(tags, defaultTags)
 		tags["size_kb"] = hugepagesSize
 
 		acc.AddFields(measurement, metrics, tags)
@@ -223,9 +218,8 @@ func (h *Hugepages) gatherStatsFromMeminfo(acc telegraf.Accumulator) error {
 		return err
 	}
 
-	metrics := make(map[string]interface{})
-	lines := bytes.Split(meminfo, newlineByte)
-	for _, line := range lines {
+	metrics := make(map[string]any)
+	for line := range bytes.SplitSeq(meminfo, newlineByte) {
 		fields := bytes.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -244,7 +238,7 @@ func (h *Hugepages) gatherStatsFromMeminfo(acc telegraf.Accumulator) error {
 		metrics[metricName] = fieldValue
 	}
 
-	acc.AddFields("hugepages_"+meminfoHugepages, metrics, map[string]string{})
+	acc.AddFields("hugepages_"+meminfoHugepages, metrics, make(map[string]string))
 	return nil
 }
 
@@ -258,7 +252,7 @@ func (h *Hugepages) parseHugepagesConfig() error {
 
 	// empty array
 	if len(h.Types) == 0 {
-		return fmt.Errorf("plugin was configured with nothing to read")
+		return errors.New("plugin was configured with nothing to read")
 	}
 
 	for _, hugepagesType := range h.Types {

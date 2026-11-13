@@ -1,16 +1,24 @@
 # MongoDB Input Plugin
 
-See the [MongoDB Software Lifecycle Schedules][lifecycles] for supported
-versions.
+This plugin collects metrics about [MongoDB][mongodb] server instances by
+running database commands.
 
+> [!NOTE]
+> This plugin supports all versions marked as supported in the
+> [MongoDB Software Lifecycle Schedules][lifecycles].
+
+⭐ Telegraf v0.1.5
+🏷️ datastore
+💻 all
+
+[mongodb]: https://www.mongodb.com
 [lifecycles]: https://www.mongodb.com/support-policy/lifecycles
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -50,9 +58,28 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   # col_stats_dbs = ["local"]
 
   ## Optional TLS Config
-  # tls_ca = "/etc/telegraf/ca.pem"
-  # tls_cert = "/etc/telegraf/cert.pem"
-  # tls_key = "/etc/telegraf/key.pem"
+  ## Set to true/false to enforce TLS being enabled/disabled. If not set,
+  ## enable TLS only if any of the other options are specified.
+  # tls_enable =
+  ## Trusted root certificates for server
+  # tls_ca = "/path/to/cafile"
+  ## Used for TLS client certificate authentication
+  # tls_cert = "/path/to/certfile"
+  ## Used for TLS client certificate authentication
+  # tls_key = "/path/to/keyfile"
+  ## Password for the key file if it is encrypted
+  # tls_key_pwd = ""
+  ## Send the specified TLS server name via SNI
+  # tls_server_name = "kubernetes.example.com"
+  ## Minimal TLS version to accept by the client
+  # tls_min_version = "TLS12"
+  ## List of ciphers to accept, by default all secure ciphers will be accepted
+  ## See https://pkg.go.dev/crypto/tls#pkg-constants for supported values.
+  ## Use "all", "secure" and "insecure" to add all support ciphers, secure
+  ## suites or insecure suites respectively.
+  # tls_cipher_suites = ["secure"]
+  ## Renegotiation method, "never", "once" or "freely"
+  # tls_renegotiation_method = "never"
   ## Use TLS but skip chain & host verification
   # insecure_skip_verify = false
 
@@ -332,6 +359,6 @@ mongodb,hostname=127.0.0.1:27017,node_type=PRI,rs_name=rs0 active_reads=1i,activ
 mongodb_db_stats,db_name=admin,hostname=127.0.0.1:27017 avg_obj_size=241,collections=2i,data_size=723i,index_size=49152i,indexes=3i,num_extents=0i,objects=3i,ok=1i,storage_size=53248i,type="db_stat" 1547159491000000000
 mongodb_db_stats,db_name=local,hostname=127.0.0.1:27017 avg_obj_size=813.9705882352941,collections=6i,data_size=55350i,index_size=102400i,indexes=5i,num_extents=0i,objects=68i,ok=1i,storage_size=204800i,type="db_stat" 1547159491000000000
 mongodb_col_stats,collection=foo,db_name=local,hostname=127.0.0.1:27017 size=375005928i,avg_obj_size=5494,type="col_stat",storage_size=249307136i,total_index_size=2138112i,ok=1i,count=68251i 1547159491000000000
-mongodb_shard_stats,hostname=127.0.0.1:27017,in_use=3i,available=3i,created=4i,refreshing=0i 1522799074000000000
-mongodb_top_stats,collection=foo,total_time=1471,total_count=158,read_lock_time=49614,read_lock_count=657,write_lock_time=49125456,write_lock_count=9841,queries_time=174,queries_count=495,get_more_time=498,get_more_count=46,insert_time=2651,insert_count=1265,update_time=0,update_count=0,remove_time=0,remove_count=0,commands_time=498611,commands_count=4615
+mongodb_shard_stats,hostname=127.0.0.1:27017 in_use=3i,available=3i,created=4i,refreshing=0i 1522799074000000000
+mongodb_top_stats,collection=foo total_time=1471i,total_count=158i,read_lock_time=49614i,read_lock_count=657i,write_lock_time=49125456i,write_lock_count=9841i,queries_time=174i,queries_count=495i,get_more_time=498i,get_more_count=46i,insert_time=2651i,insert_count=1265i,update_time=0i,update_count=0i,remove_time=0i,remove_count=0i,commands_time=498611i,commands_count=4615i
 ```

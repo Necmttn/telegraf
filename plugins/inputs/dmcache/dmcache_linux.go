@@ -3,11 +3,10 @@
 package dmcache
 
 import (
+	"errors"
 	"os/exec"
 	"strconv"
 	"strings"
-
-	"errors"
 
 	"github.com/influxdata/telegraf"
 )
@@ -155,8 +154,8 @@ func aggregateStats(totalStatus *cacheStatus, status cacheStatus) {
 	totalStatus.dirty += status.dirty
 }
 
-func toFields(status cacheStatus) map[string]interface{} {
-	fields := make(map[string]interface{})
+func toFields(status cacheStatus) map[string]any {
+	fields := make(map[string]any)
 	fields["length"] = status.length
 	fields["metadata_blocksize"] = status.metadataBlocksize
 	fields["metadata_used"] = status.metadataUsed
@@ -180,7 +179,7 @@ func dmSetupStatus() ([]string, error) {
 		return nil, err
 	}
 	if string(out) == "No devices found\n" {
-		return []string{}, nil
+		return nil, nil
 	}
 
 	outString := strings.TrimRight(string(out), "\n")

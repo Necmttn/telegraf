@@ -1,13 +1,15 @@
 package filter
 
 import (
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 var testmetrics = []telegraf.Metric{
@@ -18,7 +20,7 @@ var testmetrics = []telegraf.Metric{
 			"location": "main building",
 			"status":   "OK",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"operating_hours": 37,
 			"temperature":     23.1,
 		},
@@ -31,7 +33,7 @@ var testmetrics = []telegraf.Metric{
 			"location": "factory X",
 			"status":   "OK",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"operating_hours": 1337,
 			"temperature":     19.9,
 			"pieces":          96878,
@@ -45,7 +47,7 @@ var testmetrics = []telegraf.Metric{
 			"location": "factory X",
 			"status":   "failure",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"operating_hours": 1009,
 			"temperature":     67.3,
 			"message":         "temperature alert",
@@ -59,7 +61,7 @@ var testmetrics = []telegraf.Metric{
 			"location": "factory Y",
 			"status":   "OK",
 		},
-		map[string]interface{}{
+		map[string]any{
 			"operating_hours": 825,
 			"temperature":     31.2,
 		},
@@ -94,7 +96,7 @@ func TestNoMetric(t *testing.T) {
 	}
 	require.NoError(t, plugin.Init())
 
-	input := []telegraf.Metric{}
+	var input []telegraf.Metric
 	require.Empty(t, plugin.Apply(input...))
 }
 
@@ -158,7 +160,7 @@ func TestNamePass(t *testing.T) {
 				"location": "factory X",
 				"status":   "failure",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1009,
 				"temperature":     67.3,
 				"message":         "temperature alert",
@@ -172,7 +174,7 @@ func TestNamePass(t *testing.T) {
 				"location": "factory Y",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 825,
 				"temperature":     31.2,
 			},
@@ -202,7 +204,7 @@ func TestNameDrop(t *testing.T) {
 				"location": "main building",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 37,
 				"temperature":     23.1,
 			},
@@ -215,7 +217,7 @@ func TestNameDrop(t *testing.T) {
 				"location": "factory X",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1337,
 				"temperature":     19.9,
 				"pieces":          96878,
@@ -246,7 +248,7 @@ func TestNameGlob(t *testing.T) {
 				"location": "factory X",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1337,
 				"temperature":     19.9,
 				"pieces":          96878,
@@ -278,7 +280,7 @@ func TestTagPass(t *testing.T) {
 				"location": "main building",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 37,
 				"temperature":     23.1,
 			},
@@ -291,7 +293,7 @@ func TestTagPass(t *testing.T) {
 				"location": "factory X",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1337,
 				"temperature":     19.9,
 				"pieces":          96878,
@@ -305,7 +307,7 @@ func TestTagPass(t *testing.T) {
 				"location": "factory Y",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 825,
 				"temperature":     31.2,
 			},
@@ -335,7 +337,7 @@ func TestTagDrop(t *testing.T) {
 				"location": "factory X",
 				"status":   "failure",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1009,
 				"temperature":     67.3,
 				"message":         "temperature alert",
@@ -370,7 +372,7 @@ func TestTagMultiple(t *testing.T) {
 				"location": "factory X",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1337,
 				"temperature":     19.9,
 				"pieces":          96878,
@@ -384,7 +386,7 @@ func TestTagMultiple(t *testing.T) {
 				"location": "factory Y",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 825,
 				"temperature":     31.2,
 			},
@@ -415,7 +417,7 @@ func TestTagGlob(t *testing.T) {
 				"location": "factory X",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1337,
 				"temperature":     19.9,
 				"pieces":          96878,
@@ -429,7 +431,7 @@ func TestTagGlob(t *testing.T) {
 				"location": "factory X",
 				"status":   "failure",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1009,
 				"temperature":     67.3,
 				"message":         "temperature alert",
@@ -443,7 +445,7 @@ func TestTagGlob(t *testing.T) {
 				"location": "factory Y",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 825,
 				"temperature":     31.2,
 			},
@@ -492,7 +494,7 @@ func TestFieldPass(t *testing.T) {
 				"location": "factory X",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1337,
 				"temperature":     19.9,
 				"pieces":          96878,
@@ -506,7 +508,7 @@ func TestFieldPass(t *testing.T) {
 				"location": "factory X",
 				"status":   "failure",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1009,
 				"temperature":     67.3,
 				"message":         "temperature alert",
@@ -537,7 +539,7 @@ func TestFieldDrop(t *testing.T) {
 				"location": "main building",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 37,
 				"temperature":     23.1,
 			},
@@ -550,7 +552,7 @@ func TestFieldDrop(t *testing.T) {
 				"location": "factory Y",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 825,
 				"temperature":     31.2,
 			},
@@ -581,7 +583,7 @@ func TestFieldGlob(t *testing.T) {
 				"location": "factory X",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1337,
 				"temperature":     19.9,
 				"pieces":          96878,
@@ -595,7 +597,7 @@ func TestFieldGlob(t *testing.T) {
 				"location": "factory X",
 				"status":   "failure",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 1009,
 				"temperature":     67.3,
 				"message":         "temperature alert",
@@ -649,7 +651,7 @@ func TestRuleMultiple(t *testing.T) {
 				"location": "main building",
 				"status":   "OK",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"operating_hours": 37,
 				"temperature":     23.1,
 			},
@@ -658,4 +660,79 @@ func TestRuleMultiple(t *testing.T) {
 	}
 	actual := plugin.Apply(testmetrics...)
 	testutil.RequireMetricsEqual(t, expected, actual)
+}
+
+func TestTracking(t *testing.T) {
+	inputRaw := testmetrics
+
+	var mu sync.Mutex
+	delivered := make([]telegraf.DeliveryInfo, 0, len(inputRaw))
+	notify := func(di telegraf.DeliveryInfo) {
+		mu.Lock()
+		defer mu.Unlock()
+		delivered = append(delivered, di)
+	}
+
+	input := make([]telegraf.Metric, 0, len(inputRaw))
+	for _, m := range inputRaw {
+		tm, _ := metric.WithTracking(m.Copy(), notify)
+		input = append(input, tm)
+	}
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"welding",
+			map[string]string{
+				"source":   "machine C",
+				"location": "factory X",
+				"status":   "failure",
+			},
+			map[string]any{
+				"operating_hours": 1009,
+				"temperature":     67.3,
+				"message":         "temperature alert",
+			},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"welding",
+			map[string]string{
+				"source":   "machine D",
+				"location": "factory Y",
+				"status":   "OK",
+			},
+			map[string]any{
+				"operating_hours": 825,
+				"temperature":     31.2,
+			},
+			time.Unix(0, 0),
+		),
+	}
+
+	plugin := &Filter{
+		Rules: []rule{
+			{
+				Name:   []string{"welding"},
+				Action: "pass",
+			},
+		},
+		DefaultAction: "drop",
+	}
+	require.NoError(t, plugin.Init())
+
+	// Process expected metrics and compare with resulting metrics
+	actual := plugin.Apply(input...)
+	testutil.RequireMetricsEqual(t, expected, actual)
+
+	// Simulate output acknowledging delivery
+	for _, m := range actual {
+		m.Accept()
+	}
+
+	// Check delivery
+	require.Eventuallyf(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(input) == len(delivered)
+	}, time.Second, 100*time.Millisecond, "%d delivered but %d expected", len(delivered), len(expected))
 }

@@ -50,12 +50,11 @@ func (r *reader) Read(p []byte) (int, error) {
 	}
 
 	for _, metric := range r.metrics[r.offset:] {
-		err := r.serializer.Write(r.buf, metric)
+		err := r.serializer.write(r.buf, metric)
 		r.offset++
 		if err != nil {
 			r.buf.Reset()
-			var mErr *MetricError
-			if errors.As(err, &mErr) {
+			if _, ok := errors.AsType[*metricError](err); ok {
 				continue
 			}
 			// Since we are serializing multiple metrics, don't fail the

@@ -10,31 +10,31 @@ type Accumulator interface {
 	// name, fields, and tags (and timestamp). If a timestamp is not provided,
 	// then the accumulator sets it to "now".
 	AddFields(measurement string,
-		fields map[string]interface{},
+		fields map[string]any,
 		tags map[string]string,
 		t ...time.Time)
 
 	// AddGauge is the same as AddFields, but will add the metric as a "Gauge" type
 	AddGauge(measurement string,
-		fields map[string]interface{},
+		fields map[string]any,
 		tags map[string]string,
 		t ...time.Time)
 
 	// AddCounter is the same as AddFields, but will add the metric as a "Counter" type
 	AddCounter(measurement string,
-		fields map[string]interface{},
+		fields map[string]any,
 		tags map[string]string,
 		t ...time.Time)
 
 	// AddSummary is the same as AddFields, but will add the metric as a "Summary" type
 	AddSummary(measurement string,
-		fields map[string]interface{},
+		fields map[string]any,
 		tags map[string]string,
 		t ...time.Time)
 
 	// AddHistogram is the same as AddFields, but will add the metric as a "Histogram" type
 	AddHistogram(measurement string,
-		fields map[string]interface{},
+		fields map[string]any,
 		tags map[string]string,
 		t ...time.Time)
 
@@ -56,6 +56,14 @@ type Accumulator interface {
 
 // TrackingID uniquely identifies a tracked metric group
 type TrackingID uint64
+
+type TrackingData interface {
+	// ID is the TrackingID
+	ID() TrackingID
+
+	// RefCount is the number of tracking metrics still persistent and referencing this tracking ID
+	RefCount() int32
+}
 
 // DeliveryInfo provides the results of a delivered metric group.
 type DeliveryInfo interface {

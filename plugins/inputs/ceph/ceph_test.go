@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -19,7 +20,7 @@ const (
 
 type expectedResult struct {
 	metric string
-	fields map[string]interface{}
+	fields map[string]any
 	tags   map[string]string
 }
 
@@ -41,7 +42,7 @@ func TestParseOsdDump(t *testing.T) {
 	dump, err := c.parseDump(osdPerfDump)
 	require.NoError(t, err)
 	require.InEpsilon(t, 552132.109360000, dump["filestore"]["commitcycle_interval.sum"], epsilon)
-	require.Equal(t, float64(0), dump["mutex-FileJournal::finisher_lock"]["wait.avgcount"])
+	require.InDelta(t, float64(0), dump["mutex-FileJournal::finisher_lock"]["wait.avgcount"], testutil.DefaultDelta)
 }
 
 func TestParseMdsDump(t *testing.T) {
@@ -49,7 +50,7 @@ func TestParseMdsDump(t *testing.T) {
 	dump, err := c.parseDump(mdsPerfDump)
 	require.NoError(t, err)
 	require.InEpsilon(t, 2408386.600934982, dump["mds"]["reply_latency.sum"], epsilon)
-	require.Equal(t, float64(0), dump["throttle-write_buf_throttle"]["wait.avgcount"])
+	require.InDelta(t, float64(0), dump["throttle-write_buf_throttle"]["wait.avgcount"], testutil.DefaultDelta)
 }
 
 func TestParseRgwDump(t *testing.T) {
@@ -57,7 +58,7 @@ func TestParseRgwDump(t *testing.T) {
 	dump, err := c.parseDump(rgwPerfDump)
 	require.NoError(t, err)
 	require.InEpsilon(t, 0.002219876, dump["rgw"]["get_initial_lat.sum"], epsilon)
-	require.Equal(t, float64(0), dump["rgw"]["put_initial_lat.avgcount"])
+	require.InDelta(t, float64(0), dump["rgw"]["put_initial_lat.avgcount"], testutil.DefaultDelta)
 }
 
 func TestDecodeStatus(t *testing.T) {
@@ -107,17 +108,36 @@ func TestGather(t *testing.T) {
 		perfDump = saveDump
 	}()
 
-	findSockets = func(c *Ceph) ([]*socket, error) {
+	findSockets = func(*Ceph) ([]*socket, error) {
 		return []*socket{{"osd.1", typeOsd, ""}}, nil
 	}
 
-	perfDump = func(binary string, s *socket) (string, error) {
+	perfDump = func(string, *socket) (string, error) {
 		return osdPerfDump, nil
 	}
 
 	acc := &testutil.Accumulator{}
 	c := &Ceph{}
 	require.NoError(t, c.Gather(acc))
+}
+
+func TestParseSchema(t *testing.T) {
+	schemaMap, err := parseSchema(osdRawSchema)
+
+	require.NoError(t, err)
+	// Test Gauge
+	require.Equal(t, telegraf.Counter, schemaMap["osd"]["op"],
+		"op should be a Counter")
+	// Test Counter
+	require.Equal(t, telegraf.Gauge, schemaMap["osd"]["op_wip"],
+		"op_wip should be a Gauge")
+	// Test LongRunAvg
+	require.Equal(t, telegraf.Counter, schemaMap["osd"]["op_latency.avgcount"],
+		"op_latency.avgcount should be a Counter")
+	require.Equal(t, telegraf.Counter, schemaMap["osd"]["op_latency.sum"],
+		"op_latency.sum should be a Counter")
+	require.Equal(t, telegraf.Gauge, schemaMap["osd"]["op_latency.avgtime"],
+		"op_latency.avgtime should be a Gauge")
 }
 
 func TestFindSockets(t *testing.T) {
@@ -1767,6 +1787,74 @@ var rgwPerfDump = `
     }
 }
 `
+var osdRawSchema = `
+{    "osd": {
+        "op_wip": {
+            "type": 2,
+            "metric_type": "gauge",
+            "value_type": "integer",
+            "description": "Replication operations currently being processed (primary)",
+            "nick": "",
+            "priority": 5,
+            "units": "none"
+        },
+        "op": {
+            "type": 10,
+            "metric_type": "counter",
+            "value_type": "integer",
+            "description": "Client operations",
+            "nick": "ops",
+            "priority": 10,
+            "units": "none"
+        },
+        "op_in_bytes": {
+            "type": 10,
+            "metric_type": "counter",
+            "value_type": "integer",
+            "description": "Client operations total write size",
+            "nick": "wr",
+            "priority": 8,
+            "units": "bytes"
+        },
+        "op_out_bytes": {
+            "type": 10,
+            "metric_type": "counter",
+            "value_type": "integer",
+            "description": "Client operations total read size",
+            "nick": "rd",
+            "priority": 8,
+            "units": "bytes"
+        },
+        "op_latency": {
+	    "type": 5,
+            "metric_type": "gauge",
+            "value_type": "real-integer-pair",
+            "description": "Latency of client operations (including queue time)",
+            "nick": "l",
+            "priority": 9,
+            "units": "none"
+        },
+        "op_process_latency": {
+            "type": 5,
+            "metric_type": "gauge",
+            "value_type": "real-integer-pair",
+            "description": "Latency of client operations (excluding queue time)",
+            "nick": "",
+            "priority": 5,
+            "units": "none"
+        },
+        "op_prepare_latency": {
+            "type": 5,
+            "metric_type": "gauge",
+            "value_type": "real-integer-pair",
+            "description": "Latency of client operations (excluding queue time and wait for finished)",
+            "nick": "",
+            "priority": 5,
+            "units": "none"
+        }
+}
+}
+`
 
 var clusterStatusDump = `
 {
@@ -1888,7 +1976,7 @@ var clusterStatusDump = `
 var cephStatusResults = []expectedResult{
 	{
 		metric: "ceph_fsmap",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"in":         float64(1),
 			"max":        float64(1),
 			"up_standby": float64(2),
@@ -1898,7 +1986,7 @@ var cephStatusResults = []expectedResult{
 	},
 	{
 		metric: "ceph_health",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"overall_status": "",
 			"status_code":    float64(2),
 			"status":         "HEALTH_OK",
@@ -1907,14 +1995,14 @@ var cephStatusResults = []expectedResult{
 	},
 	{
 		metric: "ceph_monmap",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"num_mons": float64(3),
 		},
 		tags: map[string]string{},
 	},
 	{
 		metric: "ceph_osdmap",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"epoch":            float64(21734),
 			"num_in_osds":      float64(24),
 			"num_osds":         float64(24),
@@ -1925,7 +2013,7 @@ var cephStatusResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pgmap",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"bytes_avail":                float64(9857462382592),
 			"bytes_total":                float64(17335810048000),
 			"bytes_used":                 float64(7478347665408),
@@ -1954,7 +2042,7 @@ var cephStatusResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pgmap_state",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"count": float64(2560),
 		},
 		tags: map[string]string{
@@ -1963,7 +2051,7 @@ var cephStatusResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pgmap_state",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"count": float64(10),
 		},
 		tags: map[string]string{
@@ -1972,7 +2060,7 @@ var cephStatusResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pgmap_state",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"count": float64(5),
 		},
 		tags: map[string]string{
@@ -2103,7 +2191,7 @@ var clusterStatusDumpNestedOSD = `
 var cephStatusResultsNestedOSD = []expectedResult{
 	{
 		metric: "ceph_osdmap",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"epoch":            float64(21734),
 			"full":             false,
 			"nearfull":         false,
@@ -2200,7 +2288,7 @@ var cephDFDump = `
 var cephDfResults = []expectedResult{
 	{
 		metric: "ceph_usage",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"num_osds":               float64(6),
 			"num_per_pool_omap_osds": float64(6),
 			"num_per_pool_osds":      float64(6),
@@ -2217,7 +2305,7 @@ var cephDfResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pool_usage",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"bytes_used":   float64(2019480838046),
 			"kb_used":      float64(1972149256),
 			"max_avail":    float64(1826599337984),
@@ -2231,7 +2319,7 @@ var cephDfResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pool_usage",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"bytes_used":   float64(4459399953),
 			"kb_used":      float64(4354883),
 			"max_avail":    float64(547248046080),
@@ -2245,7 +2333,7 @@ var cephDfResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pool_usage",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"bytes_used":   float64(3892134871040),
 			"kb_used":      float64(3800912960),
 			"max_avail":    float64(1826599337984),
@@ -2259,7 +2347,7 @@ var cephDfResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pool_usage",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"bytes_used":   float64(85269164),
 			"kb_used":      float64(83271),
 			"max_avail":    float64(3397479301120),
@@ -2273,7 +2361,7 @@ var cephDfResults = []expectedResult{
 	},
 	{
 		metric: "ceph_deviceclass_usage",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"total_avail_bytes":    float64(6080040206336),
 			"total_bytes":          float64(12002349023232),
 			"total_used_bytes":     float64(5922308816896),
@@ -2286,7 +2374,7 @@ var cephDfResults = []expectedResult{
 	},
 	{
 		metric: "ceph_deviceclass_usage",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"total_avail_bytes":    float64(1786094858240),
 			"total_bytes":          float64(2880580878336),
 			"total_used_bytes":     float64(1094486020096),
@@ -2351,7 +2439,7 @@ var cephODSPoolStatsDump = `
 var cephOSDPoolStatsResults = []expectedResult{
 	{
 		metric: "ceph_pool_stats",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"degraded_objects":           float64(12),
 			"degraded_ratio":             float64(0.000024840246166839513),
 			"degraded_total":             float64(483087),
@@ -2373,7 +2461,7 @@ var cephOSDPoolStatsResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pool_stats",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"degraded_objects":           float64(0),
 			"degraded_ratio":             float64(0),
 			"degraded_total":             float64(0),
@@ -2395,7 +2483,7 @@ var cephOSDPoolStatsResults = []expectedResult{
 	},
 	{
 		metric: "ceph_pool_stats",
-		fields: map[string]interface{}{
+		fields: map[string]any{
 			"degraded_objects":           float64(0),
 			"degraded_ratio":             float64(0),
 			"degraded_total":             float64(0),

@@ -21,7 +21,7 @@ import (
 var sampleConfig string
 
 type Raindrops struct {
-	Urls       []string
+	Urls       []string `toml:"urls"`
 	httpClient *http.Client
 }
 
@@ -89,8 +89,8 @@ func (r *Raindrops) gatherURL(addr *url.URL, acc telegraf.Accumulator) error {
 	if err != nil {
 		return err
 	}
-	tags := r.getTags(addr)
-	fields := map[string]interface{}{
+	tags := getTags(addr)
+	fields := map[string]any{
 		"calling": calling,
 		"writing": writing,
 	}
@@ -106,7 +106,7 @@ func (r *Raindrops) gatherURL(addr *url.URL, acc telegraf.Accumulator) error {
 		// Listen
 		var tags map[string]string
 
-		lis := map[string]interface{}{
+		lis := map[string]any{
 			"active": 0,
 			"queued": 0,
 		}
@@ -149,11 +149,11 @@ func (r *Raindrops) gatherURL(addr *url.URL, acc telegraf.Accumulator) error {
 		}
 		acc.AddFields("raindrops_listen", lis, tags)
 	}
-	return nil //nolint:nilerr // nil returned on purpose
+	return nil
 }
 
 // Get tag(s) for the raindrops calling/writing plugin
-func (r *Raindrops) getTags(addr *url.URL) map[string]string {
+func getTags(addr *url.URL) map[string]string {
 	h := addr.Host
 	host, port, err := net.SplitHostPort(h)
 	if err != nil {

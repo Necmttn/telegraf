@@ -1,24 +1,42 @@
 # Windows Eventlog Input Plugin
 
-Telegraf's win_eventlog input plugin gathers metrics from the windows event log.
+This plugin gathers metrics from the [Windows event log][win_event_log] on
+Windows Vista and higher.
 
-## Collect Windows Event Log messages
+> [!NOTE]
+> Some event channels, like the System Log, require Administrator permissions
+> to subscribe.
 
-Supports Windows Vista and higher.
+⭐ Telegraf v1.16.0
+🏷️ logging
+💻 windows
 
-Telegraf should have Administrator permissions to subscribe for some of the
-Windows Events Channels, like System Log.
-
-Telegraf minimum version: Telegraf 1.16.0
+[win_event_log]: https://learn.microsoft.com/en-us/shows/inside/event-viewer
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
+
+## Startup error behavior options <!-- @/docs/includes/startup_error_behavior.md -->
+
+In addition to the plugin-specific and global configuration settings the plugin
+supports options for specifying the behavior when experiencing startup errors
+using the `startup_error_behavior` setting. Available values are:
+
+- `error`:  Telegraf with stop and exit in case of startup errors. This is the
+            default behavior.
+- `ignore`: Telegraf will ignore startup errors for this plugin and disables it
+            but continues processing for all other plugins.
+- `retry`:  Telegraf will try to startup the plugin in every gather or write
+            cycle in case of startup errors. The plugin is disabled until
+            the startup succeeds.
+- `probe`:  Telegraf will probe the plugin's function (if possible) and disables
+            the plugin in case probing fails. If the plugin does not support
+            probing, Telegraf will behave as if `ignore` was set instead.
 
 ## Configuration
 
@@ -69,6 +87,9 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## events will be logged.
   # from_beginning = false
 
+  ## Number of events to fetch in one batch
+  # event_batch_size = 5
+
   # Process UserData XML to fields, if this node exists in Event XML
   # process_userdata = true
 
@@ -117,6 +138,11 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## The values below are included by default.
   ## Globbing supported (e.g. "Level*" matches both "Level" and "LevelText")
   # exclude_empty = ["Task", "Opcode", "*ActivityID", "UserID"]
+
+  ## Maximum memory size available for an event to render
+  ## Events larger that that are not processed and will not create a metric.
+  ## NOTE: As events are encoded in UTF-16 we need two bytes per character.
+  # event_size_limit = "64KB"
 ```
 
 ### Filtering
@@ -128,7 +154,7 @@ There are three types of filtering: **Event Log** name, **XPath Query** and
 
 ```toml
   eventlog_name = "Application"
-  xpath_query = '''
+  xpath_query = ""
 ```
 
 For **XPath Query** filtering set the `xpath_query` value, and `eventlog_name`
@@ -148,13 +174,22 @@ XML Query documentation:
 
 <https://docs.microsoft.com/en-us/windows/win32/wes/consuming-events>
 
+## Troubleshooting
+
+In case you see a `Collection took longer than expected` warning, there might
+be a burst of events logged and the API is not able to deliver them fast enough
+to complete processing within the specified interval. Tweaking the
+`event_batch_size` setting might help to mitigate the issue.
+The said warning does not indicate data-loss, but you should investigate the
+amount of events you log.
+
 ## Metrics
 
 You can send any field, *System*, *Computed* or *XML* as tag field. List of
 those fields is in the `event_tags` config array. Globbing is supported in this
-array, i.e. `Level*` for all fields beginning with `Level`, or `L?vel` for all
-fields where the name is `Level`, `L3vel`, `L@vel` and so on. Tag fields are
-converted to strings automatically.
+array. For example, `Level*` matches all fields beginning with `Level`, and
+`L?vel` matches all fields where the name is `Level`, `L3vel`, `L@vel`, and so
+on. Tag fields are converted to strings automatically.
 
 By default, all other fields are sent, but you can limit that either by listing
 it in `event_fields` config array with globbing, or by adding some field name
@@ -254,7 +289,7 @@ CbsPackageChangeState_Client = "UpdateAgentLCU"
 If there are more than one field with the same name, all those fields are given
 suffix with number: `_1`, `_2` and so on.
 
-## Localization
+### Localization
 
 Human readable Event Description is in the Message field. But it is better to be
 skipped in favour of the Event XML values, because they are more

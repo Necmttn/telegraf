@@ -12,9 +12,9 @@ import (
 
 // MetricHandler implements the Handler interface and produces telegraf.Metric.
 type MetricHandler struct {
-	timePrecision time.Duration
-	timeFunc      TimeFunc
 	metric        telegraf.Metric
+	timeFunc      func() time.Time
+	timePrecision time.Duration
 }
 
 func NewMetricHandler() *MetricHandler {
@@ -34,11 +34,14 @@ func (h *MetricHandler) SetTimePrecision(p time.Duration) {
 	// overloaded to hold the unit of measurement of the timestamp.
 }
 
-func (h *MetricHandler) SetTimeFunc(f TimeFunc) {
+func (h *MetricHandler) SetTimeFunc(f func() time.Time) {
 	h.timeFunc = f
 }
 
 func (h *MetricHandler) Metric() telegraf.Metric {
+	if h.metric == nil {
+		return nil
+	}
 	if h.metric.Time().IsZero() {
 		h.metric.SetTime(h.timeFunc().Truncate(h.timePrecision))
 	}
@@ -51,19 +54,18 @@ func (h *MetricHandler) SetMeasurement(name []byte) error {
 	return nil
 }
 
-func (h *MetricHandler) AddTag(key []byte, value []byte) error {
+func (h *MetricHandler) AddTag(key, value []byte) error {
 	tk := unescape(key)
 	tv := unescape(value)
 	h.metric.AddTag(tk, tv)
 	return nil
 }
 
-func (h *MetricHandler) AddInt(key []byte, value []byte) error {
+func (h *MetricHandler) AddInt(key, value []byte) error {
 	fk := unescape(key)
 	fv, err := parseIntBytes(bytes.TrimSuffix(value, []byte("i")), 10, 64)
 	if err != nil {
-		var numErr *strconv.NumError
-		if errors.As(err, &numErr) {
+		if numErr, ok := errors.AsType[*strconv.NumError](err); ok {
 			return numErr.Err
 		}
 		return err
@@ -72,12 +74,11 @@ func (h *MetricHandler) AddInt(key []byte, value []byte) error {
 	return nil
 }
 
-func (h *MetricHandler) AddUint(key []byte, value []byte) error {
+func (h *MetricHandler) AddUint(key, value []byte) error {
 	fk := unescape(key)
 	fv, err := parseUintBytes(bytes.TrimSuffix(value, []byte("u")), 10, 64)
 	if err != nil {
-		var numErr *strconv.NumError
-		if errors.As(err, &numErr) {
+		if numErr, ok := errors.AsType[*strconv.NumError](err); ok {
 			return numErr.Err
 		}
 		return err
@@ -86,12 +87,11 @@ func (h *MetricHandler) AddUint(key []byte, value []byte) error {
 	return nil
 }
 
-func (h *MetricHandler) AddFloat(key []byte, value []byte) error {
+func (h *MetricHandler) AddFloat(key, value []byte) error {
 	fk := unescape(key)
 	fv, err := parseFloatBytes(value, 64)
 	if err != nil {
-		var numErr *strconv.NumError
-		if errors.As(err, &numErr) {
+		if numErr, ok := errors.AsType[*strconv.NumError](err); ok {
 			return numErr.Err
 		}
 		return err
@@ -100,18 +100,18 @@ func (h *MetricHandler) AddFloat(key []byte, value []byte) error {
 	return nil
 }
 
-func (h *MetricHandler) AddString(key []byte, value []byte) error {
+func (h *MetricHandler) AddString(key, value []byte) error {
 	fk := unescape(key)
 	fv := stringFieldUnescape(value)
 	h.metric.AddField(fk, fv)
 	return nil
 }
 
-func (h *MetricHandler) AddBool(key []byte, value []byte) error {
+func (h *MetricHandler) AddBool(key, value []byte) error {
 	fk := unescape(key)
 	fv, err := parseBoolBytes(value)
 	if err != nil {
-		return errors.New("unparseable bool")
+		return errors.New("unparsable bool")
 	}
 	h.metric.AddField(fk, fv)
 	return nil
@@ -120,14 +120,13 @@ func (h *MetricHandler) AddBool(key []byte, value []byte) error {
 func (h *MetricHandler) SetTimestamp(tm []byte) error {
 	v, err := parseIntBytes(tm, 10, 64)
 	if err != nil {
-		var numErr *strconv.NumError
-		if errors.As(err, &numErr) {
+		if numErr, ok := errors.AsType[*strconv.NumError](err); ok {
 			return numErr.Err
 		}
 		return err
 	}
 
-	//time precision is overloaded to mean time unit here
+	// time precision is overloaded to mean time unit here
 	ns := v * int64(h.timePrecision)
 	h.metric.SetTime(time.Unix(0, ns))
 	return nil

@@ -10,6 +10,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/serializers/influx"
+	"github.com/influxdata/telegraf/selfstat"
 )
 
 const (
@@ -29,9 +30,22 @@ type Conn interface {
 type UDPConfig struct {
 	MaxPayloadSize int
 	URL            *url.URL
+	LocalAddr      *net.UDPAddr
 	Serializer     *influx.Serializer
 	Dialer         Dialer
 	Log            telegraf.Logger
+
+	BytesWritten selfstat.Stat
+}
+
+type udpClient struct {
+	conn       Conn
+	dialer     Dialer
+	serializer *influx.Serializer
+	url        *url.URL
+	log        telegraf.Logger
+
+	bytesWritten selfstat.Stat
 }
 
 func NewUDPClient(config UDPConfig) (*udpClient, error) {
@@ -55,31 +69,24 @@ func NewUDPClient(config UDPConfig) (*udpClient, error) {
 
 	dialer := config.Dialer
 	if dialer == nil {
-		dialer = &netDialer{net.Dialer{}}
+		dialer = &netDialer{net.Dialer{LocalAddr: config.LocalAddr}}
 	}
 
 	client := &udpClient{
-		url:        config.URL,
-		serializer: serializer,
-		dialer:     dialer,
-		log:        config.Log,
+		url:          config.URL,
+		serializer:   serializer,
+		dialer:       dialer,
+		log:          config.Log,
+		bytesWritten: config.BytesWritten,
 	}
 	return client, nil
-}
-
-type udpClient struct {
-	conn       Conn
-	dialer     Dialer
-	serializer *influx.Serializer
-	url        *url.URL
-	log        telegraf.Logger
 }
 
 func (c *udpClient) URL() string {
 	return c.url.String()
 }
 
-func (c *udpClient) Database() string {
+func (*udpClient) Database() string {
 	return ""
 }
 
@@ -97,8 +104,7 @@ func (c *udpClient) Write(ctx context.Context, metrics []telegraf.Metric) error 
 		if err != nil {
 			// Since we are serializing multiple metrics, don't fail the
 			// entire batch just because of one unserializable metric.
-			c.log.Errorf("When writing to [%s] could not serialize metric: %v",
-				c.URL(), err)
+			c.log.Errorf("When writing to [%s] could not serialize metric: %v", c.URL(), err)
 			continue
 		}
 
@@ -107,6 +113,8 @@ func (c *udpClient) Write(ctx context.Context, metrics []telegraf.Metric) error 
 		for scanner.Scan() {
 			_, err = c.conn.Write(scanner.Bytes())
 		}
+		c.bytesWritten.Incr(int64(len(octets)))
+
 		if err != nil {
 			_ = c.conn.Close()
 			c.conn = nil
@@ -117,7 +125,7 @@ func (c *udpClient) Write(ctx context.Context, metrics []telegraf.Metric) error 
 	return nil
 }
 
-func (c *udpClient) CreateDatabase(_ context.Context, _ string) error {
+func (*udpClient) CreateDatabase(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -140,5 +148,5 @@ func scanLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	return 0, nil, nil
 }
 
-func (c *udpClient) Close() {
+func (*udpClient) Close() {
 }

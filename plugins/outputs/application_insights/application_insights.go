@@ -3,8 +3,10 @@ package application_insights
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"time"
 
@@ -46,7 +48,7 @@ func (*ApplicationInsights) SampleConfig() string {
 
 func (a *ApplicationInsights) Connect() error {
 	if a.InstrumentationKey == "" {
-		return fmt.Errorf("instrumentation key is required")
+		return errors.New("instrumentation key is required")
 	}
 
 	if a.transmitter == nil {
@@ -165,9 +167,13 @@ func (a *ApplicationInsights) createAggregateMetricTelemetry(metric telegraf.Met
 	// We attempt to set min, max, variance and stddev fields but do not really care if they are not present--
 	// they are not essential for aggregate metric.
 	// By convention AppInsights prefers stddev over variance, so to be consistent, we test for stddev after testing for variance.
+	//nolint:errcheck // see above
 	telemetry.Min, _ = getFloat64TelemetryPropertyValue([]string{"min"}, metric, &usedFields)
+	//nolint:errcheck // see above
 	telemetry.Max, _ = getFloat64TelemetryPropertyValue([]string{"max"}, metric, &usedFields)
+	//nolint:errcheck // see above
 	telemetry.Variance, _ = getFloat64TelemetryPropertyValue([]string{"variance"}, metric, &usedFields)
+	//nolint:errcheck // see above
 	telemetry.StdDev, _ = getFloat64TelemetryPropertyValue([]string{"stddev"}, metric, &usedFields)
 
 	return telemetry, usedFields
@@ -178,7 +184,7 @@ func (a *ApplicationInsights) createTelemetryForUnusedFields(metric telegraf.Met
 	retval := make([]appinsights.Telemetry, 0, len(fields))
 
 	for fieldName := range fields {
-		if contains(usedFields, fieldName) {
+		if slices.Contains(usedFields, fieldName) {
 			continue
 		}
 
@@ -222,7 +228,7 @@ func getFloat64TelemetryPropertyValue(
 		return metricValue, nil
 	}
 
-	return 0.0, fmt.Errorf("no field from the candidate list was found in the metric")
+	return 0.0, errors.New("no field from the candidate list was found in the metric")
 }
 
 func getIntTelemetryPropertyValue(
@@ -248,20 +254,10 @@ func getIntTelemetryPropertyValue(
 		return metricValue, nil
 	}
 
-	return 0, fmt.Errorf("no field from the candidate list was found in the metric")
+	return 0, errors.New("no field from the candidate list was found in the metric")
 }
 
-func contains(set []string, val string) bool {
-	for _, elem := range set {
-		if elem == val {
-			return true
-		}
-	}
-
-	return false
-}
-
-func toFloat64(value interface{}) (float64, error) {
+func toFloat64(value any) (float64, error) {
 	// Out of all Golang numerical types Telegraf only uses int64, unit64 and float64 for fields
 	switch v := value.(type) {
 	case int64:
@@ -275,7 +271,7 @@ func toFloat64(value interface{}) (float64, error) {
 	return 0.0, fmt.Errorf("[%s] cannot be converted to a float64 value", value)
 }
 
-func toInt(value interface{}) (int, error) {
+func toInt(value any) (int, error) {
 	// Out of all Golang numerical types Telegraf only uses int64, unit64 and float64 for fields
 	switch v := value.(type) {
 	case uint64:

@@ -24,7 +24,7 @@ func TestNoMigration(t *testing.T) {
   ignore_fs = ["tmpfs", "devtmpfs", "devfs", "iso9660", "overlay", "aufs", "squashfs"]
 
   ## Ignore mount points by mount options.
-  ## The 'mount' command reports options of all mounts in parathesis.
+  ## The 'mount' command reports options of all mounts in parenthesis.
   ## Bind mounts can be ignored with the special 'bind' option.
   # ignore_mount_opts = []
 `)
@@ -70,7 +70,7 @@ func TestCases(t *testing.T) {
 			require.NotEmpty(t, output)
 			require.GreaterOrEqual(t, n, uint64(1))
 			actual := config.NewConfig()
-			require.NoError(t, actual.LoadConfigData(output))
+			require.NoError(t, actual.LoadConfigData(output, config.EmptySourcePath))
 
 			// Test the output
 			require.Len(t, actual.Inputs, len(expected.Inputs))

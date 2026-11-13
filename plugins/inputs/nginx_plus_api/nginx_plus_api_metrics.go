@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -71,7 +72,7 @@ func (n *NginxPlusAPI) gatherURL(addr *url.URL, path string) ([]byte, error) {
 		return nil, fmt.Errorf("%s returned HTTP status %s", address, resp.Status)
 	}
 
-	contentType := strings.Split(resp.Header.Get("Content-Type"), ";")[0]
+	contentType, _, _ := strings.Cut(resp.Header.Get("Content-Type"), ";")
 	switch contentType {
 	case "application/json":
 		body, err := io.ReadAll(resp.Body)
@@ -91,7 +92,7 @@ func (n *NginxPlusAPI) gatherProcessesMetrics(addr *url.URL, acc telegraf.Accumu
 		return err
 	}
 
-	var processes = &Processes{}
+	var processes = &processes{}
 
 	if err := json.Unmarshal(body, processes); err != nil {
 		return err
@@ -99,7 +100,7 @@ func (n *NginxPlusAPI) gatherProcessesMetrics(addr *url.URL, acc telegraf.Accumu
 
 	acc.AddFields(
 		"nginx_plus_api_processes",
-		map[string]interface{}{
+		map[string]any{
 			"respawned": processes.Respawned,
 		},
 		getTags(addr),
@@ -114,7 +115,7 @@ func (n *NginxPlusAPI) gatherConnectionsMetrics(addr *url.URL, acc telegraf.Accu
 		return err
 	}
 
-	var connections = &Connections{}
+	var connections = &connections{}
 
 	if err := json.Unmarshal(body, connections); err != nil {
 		return err
@@ -122,7 +123,7 @@ func (n *NginxPlusAPI) gatherConnectionsMetrics(addr *url.URL, acc telegraf.Accu
 
 	acc.AddFields(
 		"nginx_plus_api_connections",
-		map[string]interface{}{
+		map[string]any{
 			"accepted": connections.Accepted,
 			"dropped":  connections.Dropped,
 			"active":   connections.Active,
@@ -140,7 +141,7 @@ func (n *NginxPlusAPI) gatherSlabsMetrics(addr *url.URL, acc telegraf.Accumulato
 		return err
 	}
 
-	var slabs Slabs
+	var slabs slabs
 
 	if err := json.Unmarshal(body, &slabs); err != nil {
 		return err
@@ -149,15 +150,13 @@ func (n *NginxPlusAPI) gatherSlabsMetrics(addr *url.URL, acc telegraf.Accumulato
 	tags := getTags(addr)
 
 	for zoneName, slab := range slabs {
-		slabTags := map[string]string{}
-		for k, v := range tags {
-			slabTags[k] = v
-		}
+		slabTags := make(map[string]string, len(tags)+1)
+		maps.Copy(slabTags, tags)
 		slabTags["zone"] = zoneName
 
 		acc.AddFields(
 			"nginx_plus_api_slabs_pages",
-			map[string]interface{}{
+			map[string]any{
 				"used": slab.Pages.Used,
 				"free": slab.Pages.Free,
 			},
@@ -165,15 +164,13 @@ func (n *NginxPlusAPI) gatherSlabsMetrics(addr *url.URL, acc telegraf.Accumulato
 		)
 
 		for slotID, slot := range slab.Slots {
-			slotTags := map[string]string{}
-			for k, v := range slabTags {
-				slotTags[k] = v
-			}
+			slotTags := make(map[string]string, len(slabTags)+1)
+			maps.Copy(slotTags, slabTags)
 			slotTags["slot"] = slotID
 
 			acc.AddFields(
 				"nginx_plus_api_slabs_slots",
-				map[string]interface{}{
+				map[string]any{
 					"used":  slot.Used,
 					"free":  slot.Free,
 					"reqs":  slot.Reqs,
@@ -193,7 +190,7 @@ func (n *NginxPlusAPI) gatherSslMetrics(addr *url.URL, acc telegraf.Accumulator)
 		return err
 	}
 
-	var ssl = &Ssl{}
+	var ssl = &ssl{}
 
 	if err := json.Unmarshal(body, ssl); err != nil {
 		return err
@@ -201,7 +198,7 @@ func (n *NginxPlusAPI) gatherSslMetrics(addr *url.URL, acc telegraf.Accumulator)
 
 	acc.AddFields(
 		"nginx_plus_api_ssl",
-		map[string]interface{}{
+		map[string]any{
 			"handshakes":        ssl.Handshakes,
 			"handshakes_failed": ssl.HandshakesFailed,
 			"session_reuses":    ssl.SessionReuses,
@@ -218,7 +215,7 @@ func (n *NginxPlusAPI) gatherHTTPRequestsMetrics(addr *url.URL, acc telegraf.Acc
 		return err
 	}
 
-	var httpRequests = &HTTPRequests{}
+	var httpRequests = &httpRequests{}
 
 	if err := json.Unmarshal(body, httpRequests); err != nil {
 		return err
@@ -226,7 +223,7 @@ func (n *NginxPlusAPI) gatherHTTPRequestsMetrics(addr *url.URL, acc telegraf.Acc
 
 	acc.AddFields(
 		"nginx_plus_api_http_requests",
-		map[string]interface{}{
+		map[string]any{
 			"total":   httpRequests.Total,
 			"current": httpRequests.Current,
 		},
@@ -242,24 +239,21 @@ func (n *NginxPlusAPI) gatherHTTPServerZonesMetrics(addr *url.URL, acc telegraf.
 		return err
 	}
 
-	var httpServerZones HTTPServerZones
+	var httpServerZones httpServerZones
 
 	if err := json.Unmarshal(body, &httpServerZones); err != nil {
 		return err
 	}
 
 	tags := getTags(addr)
-
 	for zoneName, zone := range httpServerZones {
-		zoneTags := map[string]string{}
-		for k, v := range tags {
-			zoneTags[k] = v
-		}
+		zoneTags := make(map[string]string, len(tags)+1)
+		maps.Copy(zoneTags, tags)
 		zoneTags["zone"] = zoneName
 		acc.AddFields(
 			"nginx_plus_api_http_server_zones",
-			func() map[string]interface{} {
-				result := map[string]interface{}{
+			func() map[string]any {
+				result := map[string]any{
 					"processing":      zone.Processing,
 					"requests":        zone.Requests,
 					"responses_1xx":   zone.Responses.Responses1xx,
@@ -290,7 +284,7 @@ func (n *NginxPlusAPI) gatherHTTPLocationZonesMetrics(addr *url.URL, acc telegra
 		return err
 	}
 
-	var httpLocationZones HTTPLocationZones
+	var httpLocationZones httpLocationZones
 
 	if err := json.Unmarshal(body, &httpLocationZones); err != nil {
 		return err
@@ -299,15 +293,13 @@ func (n *NginxPlusAPI) gatherHTTPLocationZonesMetrics(addr *url.URL, acc telegra
 	tags := getTags(addr)
 
 	for zoneName, zone := range httpLocationZones {
-		zoneTags := map[string]string{}
-		for k, v := range tags {
-			zoneTags[k] = v
-		}
+		zoneTags := make(map[string]string, len(tags)+1)
+		maps.Copy(zoneTags, tags)
 		zoneTags["zone"] = zoneName
 		acc.AddFields(
 			"nginx_plus_api_http_location_zones",
-			func() map[string]interface{} {
-				result := map[string]interface{}{
+			func() map[string]any {
+				result := map[string]any{
 					"requests":        zone.Requests,
 					"responses_1xx":   zone.Responses.Responses1xx,
 					"responses_2xx":   zone.Responses.Responses2xx,
@@ -336,7 +328,7 @@ func (n *NginxPlusAPI) gatherHTTPUpstreamsMetrics(addr *url.URL, acc telegraf.Ac
 		return err
 	}
 
-	var httpUpstreams HTTPUpstreams
+	var httpUpstreams httpUpstreams
 
 	if err := json.Unmarshal(body, &httpUpstreams); err != nil {
 		return err
@@ -345,12 +337,10 @@ func (n *NginxPlusAPI) gatherHTTPUpstreamsMetrics(addr *url.URL, acc telegraf.Ac
 	tags := getTags(addr)
 
 	for upstreamName, upstream := range httpUpstreams {
-		upstreamTags := map[string]string{}
-		for k, v := range tags {
-			upstreamTags[k] = v
-		}
+		upstreamTags := make(map[string]string, len(tags)+1)
+		maps.Copy(upstreamTags, tags)
 		upstreamTags["upstream"] = upstreamName
-		upstreamFields := map[string]interface{}{
+		upstreamFields := map[string]any{
 			"keepalive": upstream.Keepalive,
 			"zombies":   upstream.Zombies,
 		}
@@ -365,7 +355,7 @@ func (n *NginxPlusAPI) gatherHTTPUpstreamsMetrics(addr *url.URL, acc telegraf.Ac
 			upstreamTags,
 		)
 		for _, peer := range upstream.Peers {
-			peerFields := map[string]interface{}{
+			peerFields := map[string]any{
 				"backup":                 peer.Backup,
 				"weight":                 peer.Weight,
 				"state":                  peer.State,
@@ -385,8 +375,8 @@ func (n *NginxPlusAPI) gatherHTTPUpstreamsMetrics(addr *url.URL, acc telegraf.Ac
 				"healthchecks_fails":     peer.HealthChecks.Fails,
 				"healthchecks_unhealthy": peer.HealthChecks.Unhealthy,
 				"downtime":               peer.Downtime,
-				//"selected":               peer.Selected.toInt64,
-				//"downstart":              peer.Downstart.toInt64,
+				// "selected":               peer.Selected.toInt64,
+				// "downstart":              peer.Downstart.toInt64,
 			}
 			if peer.HealthChecks.LastPassed != nil {
 				peerFields["healthchecks_last_passed"] = *peer.HealthChecks.LastPassed
@@ -400,10 +390,8 @@ func (n *NginxPlusAPI) gatherHTTPUpstreamsMetrics(addr *url.URL, acc telegraf.Ac
 			if peer.MaxConns != nil {
 				peerFields["max_conns"] = *peer.MaxConns
 			}
-			peerTags := map[string]string{}
-			for k, v := range upstreamTags {
-				peerTags[k] = v
-			}
+			peerTags := make(map[string]string, len(upstreamTags)+2)
+			maps.Copy(peerTags, upstreamTags)
 			peerTags["upstream_address"] = peer.Server
 			if peer.ID != nil {
 				peerTags["id"] = strconv.Itoa(*peer.ID)
@@ -420,7 +408,7 @@ func (n *NginxPlusAPI) gatherHTTPCachesMetrics(addr *url.URL, acc telegraf.Accum
 		return err
 	}
 
-	var httpCaches HTTPCaches
+	var httpCaches httpCaches
 
 	if err := json.Unmarshal(body, &httpCaches); err != nil {
 		return err
@@ -429,14 +417,12 @@ func (n *NginxPlusAPI) gatherHTTPCachesMetrics(addr *url.URL, acc telegraf.Accum
 	tags := getTags(addr)
 
 	for cacheName, cache := range httpCaches {
-		cacheTags := map[string]string{}
-		for k, v := range tags {
-			cacheTags[k] = v
-		}
+		cacheTags := make(map[string]string, len(tags)+1)
+		maps.Copy(cacheTags, tags)
 		cacheTags["cache"] = cacheName
 		acc.AddFields(
 			"nginx_plus_api_http_caches",
-			map[string]interface{}{
+			map[string]any{
 				"size":                      cache.Size,
 				"max_size":                  cache.MaxSize,
 				"cold":                      cache.Cold,
@@ -474,7 +460,7 @@ func (n *NginxPlusAPI) gatherStreamServerZonesMetrics(addr *url.URL, acc telegra
 		return err
 	}
 
-	var streamServerZones StreamServerZones
+	var streamServerZones streamServerZones
 
 	if err := json.Unmarshal(body, &streamServerZones); err != nil {
 		return err
@@ -483,14 +469,12 @@ func (n *NginxPlusAPI) gatherStreamServerZonesMetrics(addr *url.URL, acc telegra
 	tags := getTags(addr)
 
 	for zoneName, zone := range streamServerZones {
-		zoneTags := map[string]string{}
-		for k, v := range tags {
-			zoneTags[k] = v
-		}
+		zoneTags := make(map[string]string, len(tags)+1)
+		maps.Copy(zoneTags, tags)
 		zoneTags["zone"] = zoneName
 		acc.AddFields(
 			"nginx_plus_api_stream_server_zones",
-			map[string]interface{}{
+			map[string]any{
 				"processing":  zone.Processing,
 				"connections": zone.Connections,
 				"received":    zone.Received,
@@ -510,7 +494,7 @@ func (n *NginxPlusAPI) gatherResolverZonesMetrics(addr *url.URL, acc telegraf.Ac
 		return err
 	}
 
-	var resolverZones ResolverZones
+	var resolverZones resolverZones
 
 	if err := json.Unmarshal(body, &resolverZones); err != nil {
 		return err
@@ -519,14 +503,12 @@ func (n *NginxPlusAPI) gatherResolverZonesMetrics(addr *url.URL, acc telegraf.Ac
 	tags := getTags(addr)
 
 	for zoneName, resolver := range resolverZones {
-		zoneTags := map[string]string{}
-		for k, v := range tags {
-			zoneTags[k] = v
-		}
+		zoneTags := make(map[string]string, len(tags)+1)
+		maps.Copy(zoneTags, tags)
 		zoneTags["zone"] = zoneName
 		acc.AddFields(
 			"nginx_plus_api_resolver_zones",
-			map[string]interface{}{
+			map[string]any{
 				"name": resolver.Requests.Name,
 				"srv":  resolver.Requests.Srv,
 				"addr": resolver.Requests.Addr,
@@ -553,7 +535,7 @@ func (n *NginxPlusAPI) gatherStreamUpstreamsMetrics(addr *url.URL, acc telegraf.
 		return err
 	}
 
-	var streamUpstreams StreamUpstreams
+	var streamUpstreams streamUpstreams
 
 	if err := json.Unmarshal(body, &streamUpstreams); err != nil {
 		return err
@@ -562,20 +544,18 @@ func (n *NginxPlusAPI) gatherStreamUpstreamsMetrics(addr *url.URL, acc telegraf.
 	tags := getTags(addr)
 
 	for upstreamName, upstream := range streamUpstreams {
-		upstreamTags := map[string]string{}
-		for k, v := range tags {
-			upstreamTags[k] = v
-		}
+		upstreamTags := make(map[string]string, len(tags)+1)
+		maps.Copy(upstreamTags, tags)
 		upstreamTags["upstream"] = upstreamName
 		acc.AddFields(
 			"nginx_plus_api_stream_upstreams",
-			map[string]interface{}{
+			map[string]any{
 				"zombies": upstream.Zombies,
 			},
 			upstreamTags,
 		)
 		for _, peer := range upstream.Peers {
-			peerFields := map[string]interface{}{
+			peerFields := map[string]any{
 				"backup":                 peer.Backup,
 				"weight":                 peer.Weight,
 				"state":                  peer.State,
@@ -602,10 +582,8 @@ func (n *NginxPlusAPI) gatherStreamUpstreamsMetrics(addr *url.URL, acc telegraf.
 			if peer.ResponseTime != nil {
 				peerFields["response_time"] = *peer.ResponseTime
 			}
-			peerTags := map[string]string{}
-			for k, v := range upstreamTags {
-				peerTags[k] = v
-			}
+			peerTags := make(map[string]string, len(upstreamTags)+2)
+			maps.Copy(peerTags, upstreamTags)
 			peerTags["upstream_address"] = peer.Server
 			peerTags["id"] = strconv.Itoa(peer.ID)
 
@@ -623,7 +601,7 @@ func (n *NginxPlusAPI) gatherHTTPLimitReqsMetrics(addr *url.URL, acc telegraf.Ac
 		return err
 	}
 
-	var httpLimitReqs HTTPLimitReqs
+	var httpLimitReqs httpLimitReqs
 
 	if err := json.Unmarshal(body, &httpLimitReqs); err != nil {
 		return err
@@ -632,14 +610,12 @@ func (n *NginxPlusAPI) gatherHTTPLimitReqsMetrics(addr *url.URL, acc telegraf.Ac
 	tags := getTags(addr)
 
 	for limitReqName, limit := range httpLimitReqs {
-		limitReqsTags := map[string]string{}
-		for k, v := range tags {
-			limitReqsTags[k] = v
-		}
+		limitReqsTags := make(map[string]string, len(tags)+1)
+		maps.Copy(limitReqsTags, tags)
 		limitReqsTags["limit"] = limitReqName
 		acc.AddFields(
 			"nginx_plus_api_http_limit_reqs",
-			map[string]interface{}{
+			map[string]any{
 				"passed":           limit.Passed,
 				"delayed":          limit.Delayed,
 				"rejected":         limit.Rejected,

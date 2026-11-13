@@ -3,10 +3,12 @@ package nginx_sts
 
 import (
 	"bufio"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,7 +18,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/plugins/common/tls"
+	common_http "github.com/influxdata/telegraf/plugins/common/http"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
@@ -24,9 +26,9 @@ import (
 var sampleConfig string
 
 type NginxSTS struct {
-	Urls            []string        `toml:"urls"`
-	ResponseTimeout config.Duration `toml:"response_timeout"`
-	tls.ClientConfig
+	Urls []string        `toml:"urls"`
+	Log  telegraf.Logger `toml:"-"`
+	common_http.HTTPClientConfig
 
 	client *http.Client
 }
@@ -68,20 +70,15 @@ func (n *NginxSTS) Gather(acc telegraf.Accumulator) error {
 }
 
 func (n *NginxSTS) createHTTPClient() (*http.Client, error) {
-	if n.ResponseTimeout < config.Duration(time.Second) {
-		n.ResponseTimeout = config.Duration(time.Second * 5)
+	if n.HTTPClientConfig.ResponseHeaderTimeout < config.Duration(time.Second) {
+		n.HTTPClientConfig.ResponseHeaderTimeout = config.Duration(time.Second * 5)
 	}
 
-	tlsConfig, err := n.ClientConfig.TLSConfig()
+	// Create the client
+	ctx := context.Background()
+	client, err := n.HTTPClientConfig.CreateClient(ctx, n.Log)
 	if err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-		Timeout: time.Duration(n.ResponseTimeout),
+		return nil, fmt.Errorf("creating client failed: %w", err)
 	}
 
 	return client, nil
@@ -97,7 +94,7 @@ func (n *NginxSTS) gatherURL(addr *url.URL, acc telegraf.Accumulator) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s returned HTTP status %s", addr.String(), resp.Status)
 	}
-	contentType := strings.Split(resp.Header.Get("Content-Type"), ";")[0]
+	contentType, _, _ := strings.Cut(resp.Header.Get("Content-Type"), ";")
 	switch contentType {
 	case "application/json":
 		return gatherStatusURL(bufio.NewReader(resp.Body), getTags(addr), acc)
@@ -106,7 +103,7 @@ func (n *NginxSTS) gatherURL(addr *url.URL, acc telegraf.Accumulator) error {
 	}
 }
 
-type NginxSTSResponse struct {
+type nginxSTSResponse struct {
 	Connections struct {
 		Active   uint64 `json:"active"`
 		Reading  uint64 `json:"reading"`
@@ -117,12 +114,12 @@ type NginxSTSResponse struct {
 		Requests uint64 `json:"requests"`
 	} `json:"connections"`
 	Hostname            string                       `json:"hostName"`
-	StreamFilterZones   map[string]map[string]Server `json:"streamFilterZones"`
-	StreamServerZones   map[string]Server            `json:"streamServerZones"`
-	StreamUpstreamZones map[string][]Upstream        `json:"streamUpstreamZones"`
+	StreamFilterZones   map[string]map[string]server `json:"streamFilterZones"`
+	StreamServerZones   map[string]server            `json:"streamServerZones"`
+	StreamUpstreamZones map[string][]upstream        `json:"streamUpstreamZones"`
 }
 
-type Server struct {
+type server struct {
 	ConnectCounter     uint64 `json:"connectCounter"`
 	InBytes            uint64 `json:"inBytes"`
 	OutBytes           uint64 `json:"outBytes"`
@@ -137,7 +134,7 @@ type Server struct {
 	} `json:"responses"`
 }
 
-type Upstream struct {
+type upstream struct {
 	Server         string `json:"server"`
 	ConnectCounter uint64 `json:"connectCounter"`
 	InBytes        uint64 `json:"inBytes"`
@@ -166,12 +163,12 @@ type Upstream struct {
 
 func gatherStatusURL(r *bufio.Reader, tags map[string]string, acc telegraf.Accumulator) error {
 	dec := json.NewDecoder(r)
-	status := &NginxSTSResponse{}
+	status := &nginxSTSResponse{}
 	if err := dec.Decode(status); err != nil {
 		return errors.New("error while decoding JSON response")
 	}
 
-	acc.AddFields("nginx_sts_connections", map[string]interface{}{
+	acc.AddFields("nginx_sts_connections", map[string]any{
 		"active":   status.Connections.Active,
 		"reading":  status.Connections.Reading,
 		"writing":  status.Connections.Writing,
@@ -182,13 +179,11 @@ func gatherStatusURL(r *bufio.Reader, tags map[string]string, acc telegraf.Accum
 	}, tags)
 
 	for zoneName, zone := range status.StreamServerZones {
-		zoneTags := map[string]string{}
-		for k, v := range tags {
-			zoneTags[k] = v
-		}
+		zoneTags := make(map[string]string, len(tags)+1)
+		maps.Copy(zoneTags, tags)
 		zoneTags["zone"] = zoneName
 
-		acc.AddFields("nginx_sts_server", map[string]interface{}{
+		acc.AddFields("nginx_sts_server", map[string]any{
 			"connects":             zone.ConnectCounter,
 			"in_bytes":             zone.InBytes,
 			"out_bytes":            zone.OutBytes,
@@ -205,14 +200,12 @@ func gatherStatusURL(r *bufio.Reader, tags map[string]string, acc telegraf.Accum
 
 	for filterName, filters := range status.StreamFilterZones {
 		for filterKey, upstream := range filters {
-			filterTags := map[string]string{}
-			for k, v := range tags {
-				filterTags[k] = v
-			}
+			filterTags := make(map[string]string, len(tags)+2)
+			maps.Copy(filterTags, tags)
 			filterTags["filter_key"] = filterKey
 			filterTags["filter_name"] = filterName
 
-			acc.AddFields("nginx_sts_filter", map[string]interface{}{
+			acc.AddFields("nginx_sts_filter", map[string]any{
 				"connects":             upstream.ConnectCounter,
 				"in_bytes":             upstream.InBytes,
 				"out_bytes":            upstream.OutBytes,
@@ -230,13 +223,11 @@ func gatherStatusURL(r *bufio.Reader, tags map[string]string, acc telegraf.Accum
 
 	for upstreamName, upstreams := range status.StreamUpstreamZones {
 		for _, upstream := range upstreams {
-			upstreamServerTags := map[string]string{}
-			for k, v := range tags {
-				upstreamServerTags[k] = v
-			}
+			upstreamServerTags := make(map[string]string, len(tags)+2)
+			maps.Copy(upstreamServerTags, tags)
 			upstreamServerTags["upstream"] = upstreamName
 			upstreamServerTags["upstream_address"] = upstream.Server
-			acc.AddFields("nginx_sts_upstream", map[string]interface{}{
+			acc.AddFields("nginx_sts_upstream", map[string]any{
 				"connects":                        upstream.ConnectCounter,
 				"session_msec":                    upstream.SessionMsec,
 				"session_msec_counter":            upstream.SessionMsecCounter,

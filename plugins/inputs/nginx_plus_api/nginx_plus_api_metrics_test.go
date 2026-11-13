@@ -8,8 +8,9 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/testutil"
 )
 
 const processesPayload = `
@@ -679,7 +680,7 @@ func TestGatherProcessesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_processes",
-		map[string]interface{}{
+		map[string]any{
 			"respawned": int(0),
 		},
 		map[string]string{
@@ -700,7 +701,7 @@ func TestGatherConnectionsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_connections",
-		map[string]interface{}{
+		map[string]any{
 			"accepted": int64(1234567890000),
 			"dropped":  int64(2345678900000),
 			"active":   int64(345),
@@ -724,7 +725,7 @@ func TestGatherSlabsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_slabs_pages",
-		map[string]interface{}{
+		map[string]any{
 			"used": int64(7),
 			"free": int64(56),
 		},
@@ -736,7 +737,7 @@ func TestGatherSlabsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_slabs_pages",
-		map[string]interface{}{
+		map[string]any{
 			"used": int64(2218),
 			"free": int64(252290),
 		},
@@ -748,7 +749,7 @@ func TestGatherSlabsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_slabs_slots",
-		map[string]interface{}{
+		map[string]any{
 			"used":  int64(1),
 			"free":  int64(503),
 			"reqs":  int64(1),
@@ -763,7 +764,7 @@ func TestGatherSlabsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_slabs_slots",
-		map[string]interface{}{
+		map[string]any{
 			"used":  int64(10893),
 			"free":  int64(3),
 			"reqs":  int64(124245),
@@ -789,7 +790,7 @@ func TestGatherSslMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_ssl",
-		map[string]interface{}{
+		map[string]any{
 			"handshakes":        int64(79572),
 			"handshakes_failed": int64(21025),
 			"session_reuses":    int64(15762),
@@ -812,7 +813,7 @@ func TestGatherHttpRequestsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_requests",
-		map[string]interface{}{
+		map[string]any{
 			"total":   int64(10624511),
 			"current": int64(4),
 		},
@@ -834,7 +835,7 @@ func TestGatherHttpServerZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_server_zones",
-		map[string]interface{}{
+		map[string]any{
 			"discarded":       int64(2020),
 			"processing":      int(2),
 			"received":        int64(180157219),
@@ -856,7 +857,7 @@ func TestGatherHttpServerZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_server_zones",
-		map[string]interface{}{
+		map[string]any{
 			"discarded":       int64(20326),
 			"processing":      int(1),
 			"received":        int64(51575327),
@@ -888,7 +889,7 @@ func TestGatherHttpLimitReqsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_limit_reqs",
-		map[string]interface{}{
+		map[string]any{
 			"passed":           int64(2),
 			"delayed":          int64(9),
 			"rejected":         int64(4),
@@ -904,7 +905,7 @@ func TestGatherHttpLimitReqsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_limit_reqs",
-		map[string]interface{}{
+		map[string]any{
 			"passed":           int64(451),
 			"delayed":          int64(10),
 			"rejected":         int64(0),
@@ -930,7 +931,7 @@ func TestGatherHttpLocationZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_location_zones",
-		map[string]interface{}{
+		map[string]any{
 			"discarded":       int64(2020),
 			"received":        int64(180157219),
 			"requests":        int64(736395),
@@ -951,7 +952,7 @@ func TestGatherHttpLocationZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_location_zones",
-		map[string]interface{}{
+		map[string]any{
 			"discarded":       int64(20326),
 			"received":        int64(51575327),
 			"requests":        int64(185307),
@@ -982,7 +983,7 @@ func TestGatherHttpUpstreamsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_upstreams",
-		map[string]interface{}{
+		map[string]any{
 			"keepalive": int(0),
 			"zombies":   int(0),
 		},
@@ -995,7 +996,7 @@ func TestGatherHttpUpstreamsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_upstreams",
-		map[string]interface{}{
+		map[string]any{
 			"keepalive": int(0),
 			"zombies":   int(0),
 		},
@@ -1008,7 +1009,7 @@ func TestGatherHttpUpstreamsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   false,
 			"downtime":                 int64(0),
@@ -1043,7 +1044,7 @@ func TestGatherHttpUpstreamsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   true,
 			"downtime":                 int64(262925617),
@@ -1076,7 +1077,7 @@ func TestGatherHttpUpstreamsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   false,
 			"downtime":                 int64(0),
@@ -1111,7 +1112,7 @@ func TestGatherHttpUpstreamsMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   true,
 			"downtime":                 int64(262925617),
@@ -1154,7 +1155,7 @@ func TestGatherHttpCachesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_caches",
-		map[string]interface{}{
+		map[string]any{
 			"bypass_bytes":              int64(5510647548),
 			"bypass_bytes_written":      int64(44992),
 			"bypass_responses":          int64(200187),
@@ -1188,7 +1189,7 @@ func TestGatherHttpCachesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_http_caches",
-		map[string]interface{}{
+		map[string]any{
 			"bypass_bytes":              int64(5510647548),
 			"bypass_bytes_written":      int64(44992),
 			"bypass_responses":          int64(200187),
@@ -1232,7 +1233,7 @@ func TestGatherResolverZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_resolver_zones",
-		map[string]interface{}{
+		map[string]any{
 			"name":     int64(25460),
 			"srv":      int64(130),
 			"addr":     int64(2580),
@@ -1254,7 +1255,7 @@ func TestGatherResolverZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_resolver_zones",
-		map[string]interface{}{
+		map[string]any{
 			"name":     int64(325460),
 			"srv":      int64(1130),
 			"addr":     int64(12580),
@@ -1286,7 +1287,7 @@ func TestGatherStreamUpstreams(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_upstreams",
-		map[string]interface{}{
+		map[string]any{
 			"zombies": int(0),
 		},
 		map[string]string{
@@ -1298,7 +1299,7 @@ func TestGatherStreamUpstreams(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_upstreams",
-		map[string]interface{}{
+		map[string]any{
 			"zombies": int(0),
 		},
 		map[string]string{
@@ -1310,7 +1311,7 @@ func TestGatherStreamUpstreams(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   false,
 			"connections":              int64(0),
@@ -1337,7 +1338,7 @@ func TestGatherStreamUpstreams(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   true,
 			"connections":              int64(0),
@@ -1364,7 +1365,7 @@ func TestGatherStreamUpstreams(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   false,
 			"connections":              int64(667231),
@@ -1391,7 +1392,7 @@ func TestGatherStreamUpstreams(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_upstream_peers",
-		map[string]interface{}{
+		map[string]any{
 			"active":                   int(0),
 			"backup":                   true,
 			"connections":              int64(0),
@@ -1428,7 +1429,7 @@ func TestGatherStreamServerZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_server_zones",
-		map[string]interface{}{
+		map[string]any{
 			"connections": int(270925),
 			"processing":  int(2),
 			"received":    int64(28988975),
@@ -1443,7 +1444,7 @@ func TestGatherStreamServerZonesMetrics(t *testing.T) {
 	acc.AssertContainsTaggedFields(
 		t,
 		"nginx_plus_api_stream_server_zones",
-		map[string]interface{}{
+		map[string]any{
 			"connections": int(155569),
 			"processing":  int(1),
 			"received":    int64(4200363),
@@ -1457,7 +1458,7 @@ func TestGatherStreamServerZonesMetrics(t *testing.T) {
 }
 
 func TestUnavailableEndpoints(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer ts.Close()
@@ -1475,7 +1476,7 @@ func TestUnavailableEndpoints(t *testing.T) {
 }
 
 func TestServerError(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
@@ -1493,10 +1494,13 @@ func TestServerError(t *testing.T) {
 }
 
 func TestMalformedJSON(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, err := fmt.Fprintln(w, "this is not JSON")
-		require.NoError(t, err)
+		if _, err := fmt.Fprintln(w, "this is not JSON"); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 	}))
 	defer ts.Close()
 
@@ -1513,7 +1517,7 @@ func TestMalformedJSON(t *testing.T) {
 }
 
 func TestUnknownContentType(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 	}))
 	defer ts.Close()
@@ -1530,13 +1534,12 @@ func TestUnknownContentType(t *testing.T) {
 	require.Error(t, acc.FirstError())
 }
 
-func prepareAddr(t *testing.T, ts *httptest.Server) (*url.URL, string, string) {
+func prepareAddr(t *testing.T, ts *httptest.Server) (addr *url.URL, host, port string) {
 	t.Helper()
-	addr, err := url.Parse(fmt.Sprintf("%s/api", ts.URL))
+	addr, err := url.Parse(ts.URL + "/api")
 	require.NoError(t, err)
 
-	host, port, err := net.SplitHostPort(addr.Host)
-
+	host, port, err = net.SplitHostPort(addr.Host)
 	if err != nil {
 		host = addr.Host
 		if addr.Scheme == "http" {
@@ -1551,17 +1554,25 @@ func prepareAddr(t *testing.T, ts *httptest.Server) (*url.URL, string, string) {
 	return addr, host, port
 }
 
-func prepareEndpoint(t *testing.T, path string, payload string) (*httptest.Server, *NginxPlusAPI) {
+func prepareEndpoint(t *testing.T, path, payload string) (*httptest.Server, *NginxPlusAPI) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, r.URL.Path, fmt.Sprintf("/api/%d/%s", defaultAPIVersion, path), "unknown request path")
+		fullPath := fmt.Sprintf("/api/%d/%s", defaultAPIVersion, path)
+		if r.URL.Path != fullPath {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Errorf("Unknown request path, expected: %q, actual: %q", fullPath, r.URL.Path)
+			return
+		}
 
 		w.Header()["Content-Type"] = []string{"application/json"}
-		_, err := fmt.Fprintln(w, payload)
-		require.NoError(t, err)
+		if _, err := fmt.Fprintln(w, payload); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 	}))
 
 	n := &NginxPlusAPI{
-		Urls:       []string{fmt.Sprintf("%s/api", ts.URL)},
+		Urls:       []string{ts.URL + "/api"},
 		APIVersion: defaultAPIVersion,
 	}
 

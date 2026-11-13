@@ -1,6 +1,6 @@
 # Netflow Input Plugin
 
-The `netflow` plugin acts as a collector for Netflow v5, Netflow v9 and IPFIX
+This service plugin acts as a collector for Netflow v5, Netflow v9 and IPFIX
 flow information. The Layer 4 protocol numbers are gathered from the
 [official IANA assignments][IANA assignments].
 The internal field mappings for Netflow v5 fields are defined according to
@@ -8,6 +8,10 @@ The internal field mappings for Netflow v5 fields are defined according to
 according to [Cisco's Netflow v9 documentation][CISCO NF9] and the
 [ASA extensions][ASA extensions].
 Definitions for IPFIX are according to [IANA assignment document][IPFIX doc].
+
+⭐ Telegraf v1.25.0
+🏷️ network
+💻 all
 
 [IANA assignments]: https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 [CISCO NF5]:        https://www.cisco.com/c/en/us/td/docs/net_mgmt/netflow_collection_engine/3-6/user/guide/format.html#wp1006186
@@ -18,7 +22,7 @@ Definitions for IPFIX are according to [IANA assignment document][IPFIX doc].
 ## Service Input <!-- @/docs/includes/service_input.md -->
 
 This plugin is a service input. Normal plugins gather metrics determined by the
-interval setting. Service plugins start a service to listens and waits for
+interval setting. Service plugins start a service to listen and wait for
 metrics or events to occur. Service plugins have two key differences from
 normal plugins:
 
@@ -28,10 +32,9 @@ normal plugins:
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -64,10 +67,8 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## decoding.
   # private_enterprise_number_files = []
 
-  ## Dump incoming packets to the log
-  ## This can be helpful to debug parsing issues. Only active if
-  ## Telegraf is in debug mode.
-  # dump_packets = false
+  ## Log incoming packets for tracing issues
+  # log_level = "trace"
 ```
 
 ## Private Enterprise Number mapping
@@ -94,11 +95,50 @@ with the corresponding name and data-type.
 
 Currently the following `data-type`s are supported:
 
-- `uint`   unsigned integer with 8, 16, 32 or 64 bit
-- `hex`    hex-encoding of the raw byte sequence with `0x` prefix
-- `string` string interpretation of the raw byte sequence
-- `ip`     IPv4 or IPv6 address
-- `proto`  mapping of layer-4 protocol numbers to names
+- `bool`    TruthValue according to [RFC5101][RFC5101]
+- `int`     signed integer with 8, 16, 32 or 64 bit
+- `uint`    unsigned integer with 8, 16, 32 or 64 bit
+- `float32` double-precision floating-point number (32 bit)
+- `float64` double-precision floating-point number (64 bit)
+- `hex`     hex-encoding of the raw byte sequence with `0x` prefix
+- `string`  string interpretation of the raw byte sequence
+- `mac`     MAC address
+- `ip`      IPv4 or IPv6 address
+- `proto`   mapping of layer-4 protocol numbers to names
+
+[RFC5101]: https://www.rfc-editor.org/rfc/rfc5101#section-6.1.5
+
+## Troubleshooting
+
+### `Error template not found` warnings
+
+Those warnings usually occur in cases where Telegraf is restarted or reloaded
+while the flow-device is already streaming data.
+As background, the Netflow and IPFIX protocols rely on templates sent by the
+flow-device to decode fields. Without those templates, it is not clear what the
+data-type and size of the payload is and this makes it impossible to correctly
+interpret the data. However, templates are sent by the flow-device, usually at
+the start of streaming and in regular intervals (configurable in the device) and
+Telegraf has no means to trigger sending of the templates. Therefore, we need to
+skip the packets until the templates are resent by the device.
+
+## Metrics are missing at the output
+
+The metrics produced by this plugin are not tagged in a connection specific
+manner, therefore outputs relying on unique series key (e.g. InfluxDB) require
+the metrics to contain tags for the protocol, the connection source and the
+connection destination. Otherwise, metrics might be overwritten and are thus
+missing.
+
+The required tagging can be achieved using the `converter` processor
+
+```toml
+[[processors.converter]]
+  [processors.converter.fields]
+    tag = ["protocol", "src", "src_port", "dst", "dst_port"]
+```
+
+__Please be careful as this will produce metrics with high cardinality!__
 
 ## Metrics
 

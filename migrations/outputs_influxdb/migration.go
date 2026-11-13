@@ -2,24 +2,26 @@ package outputs_influxdb
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/influxdata/toml"
 	"github.com/influxdata/toml/ast"
 
-	"github.com/influxdata/telegraf/internal/choice"
 	"github.com/influxdata/telegraf/migrations"
 )
 
 // Migration function
 func migrate(tbl *ast.Table) ([]byte, string, error) {
 	// Decode the old data structure
-	var plugin map[string]interface{}
+	var plugin map[string]any
 	if err := toml.UnmarshalTable(tbl, &plugin); err != nil {
 		return nil, "", err
 	}
 
 	// Check for deprecated option(s) and migrate them
 	var applied bool
+
+	// Migrate url -> urls
 	if oldURL, found := plugin["url"]; found {
 		applied = true
 
@@ -37,13 +39,20 @@ func migrate(tbl *ast.Table) ([]byte, string, error) {
 			return nil, "", fmt.Errorf("unexpected 'url' entry %v (%T)", ou, ou)
 		}
 
-		if !choice.Contains(ou, urls) {
+		if !slices.Contains(urls, ou) {
 			urls = append(urls, ou)
 		}
 
 		// Update replacement and remove the deprecated setting
 		plugin["urls"] = urls
 		delete(plugin, "url")
+	}
+
+	// Remove the deprecated precision option (it has been ignored since 1.0.0)
+	if _, found := plugin["precision"]; found {
+		applied = true
+		// Remove the deprecated setting
+		delete(plugin, "precision")
 	}
 
 	// No options migrated so we can exit early

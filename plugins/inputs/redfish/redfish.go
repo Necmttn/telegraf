@@ -4,12 +4,15 @@ package redfish
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/influxdata/telegraf"
@@ -21,14 +24,22 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
+const (
+	// tag sets used for including redfish OData link parent data
+	tagSetChassisLocation = "chassis.location"
+	tagSetChassis         = "chassis"
+)
+
 type Redfish struct {
 	Address          string          `toml:"address"`
-	Username         string          `toml:"username"`
-	Password         string          `toml:"password"`
+	Username         config.Secret   `toml:"username"`
+	Password         config.Secret   `toml:"password"`
 	ComputerSystemID string          `toml:"computer_system_id"`
 	IncludeMetrics   []string        `toml:"include_metrics"`
 	IncludeTagSets   []string        `toml:"include_tag_sets"`
+	Workarounds      []string        `toml:"workarounds"`
 	Timeout          config.Duration `toml:"timeout"`
+	Log              telegraf.Logger `toml:"-"`
 
 	tagSet map[string]bool
 	client http.Client
@@ -36,13 +47,7 @@ type Redfish struct {
 	baseURL *url.URL
 }
 
-const (
-	// tag sets used for including redfish OData link parent data
-	tagSetChassisLocation = "chassis.location"
-	tagSetChassis         = "chassis"
-)
-
-type System struct {
+type system struct {
 	Hostname string `json:"hostname"`
 	Links    struct {
 		Chassis []struct {
@@ -51,9 +56,9 @@ type System struct {
 	}
 }
 
-type Chassis struct {
+type chassis struct {
 	ChassisType  string
-	Location     *Location
+	Location     *location
 	Manufacturer string
 	Model        string
 	PartNumber   string
@@ -63,75 +68,13 @@ type Chassis struct {
 	PowerState   string
 	SKU          string
 	SerialNumber string
-	Status       Status
+	Status       status
 	Thermal      struct {
 		Ref string `json:"@odata.id"`
 	}
 }
 
-type Power struct {
-	PowerControl []struct {
-		Name                string
-		MemberID            string
-		PowerAllocatedWatts *float64
-		PowerAvailableWatts *float64
-		PowerCapacityWatts  *float64
-		PowerConsumedWatts  *float64
-		PowerRequestedWatts *float64
-		PowerMetrics        struct {
-			AverageConsumedWatts *float64
-			IntervalInMin        int
-			MaxConsumedWatts     *float64
-			MinConsumedWatts     *float64
-		}
-	}
-	PowerSupplies []struct {
-		Name                 string
-		MemberID             string
-		PowerInputWatts      *float64
-		PowerCapacityWatts   *float64
-		PowerOutputWatts     *float64
-		LastPowerOutputWatts *float64
-		Status               Status
-		LineInputVoltage     *float64
-	}
-	Voltages []struct {
-		Name                   string
-		MemberID               string
-		ReadingVolts           *float64
-		UpperThresholdCritical *float64
-		UpperThresholdFatal    *float64
-		LowerThresholdCritical *float64
-		LowerThresholdFatal    *float64
-		Status                 Status
-	}
-}
-
-type Thermal struct {
-	Fans []struct {
-		Name                   string
-		MemberID               string
-		Reading                *int64
-		ReadingUnits           *string
-		UpperThresholdCritical *int64
-		UpperThresholdFatal    *int64
-		LowerThresholdCritical *int64
-		LowerThresholdFatal    *int64
-		Status                 Status
-	}
-	Temperatures []struct {
-		Name                   string
-		MemberID               string
-		ReadingCelsius         *float64
-		UpperThresholdCritical *float64
-		UpperThresholdFatal    *float64
-		LowerThresholdCritical *float64
-		LowerThresholdFatal    *float64
-		Status                 Status
-	}
-}
-
-type Location struct {
+type location struct {
 	PostalAddress struct {
 		DataCenter string
 		Room       string
@@ -142,7 +85,7 @@ type Location struct {
 	}
 }
 
-type Status struct {
+type status struct {
 	State  string
 	Health string
 }
@@ -153,19 +96,19 @@ func (*Redfish) SampleConfig() string {
 
 func (r *Redfish) Init() error {
 	if r.Address == "" {
-		return fmt.Errorf("did not provide IP")
+		return errors.New("did not provide IP")
 	}
 
-	if r.Username == "" && r.Password == "" {
-		return fmt.Errorf("did not provide username and password")
+	if r.Username.Empty() && r.Password.Empty() {
+		return errors.New("did not provide username and password")
 	}
 
 	if r.ComputerSystemID == "" {
-		return fmt.Errorf("did not provide the computer system ID of the resource")
+		return errors.New("did not provide the computer system ID of the resource")
 	}
 
 	if len(r.IncludeMetrics) == 0 {
-		return fmt.Errorf("no metrics specified to collect")
+		return errors.New("no metrics specified to collect")
 	}
 	for _, metric := range r.IncludeMetrics {
 		switch metric {
@@ -175,6 +118,13 @@ func (r *Redfish) Init() error {
 		}
 	}
 
+	for _, workaround := range r.Workarounds {
+		switch workaround {
+		case "ilo4-thermal":
+		default:
+			return fmt.Errorf("unknown workaround requested: %s", workaround)
+		}
+	}
 	r.tagSet = make(map[string]bool, len(r.IncludeTagSets))
 	for _, setLabel := range r.IncludeTagSets {
 		r.tagSet[setLabel] = true
@@ -202,94 +152,6 @@ func (r *Redfish) Init() error {
 	return nil
 }
 
-func (r *Redfish) getData(address string, payload interface{}) error {
-	req, err := http.NewRequest("GET", address, nil)
-	if err != nil {
-		return err
-	}
-
-	req.SetBasicAuth(r.Username, r.Password)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("OData-Version", "4.0")
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("received status code %d (%s) for address %s, expected 200",
-			resp.StatusCode,
-			http.StatusText(resp.StatusCode),
-			r.Address)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	err = json.Unmarshal(body, &payload)
-	if err != nil {
-		return fmt.Errorf("error parsing input: %w", err)
-	}
-
-	return nil
-}
-
-func (r *Redfish) getComputerSystem(id string) (*System, error) {
-	loc := r.baseURL.ResolveReference(&url.URL{Path: path.Join("/redfish/v1/Systems/", id)})
-	system := &System{}
-	err := r.getData(loc.String(), system)
-	if err != nil {
-		return nil, err
-	}
-	return system, nil
-}
-
-func (r *Redfish) getChassis(ref string) (*Chassis, error) {
-	loc := r.baseURL.ResolveReference(&url.URL{Path: ref})
-	chassis := &Chassis{}
-	err := r.getData(loc.String(), chassis)
-	if err != nil {
-		return nil, err
-	}
-	return chassis, nil
-}
-
-func (r *Redfish) getPower(ref string) (*Power, error) {
-	loc := r.baseURL.ResolveReference(&url.URL{Path: ref})
-	power := &Power{}
-	err := r.getData(loc.String(), power)
-	if err != nil {
-		return nil, err
-	}
-	return power, nil
-}
-
-func (r *Redfish) getThermal(ref string) (*Thermal, error) {
-	loc := r.baseURL.ResolveReference(&url.URL{Path: ref})
-	thermal := &Thermal{}
-	err := r.getData(loc.String(), thermal)
-	if err != nil {
-		return nil, err
-	}
-	return thermal, nil
-}
-
-func setChassisTags(chassis *Chassis, tags map[string]string) {
-	tags["chassis_chassistype"] = chassis.ChassisType
-	tags["chassis_manufacturer"] = chassis.Manufacturer
-	tags["chassis_model"] = chassis.Model
-	tags["chassis_partnumber"] = chassis.PartNumber
-	tags["chassis_powerstate"] = chassis.PowerState
-	tags["chassis_sku"] = chassis.SKU
-	tags["chassis_serialnumber"] = chassis.SerialNumber
-	tags["chassis_state"] = chassis.Status.State
-	tags["chassis_health"] = chassis.Status.Health
-}
-
 func (r *Redfish) Gather(acc telegraf.Accumulator) error {
 	address, _, err := net.SplitHostPort(r.baseURL.Host)
 	if err != nil {
@@ -302,6 +164,13 @@ func (r *Redfish) Gather(acc telegraf.Accumulator) error {
 	}
 
 	for _, link := range system.Links.Chassis {
+		// References are resolved against the configured address, so an empty
+		// one would request the device's web root instead of a Redfish resource
+		if link.Ref == "" {
+			r.Log.Warn("Skipping chassis without reference")
+			continue
+		}
+
 		chassis, err := r.getChassis(link.Ref)
 		if err != nil {
 			return err
@@ -311,8 +180,16 @@ func (r *Redfish) Gather(acc telegraf.Accumulator) error {
 			var err error
 			switch metric {
 			case "thermal":
+				if chassis.Thermal.Ref == "" {
+					r.Log.Warnf("Skipping thermal data of chassis %q without reference", link.Ref)
+					continue
+				}
 				err = r.gatherThermal(acc, address, system, chassis)
 			case "power":
+				if chassis.Power.Ref == "" {
+					r.Log.Warnf("Skipping power data of chassis %q without reference", link.Ref)
+					continue
+				}
 				err = r.gatherPower(acc, address, system, chassis)
 			default:
 				return fmt.Errorf("unknown metric requested: %s", metric)
@@ -325,166 +202,92 @@ func (r *Redfish) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (r *Redfish) gatherThermal(acc telegraf.Accumulator, address string, system *System, chassis *Chassis) error {
-	thermal, err := r.getThermal(chassis.Thermal.Ref)
+func (r *Redfish) getData(address string, payload any) error {
+	req, err := http.NewRequest("GET", address, nil)
 	if err != nil {
 		return err
 	}
 
-	for _, j := range thermal.Temperatures {
-		tags := map[string]string{}
-		tags["member_id"] = j.MemberID
-		tags["address"] = address
-		tags["name"] = j.Name
-		tags["source"] = system.Hostname
-		tags["state"] = j.Status.State
-		tags["health"] = j.Status.Health
-		if _, ok := r.tagSet[tagSetChassisLocation]; ok && chassis.Location != nil {
-			tags["datacenter"] = chassis.Location.PostalAddress.DataCenter
-			tags["room"] = chassis.Location.PostalAddress.Room
-			tags["rack"] = chassis.Location.Placement.Rack
-			tags["row"] = chassis.Location.Placement.Row
-		}
-		if _, ok := r.tagSet[tagSetChassis]; ok {
-			setChassisTags(chassis, tags)
-		}
+	username, err := r.Username.Get()
+	if err != nil {
+		return fmt.Errorf("getting username failed: %w", err)
+	}
+	user := username.String()
+	username.Destroy()
 
-		fields := make(map[string]interface{})
-		fields["reading_celsius"] = j.ReadingCelsius
-		fields["upper_threshold_critical"] = j.UpperThresholdCritical
-		fields["upper_threshold_fatal"] = j.UpperThresholdFatal
-		fields["lower_threshold_critical"] = j.LowerThresholdCritical
-		fields["lower_threshold_fatal"] = j.LowerThresholdFatal
-		acc.AddFields("redfish_thermal_temperatures", fields, tags)
+	password, err := r.Password.Get()
+	if err != nil {
+		return fmt.Errorf("getting password failed: %w", err)
+	}
+	pass := password.String()
+	password.Destroy()
+
+	req.SetBasicAuth(user, pass)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("OData-Version", "4.0")
+
+	// workaround for iLO4 thermal data
+	if slices.Contains(r.Workarounds, "ilo4-thermal") && strings.Contains(address, "/Thermal") {
+		req.Header.Del("OData-Version")
 	}
 
-	for _, j := range thermal.Fans {
-		tags := map[string]string{}
-		fields := make(map[string]interface{})
-		tags["member_id"] = j.MemberID
-		tags["address"] = address
-		tags["name"] = j.Name
-		tags["source"] = system.Hostname
-		tags["state"] = j.Status.State
-		tags["health"] = j.Status.Health
-		if _, ok := r.tagSet[tagSetChassisLocation]; ok && chassis.Location != nil {
-			tags["datacenter"] = chassis.Location.PostalAddress.DataCenter
-			tags["room"] = chassis.Location.PostalAddress.Room
-			tags["rack"] = chassis.Location.Placement.Rack
-			tags["row"] = chassis.Location.Placement.Row
-		}
-		if _, ok := r.tagSet[tagSetChassis]; ok {
-			setChassisTags(chassis, tags)
-		}
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 
-		if j.ReadingUnits != nil && *j.ReadingUnits == "RPM" {
-			fields["upper_threshold_critical"] = j.UpperThresholdCritical
-			fields["upper_threshold_fatal"] = j.UpperThresholdFatal
-			fields["lower_threshold_critical"] = j.LowerThresholdCritical
-			fields["lower_threshold_fatal"] = j.LowerThresholdFatal
-			fields["reading_rpm"] = j.Reading
-		} else {
-			fields["reading_percent"] = j.Reading
-		}
-		acc.AddFields("redfish_thermal_fans", fields, tags)
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("received status code %d (%s) for address %s, expected 200",
+			resp.StatusCode,
+			http.StatusText(resp.StatusCode),
+			address)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(body, &payload)
+	if err != nil {
+		return fmt.Errorf("error parsing input from %s (Content-Type %q): %w", address, resp.Header.Get("Content-Type"), err)
 	}
 
 	return nil
 }
 
-func (r *Redfish) gatherPower(acc telegraf.Accumulator, address string, system *System, chassis *Chassis) error {
-	power, err := r.getPower(chassis.Power.Ref)
+func (r *Redfish) getComputerSystem(id string) (*system, error) {
+	loc := r.baseURL.ResolveReference(&url.URL{Path: path.Join("/redfish/v1/Systems/", id)})
+	system := &system{}
+	err := r.getData(loc.String(), system)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return system, nil
+}
 
-	for _, j := range power.PowerControl {
-		tags := map[string]string{
-			"member_id": j.MemberID,
-			"address":   address,
-			"name":      j.Name,
-			"source":    system.Hostname,
-		}
-		if _, ok := r.tagSet[tagSetChassisLocation]; ok && chassis.Location != nil {
-			tags["datacenter"] = chassis.Location.PostalAddress.DataCenter
-			tags["room"] = chassis.Location.PostalAddress.Room
-			tags["rack"] = chassis.Location.Placement.Rack
-			tags["row"] = chassis.Location.Placement.Row
-		}
-		if _, ok := r.tagSet[tagSetChassis]; ok {
-			setChassisTags(chassis, tags)
-		}
-
-		fields := map[string]interface{}{
-			"power_allocated_watts":  j.PowerAllocatedWatts,
-			"power_available_watts":  j.PowerAvailableWatts,
-			"power_capacity_watts":   j.PowerCapacityWatts,
-			"power_consumed_watts":   j.PowerConsumedWatts,
-			"power_requested_watts":  j.PowerRequestedWatts,
-			"average_consumed_watts": j.PowerMetrics.AverageConsumedWatts,
-			"interval_in_min":        j.PowerMetrics.IntervalInMin,
-			"max_consumed_watts":     j.PowerMetrics.MaxConsumedWatts,
-			"min_consumed_watts":     j.PowerMetrics.MinConsumedWatts,
-		}
-
-		acc.AddFields("redfish_power_powercontrol", fields, tags)
+func (r *Redfish) getChassis(ref string) (*chassis, error) {
+	loc := r.baseURL.ResolveReference(&url.URL{Path: ref})
+	chassis := &chassis{}
+	err := r.getData(loc.String(), chassis)
+	if err != nil {
+		return nil, err
 	}
+	return chassis, nil
+}
 
-	for _, j := range power.PowerSupplies {
-		tags := map[string]string{}
-		tags["member_id"] = j.MemberID
-		tags["address"] = address
-		tags["name"] = j.Name
-		tags["source"] = system.Hostname
-		tags["state"] = j.Status.State
-		tags["health"] = j.Status.Health
-		if _, ok := r.tagSet[tagSetChassisLocation]; ok && chassis.Location != nil {
-			tags["datacenter"] = chassis.Location.PostalAddress.DataCenter
-			tags["room"] = chassis.Location.PostalAddress.Room
-			tags["rack"] = chassis.Location.Placement.Rack
-			tags["row"] = chassis.Location.Placement.Row
-		}
-		if _, ok := r.tagSet[tagSetChassis]; ok {
-			setChassisTags(chassis, tags)
-		}
-
-		fields := make(map[string]interface{})
-		fields["power_input_watts"] = j.PowerInputWatts
-		fields["power_output_watts"] = j.PowerOutputWatts
-		fields["line_input_voltage"] = j.LineInputVoltage
-		fields["last_power_output_watts"] = j.LastPowerOutputWatts
-		fields["power_capacity_watts"] = j.PowerCapacityWatts
-		acc.AddFields("redfish_power_powersupplies", fields, tags)
-	}
-
-	for _, j := range power.Voltages {
-		tags := map[string]string{}
-		tags["member_id"] = j.MemberID
-		tags["address"] = address
-		tags["name"] = j.Name
-		tags["source"] = system.Hostname
-		tags["state"] = j.Status.State
-		tags["health"] = j.Status.Health
-		if _, ok := r.tagSet[tagSetChassisLocation]; ok && chassis.Location != nil {
-			tags["datacenter"] = chassis.Location.PostalAddress.DataCenter
-			tags["room"] = chassis.Location.PostalAddress.Room
-			tags["rack"] = chassis.Location.Placement.Rack
-			tags["row"] = chassis.Location.Placement.Row
-		}
-		if _, ok := r.tagSet[tagSetChassis]; ok {
-			setChassisTags(chassis, tags)
-		}
-
-		fields := make(map[string]interface{})
-		fields["reading_volts"] = j.ReadingVolts
-		fields["upper_threshold_critical"] = j.UpperThresholdCritical
-		fields["upper_threshold_fatal"] = j.UpperThresholdFatal
-		fields["lower_threshold_critical"] = j.LowerThresholdCritical
-		fields["lower_threshold_fatal"] = j.LowerThresholdFatal
-		acc.AddFields("redfish_power_voltages", fields, tags)
-	}
-
-	return nil
+func setChassisTags(chassis *chassis, tags map[string]string) {
+	tags["chassis_chassistype"] = chassis.ChassisType
+	tags["chassis_manufacturer"] = chassis.Manufacturer
+	tags["chassis_model"] = chassis.Model
+	tags["chassis_partnumber"] = chassis.PartNumber
+	tags["chassis_powerstate"] = chassis.PowerState
+	tags["chassis_sku"] = chassis.SKU
+	tags["chassis_serialnumber"] = chassis.SerialNumber
+	tags["chassis_state"] = chassis.Status.State
+	tags["chassis_health"] = chassis.Status.Health
 }
 
 func init() {

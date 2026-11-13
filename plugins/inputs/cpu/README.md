@@ -1,26 +1,16 @@
 # CPU Input Plugin
 
-The `cpu` plugin gather metrics on the system CPUs.
+This plugin gathers metrics about the system's CPUs.
 
-## macOS Support
-
-The [gopsutil][1] library, which is used to collect CPU data, does not support
-gathering CPU metrics without CGO on macOS. The user will see a "not
-implemented" message in this case. Builds provided by InfluxData do not build
-with CGO.
-
-Users can use the builds provided by [Homebrew][2], which build with CGO, to
-produce CPU metrics.
-
-[1]: https://github.com/shirou/gopsutil/blob/master/cpu/cpu_darwin_nocgo.go
-[2]: https://formulae.brew.sh/formula/telegraf
+⭐ Telegraf v0.1.5
+🏷️ system
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

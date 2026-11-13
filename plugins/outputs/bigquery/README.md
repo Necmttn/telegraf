@@ -1,19 +1,26 @@
 # Google BigQuery Output Plugin
 
-This plugin writes to the [Google Cloud
-BigQuery](https://cloud.google.com/bigquery) and requires
-[authentication](https://cloud.google.com/bigquery/docs/authentication) with
-Google Cloud using either a service account or user credentials.
+This plugin writes metrics to the [Google Cloud BigQuery][big_query] service
+and requires [authentication][authentication] with Google Cloud using either a
+service account or user credentials.
 
-Be aware that this plugin accesses APIs that are
-[chargeable](https://cloud.google.com/bigquery/pricing) and might incur costs.
+> [!IMPORTANT]
+> Be aware that this plugin accesses APIs that are [chargeable][pricing] and
+> might incur costs.
+
+[authentication]: https://cloud.google.com/bigquery/docs/authentication
+[big_query]: https://cloud.google.com/bigquery
+[pricing]: https://cloud.google.com/bigquery/pricing
+
+⭐ Telegraf v1.18.0
+🏷️ cloud, datastore
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

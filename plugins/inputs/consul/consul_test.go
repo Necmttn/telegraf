@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/consul/api"
+
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -22,7 +23,7 @@ var sampleChecks = []*api.HealthCheck{
 }
 
 func TestGatherHealthCheck(t *testing.T) {
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"check_name": "foo.health",
 		"status":     "passing",
 		"passing":    1,
@@ -43,13 +44,13 @@ func TestGatherHealthCheck(t *testing.T) {
 	var acc testutil.Accumulator
 
 	consul := &Consul{}
-	consul.GatherHealthCheck(&acc, sampleChecks)
+	consul.gatherHealthCheck(&acc, sampleChecks)
 
 	acc.AssertContainsTaggedFields(t, "consul_health_checks", expectedFields, expectedTags)
 }
 
 func TestGatherHealthCheckWithDelimitedTags(t *testing.T) {
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"check_name": "foo.health",
 		"status":     "passing",
 		"passing":    1,
@@ -72,13 +73,13 @@ func TestGatherHealthCheckWithDelimitedTags(t *testing.T) {
 	consul := &Consul{
 		TagDelimiter: ":",
 	}
-	consul.GatherHealthCheck(&acc, sampleChecks)
+	consul.gatherHealthCheck(&acc, sampleChecks)
 
 	acc.AssertContainsTaggedFields(t, "consul_health_checks", expectedFields, expectedTags)
 }
 
 func TestGatherHealthCheckV2(t *testing.T) {
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"passing":  1,
 		"critical": 0,
 		"warning":  0,
@@ -101,13 +102,13 @@ func TestGatherHealthCheckV2(t *testing.T) {
 	consul := &Consul{
 		MetricVersion: 2,
 	}
-	consul.GatherHealthCheck(&acc, sampleChecks)
+	consul.gatherHealthCheck(&acc, sampleChecks)
 
 	acc.AssertContainsTaggedFields(t, "consul_health_checks", expectedFields, expectedTags)
 }
 
 func TestGatherHealthCheckWithDelimitedTagsV2(t *testing.T) {
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"passing":  1,
 		"critical": 0,
 		"warning":  0,
@@ -131,7 +132,7 @@ func TestGatherHealthCheckWithDelimitedTagsV2(t *testing.T) {
 		MetricVersion: 2,
 		TagDelimiter:  ":",
 	}
-	consul.GatherHealthCheck(&acc, sampleChecks)
+	consul.gatherHealthCheck(&acc, sampleChecks)
 
 	acc.AssertContainsTaggedFields(t, "consul_health_checks", expectedFields, expectedTags)
 }

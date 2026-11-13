@@ -1,14 +1,17 @@
 # Google Cloud PubSub Output Plugin
 
-The GCP PubSub plugin publishes metrics to a [Google Cloud PubSub][pubsub] topic
-as one of the supported [output data formats][].
+This plugin publishes metrics to a [Google Cloud PubSub][pubsub] topic in one
+of the supported [data formats][data_formats].
+
+⭐ Telegraf v1.10.0
+🏷️ cloud, messaging
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -44,14 +47,14 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
   ## The following publish_* parameters specifically configures batching
   ## requests made to the GCP Cloud PubSub API via the PubSub Golang library. Read
-  ## more here: https://godoc.org/cloud.google.com/go/pubsub#PublishSettings
+  ## more here: https://godoc.org/cloud.google.com/go/pubsub/v2#PublishSettings
 
-  ## Optional. Send a request to PubSub (i.e. actually publish a batch)
+  ## Optional. Send a request to PubSub (actually publish a batch)
   ## when it has this many PubSub messages. If send_batched is true,
   ## this is ignored and treated as if it were 1.
   # publish_count_threshold = 1000
 
-  ## Optional. Send a request to PubSub (i.e. actually publish a batch)
+  ## Optional. Send a request to PubSub (actually publish a batch)
   ## when it has this many PubSub messages. If send_batched is true,
   ## this is ignored and treated as if it were 1
   # publish_byte_threshold = 1000000
@@ -75,4 +78,4 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 ```
 
 [pubsub]: https://cloud.google.com/pubsub
-[output data formats]: /docs/DATA_FORMATS_OUTPUT.md
+[data_formats]: /docs/DATA_FORMATS_OUTPUT.md

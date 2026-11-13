@@ -1,14 +1,20 @@
 # Beanstalkd Input Plugin
 
-The `beanstalkd` plugin collects server stats as well as tube stats (reported by
-`stats` and `stats-tube` commands respectively).
+This plugin collects server statistics as well as tube statistics from a
+[Beanstalkd work queue][beanstalkd] as reported by the `stats` and `stats-tube`
+server commands.
+
+⭐ Telegraf v1.8.0
+🏷️ messaging
+💻 all
+
+[beanstalkd]: https://beanstalkd.github.io/
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -27,9 +33,10 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 ## Metrics
 
-Please see the [Beanstalk Protocol
-doc](https://raw.githubusercontent.com/kr/beanstalkd/master/doc/protocol.txt)
-for detailed explanation of `stats` and `stats-tube` commands output.
+Please see the [Beanstalk protocol doc][protocol] for a detailed explanation of
+`stats` and `stats-tube` server commands output.
+
+[protocol]: https://github.com/beanstalkd/beanstalkd/blob/master/doc/protocol.txt
 
 `beanstalkd_overview` – statistical information about the system as a whole
 

@@ -9,7 +9,8 @@ import (
 	"github.com/influxdata/telegraf/internal"
 )
 
-func Parse(acc telegraf.Accumulator, sectionBytes []byte, roomBytes []byte, deviecsBytes []byte) error {
+// Parse parses data from sections, rooms and devices, and adds measurements containing parsed data.
+func Parse(acc telegraf.Accumulator, sectionBytes, roomBytes, devicesBytes []byte) error {
 	var tmpSections []Sections
 	if err := json.Unmarshal(sectionBytes, &tmpSections); err != nil {
 		return err
@@ -29,7 +30,7 @@ func Parse(acc telegraf.Accumulator, sectionBytes []byte, roomBytes []byte, devi
 	}
 
 	var devices []Devices
-	if err := json.Unmarshal(deviecsBytes, &devices); err != nil {
+	if err := json.Unmarshal(devicesBytes, &devices); err != nil {
 		return err
 	}
 
@@ -49,7 +50,7 @@ func Parse(acc telegraf.Accumulator, sectionBytes []byte, roomBytes []byte, devi
 			"name":     device.Name,
 			"type":     device.Type,
 		}
-		fields := make(map[string]interface{})
+		fields := make(map[string]any)
 
 		if device.Properties.BatteryLevel != nil {
 			fields["batteryLevel"] = *device.Properties.BatteryLevel
@@ -70,6 +71,15 @@ func Parse(acc telegraf.Accumulator, sectionBytes []byte, roomBytes []byte, devi
 				acc.AddError(fmt.Errorf("unable to convert value: %w", err))
 			} else {
 				fields["value"] = v
+			}
+		}
+
+		if device.Properties.Value2 != nil {
+			v, err := internal.ToFloat64(device.Properties.Value2)
+			if err != nil {
+				acc.AddError(fmt.Errorf("unable to convert value2: %w", err))
+			} else {
+				fields["value2"] = v
 			}
 		}
 

@@ -1,6 +1,9 @@
 package prometheus
 
 import (
+	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/influxdata/telegraf/testutil"
@@ -18,8 +22,8 @@ func initPrometheus() *Prometheus {
 	prom.MonitorKubernetesPodsScheme = "http"
 	prom.MonitorKubernetesPodsPort = 9102
 	prom.MonitorKubernetesPodsPath = "/metrics"
-	prom.MonitorKubernetesPodsMethod = MonitorMethodAnnotations
-	prom.kubernetesPods = map[PodID]URLAndAddress{}
+	prom.MonitorKubernetesPodsMethod = monitorMethodAnnotations
+	prom.kubernetesPods = map[podID]urlAndAddress{}
 	return prom
 }
 
@@ -34,7 +38,7 @@ func TestScrapeURLNoAnnotations(t *testing.T) {
 
 func TestScrapeURLNoAnnotationsScrapeConfig(t *testing.T) {
 	prom := initPrometheus()
-	prom.MonitorKubernetesPodsMethod = MonitorMethodSettingsAndAnnotations
+	prom.MonitorKubernetesPodsMethod = monitorMethodSettingsAndAnnotations
 
 	p := pod()
 	p.Annotations = map[string]string{}
@@ -45,7 +49,7 @@ func TestScrapeURLNoAnnotationsScrapeConfig(t *testing.T) {
 
 func TestScrapeURLScrapeConfigCustom(t *testing.T) {
 	prom := initPrometheus()
-	prom.MonitorKubernetesPodsMethod = MonitorMethodSettingsAndAnnotations
+	prom.MonitorKubernetesPodsMethod = monitorMethodSettingsAndAnnotations
 
 	prom.MonitorKubernetesPodsScheme = "https"
 	prom.MonitorKubernetesPodsPort = 9999
@@ -66,7 +70,7 @@ func TestScrapeURLAnnotations(t *testing.T) {
 
 func TestScrapeURLAnnotationsScrapeConfig(t *testing.T) {
 	prom := initPrometheus()
-	prom.MonitorKubernetesPodsMethod = MonitorMethodSettingsAndAnnotations
+	prom.MonitorKubernetesPodsMethod = monitorMethodSettingsAndAnnotations
 	p := pod()
 	url, err := getScrapeURL(p, prom)
 	require.NoError(t, err)
@@ -84,7 +88,7 @@ func TestScrapeURLAnnotationsCustomPort(t *testing.T) {
 
 func TestScrapeURLAnnotationsCustomPortScrapeConfig(t *testing.T) {
 	prom := initPrometheus()
-	prom.MonitorKubernetesPodsMethod = MonitorMethodSettingsAndAnnotations
+	prom.MonitorKubernetesPodsMethod = monitorMethodSettingsAndAnnotations
 	p := pod()
 	p.Annotations = map[string]string{"prometheus.io/port": "9000"}
 	url, err := getScrapeURL(p, prom)
@@ -129,7 +133,7 @@ func TestScrapeURLAnnotationsCustomPathWithFragment(t *testing.T) {
 }
 
 func TestAddPod(t *testing.T) {
-	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[PodID]URLAndAddress{}}
+	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
 
 	p := pod()
 	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
@@ -139,7 +143,7 @@ func TestAddPod(t *testing.T) {
 
 func TestAddPodScrapeConfig(t *testing.T) {
 	prom := initPrometheus()
-	prom.MonitorKubernetesPodsMethod = MonitorMethodSettingsAndAnnotations
+	prom.MonitorKubernetesPodsMethod = monitorMethodSettingsAndAnnotations
 
 	p := pod()
 	p.Annotations = map[string]string{}
@@ -148,7 +152,7 @@ func TestAddPodScrapeConfig(t *testing.T) {
 }
 
 func TestAddMultipleDuplicatePods(t *testing.T) {
-	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[PodID]URLAndAddress{}}
+	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
 
 	p := pod()
 	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
@@ -156,12 +160,13 @@ func TestAddMultipleDuplicatePods(t *testing.T) {
 	p.Name = "Pod2"
 	registerPod(p, prom)
 
-	urls, _ := prom.GetAllURLs()
+	urls, err := prom.getAllURLs()
+	require.NoError(t, err)
 	require.Len(t, urls, 1)
 }
 
 func TestAddMultiplePods(t *testing.T) {
-	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[PodID]URLAndAddress{}}
+	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
 
 	p := pod()
 	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
@@ -173,40 +178,74 @@ func TestAddMultiplePods(t *testing.T) {
 }
 
 func TestDeletePods(t *testing.T) {
-	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[PodID]URLAndAddress{}}
+	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
 
 	p := pod()
 	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
 	registerPod(p, prom)
 
-	podID, _ := cache.MetaNamespaceKeyFunc(p)
-	unregisterPod(PodID(podID), prom)
+	id, err := cache.MetaNamespaceKeyFunc(p)
+	require.NoError(t, err)
+	unregisterPod(podID(id), prom)
 	require.Empty(t, prom.kubernetesPods)
 }
 
 func TestKeepDefaultNamespaceLabelName(t *testing.T) {
-	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[PodID]URLAndAddress{}}
+	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
+	require.NoError(t, prom.Init())
 
 	p := pod()
 	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
 	registerPod(p, prom)
 
-	podID, _ := cache.MetaNamespaceKeyFunc(p)
-	tags := prom.kubernetesPods[PodID(podID)].Tags
+	id, err := cache.MetaNamespaceKeyFunc(p)
+	require.NoError(t, err)
+	tags := prom.kubernetesPods[podID(id)].tags
 	require.Equal(t, "default", tags["namespace"])
 }
 
 func TestChangeNamespaceLabelName(t *testing.T) {
-	prom := &Prometheus{Log: testutil.Logger{}, PodNamespaceLabelName: "pod_namespace", kubernetesPods: map[PodID]URLAndAddress{}}
+	prom := &Prometheus{Log: testutil.Logger{}, PodNamespaceLabelName: "pod_namespace", kubernetesPods: map[podID]urlAndAddress{}}
+	require.NoError(t, prom.Init())
 
 	p := pod()
 	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
 	registerPod(p, prom)
 
-	podID, _ := cache.MetaNamespaceKeyFunc(p)
-	tags := prom.kubernetesPods[PodID(podID)].Tags
+	id, err := cache.MetaNamespaceKeyFunc(p)
+	require.NoError(t, err)
+	tags := prom.kubernetesPods[podID(id)].tags
 	require.Equal(t, "default", tags["pod_namespace"])
-	require.Equal(t, "", tags["namespace"])
+	require.Empty(t, tags["namespace"])
+}
+
+func TestKeepDefaultPodNameLabelName(t *testing.T) {
+	prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
+	require.NoError(t, prom.Init())
+
+	p := pod()
+	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
+	registerPod(p, prom)
+
+	id, err := cache.MetaNamespaceKeyFunc(p)
+	require.NoError(t, err)
+	tags := prom.kubernetesPods[podID(id)].tags
+	require.Equal(t, "myPod", tags["pod_name"])
+}
+
+func TestChangePodNameLabelName(t *testing.T) {
+	prom := &Prometheus{Log: testutil.Logger{}, PodNameLabelName: "source_pod_name", kubernetesPods: map[podID]urlAndAddress{}}
+	require.NoError(t, prom.Init())
+
+	p := pod()
+	p.Annotations = map[string]string{"prometheus.io/scrape": "true"}
+	registerPod(p, prom)
+
+	id, err := cache.MetaNamespaceKeyFunc(p)
+	require.NoError(t, err)
+	tags := prom.kubernetesPods[podID(id)].tags
+	require.Equal(t, "myPod", tags["source_pod_name"])
+	require.Empty(t, tags["pod_name"])
 }
 
 func TestPodHasMatchingNamespace(t *testing.T) {
@@ -296,14 +335,14 @@ func TestAnnotationFilters(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
-			prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[PodID]URLAndAddress{}}
+			prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
 			prom.PodAnnotationInclude = tc.include
 			prom.PodAnnotationExclude = tc.exclude
 			require.NoError(t, prom.initFilters())
 			registerPod(p, prom)
 			for _, pd := range prom.kubernetesPods {
 				for _, tagKey := range tc.expectedTags {
-					require.Contains(t, pd.Tags, tagKey)
+					require.Contains(t, pd.tags, tagKey)
 				}
 			}
 		})
@@ -341,18 +380,162 @@ func TestLabelFilters(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
-			prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[PodID]URLAndAddress{}}
+			prom := &Prometheus{Log: testutil.Logger{}, kubernetesPods: map[podID]urlAndAddress{}}
 			prom.PodLabelInclude = tc.include
 			prom.PodLabelExclude = tc.exclude
 			require.NoError(t, prom.initFilters())
 			registerPod(p, prom)
 			for _, pd := range prom.kubernetesPods {
 				for _, tagKey := range tc.expectedTags {
-					require.Contains(t, pd.Tags, tagKey)
+					require.Contains(t, pd.tags, tagKey)
 				}
 			}
 		})
 	}
+}
+
+func TestInformerFactoryRefCounting(t *testing.T) {
+	resetInformerFactoryState(t)
+
+	var shutdownCalled atomic.Int32
+	mock := &mockSharedInformerFactory{
+		onShutdown: func() { shutdownCalled.Add(1) },
+	}
+
+	// Simulate two instances registered for the same namespace
+	informerfactoryMu.Lock()
+	informerfactory = map[string]informers.SharedInformerFactory{"default": mock}
+	informerfactoryRefs = map[string]int{"default": 2}
+	informerfactoryMu.Unlock()
+
+	// First Stop — should decrement ref count but not shutdown
+	_, cancel1 := context.WithCancel(context.Background())
+	p1 := &Prometheus{
+		MonitorPods:  true,
+		PodNamespace: "default",
+		cancel:       cancel1,
+	}
+	p1.Stop()
+
+	// Read under lock, assert outside to avoid deadlock if assertion fails
+	informerfactoryMu.Lock()
+	refCount := informerfactoryRefs["default"]
+	_, exists := informerfactory["default"]
+	informerfactoryMu.Unlock()
+	require.Equal(t, 1, refCount)
+	require.True(t, exists)
+	require.Equal(t, int32(0), shutdownCalled.Load())
+
+	// Second Stop — should shutdown and remove
+	_, cancel2 := context.WithCancel(context.Background())
+	p2 := &Prometheus{
+		MonitorPods:  true,
+		PodNamespace: "default",
+		cancel:       cancel2,
+	}
+	p2.Stop()
+
+	informerfactoryMu.Lock()
+	_, refsExist := informerfactoryRefs["default"]
+	_, factoryExist := informerfactory["default"]
+	informerfactoryMu.Unlock()
+	require.False(t, refsExist)
+	require.False(t, factoryExist)
+	require.Equal(t, int32(1), shutdownCalled.Load())
+}
+
+func TestInformerFactoryMultipleNamespaces(t *testing.T) {
+	resetInformerFactoryState(t)
+
+	var shutdownA, shutdownB atomic.Int32
+	mockA := &mockSharedInformerFactory{
+		onShutdown: func() { shutdownA.Add(1) },
+	}
+	mockB := &mockSharedInformerFactory{
+		onShutdown: func() { shutdownB.Add(1) },
+	}
+
+	informerfactoryMu.Lock()
+	informerfactory = map[string]informers.SharedInformerFactory{
+		"ns-a": mockA,
+		"ns-b": mockB,
+	}
+	informerfactoryRefs = map[string]int{
+		"ns-a": 1,
+		"ns-b": 1,
+	}
+	informerfactoryMu.Unlock()
+
+	// Stop instance in ns-a — should shutdown ns-a only
+	_, cancelA := context.WithCancel(context.Background())
+	pa := &Prometheus{
+		MonitorPods:  true,
+		PodNamespace: "ns-a",
+		cancel:       cancelA,
+	}
+	pa.Stop()
+
+	informerfactoryMu.Lock()
+	_, nsAExists := informerfactory["ns-a"]
+	_, nsBExists := informerfactory["ns-b"]
+	informerfactoryMu.Unlock()
+	require.False(t, nsAExists)
+	require.True(t, nsBExists)
+	require.Equal(t, int32(1), shutdownA.Load())
+	require.Equal(t, int32(0), shutdownB.Load())
+
+	// Stop instance in ns-b — should shutdown ns-b
+	_, cancelB := context.WithCancel(context.Background())
+	pb := &Prometheus{
+		MonitorPods:  true,
+		PodNamespace: "ns-b",
+		cancel:       cancelB,
+	}
+	pb.Stop()
+
+	informerfactoryMu.Lock()
+	_, nsBStillExists := informerfactory["ns-b"]
+	informerfactoryMu.Unlock()
+	require.False(t, nsBStillExists)
+	require.Equal(t, int32(1), shutdownB.Load())
+}
+
+func TestInformerFactoryConcurrentStop(t *testing.T) {
+	resetInformerFactoryState(t)
+
+	var shutdownCount atomic.Int32
+	mock := &mockSharedInformerFactory{
+		onShutdown: func() { shutdownCount.Add(1) },
+	}
+
+	const numInstances = 10
+	informerfactoryMu.Lock()
+	informerfactory = map[string]informers.SharedInformerFactory{"default": mock}
+	informerfactoryRefs = map[string]int{"default": numInstances}
+	informerfactoryMu.Unlock()
+
+	// Stop all instances concurrently — race detector verifies thread safety
+	var wg sync.WaitGroup
+	for range numInstances {
+		wg.Go(func() {
+			_, cancel := context.WithCancel(context.Background())
+			p := &Prometheus{
+				MonitorPods:  true,
+				PodNamespace: "default",
+				cancel:       cancel,
+			}
+			p.Stop()
+		})
+	}
+	wg.Wait()
+
+	informerfactoryMu.Lock()
+	_, refsExist := informerfactoryRefs["default"]
+	_, factoryExist := informerfactory["default"]
+	informerfactoryMu.Unlock()
+	require.False(t, refsExist)
+	require.False(t, factoryExist)
+	require.Equal(t, int32(1), shutdownCount.Load())
 }
 
 func pod() *corev1.Pod {
@@ -361,4 +544,29 @@ func pod() *corev1.Pod {
 	p.Name = "myPod"
 	p.Namespace = "default"
 	return p
+}
+
+type mockSharedInformerFactory struct {
+	informers.SharedInformerFactory
+	onShutdown func()
+}
+
+func (m *mockSharedInformerFactory) Shutdown() {
+	if m.onShutdown != nil {
+		m.onShutdown()
+	}
+}
+
+func resetInformerFactoryState(t *testing.T) {
+	t.Helper()
+	informerfactoryMu.Lock()
+	informerfactory = nil
+	informerfactoryRefs = nil
+	informerfactoryMu.Unlock()
+	t.Cleanup(func() {
+		informerfactoryMu.Lock()
+		informerfactory = nil
+		informerfactoryRefs = nil
+		informerfactoryMu.Unlock()
+	})
 }

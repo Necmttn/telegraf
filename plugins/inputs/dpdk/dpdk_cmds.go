@@ -10,8 +10,8 @@ import (
 type linkStatus int64
 
 const (
-	DOWN linkStatus = iota
-	UP
+	down linkStatus = iota
+	up
 )
 
 const (
@@ -22,19 +22,19 @@ const (
 
 var (
 	linkStatusMap = map[string]linkStatus{
-		"down": DOWN,
-		"up":   UP,
+		"down": down,
+		"up":   up,
 	}
 )
 
-func processCommandResponse(command string, data map[string]interface{}) error {
+func processCommandResponse(command string, data map[string]any) error {
 	if command == ethdevLinkStatusCommand {
 		return processLinkStatusCmd(data)
 	}
 	return nil
 }
 
-func processLinkStatusCmd(data map[string]interface{}) error {
+func processLinkStatusCmd(data map[string]any) error {
 	status, ok := data[linkStatusStringFieldName].(string)
 	if !ok {
 		return fmt.Errorf("can't find or parse %q field", linkStatusStringFieldName)

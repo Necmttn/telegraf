@@ -1,18 +1,21 @@
 # Fibaro Input Plugin
 
-The Fibaro plugin makes HTTP calls to the Fibaro controller API to gather values
-of hooked devices. Those values could be true (1) or false (0) for switches,
-percentage for dimmers, temperature, etc.
+This plugin gathers data from devices connected to a [Fibaro][fibaro]
+controller. Those values could be true (1) or false (0) for switches, percentage
+for dimmers, temperature, etc. Both _Home Center 2_ and _Home Center 3_ devices
+are supported.
 
-By default, this plugin supports HC2 devices. To support HC3 devices, please
-use the device type config option.
+⭐ Telegraf v1.7.0
+🏷️ iot
+💻 all
+
+[fibaro]: https://www.fibaro.com
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

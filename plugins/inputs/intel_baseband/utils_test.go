@@ -4,7 +4,6 @@ package intel_baseband
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -60,7 +59,7 @@ func TestValidatePath(t *testing.T) {
 
 		for _, tc := range testCases {
 			returnPath, err := validatePath(tc.path, tc.ft)
-			require.Equal(t, "", returnPath)
+			require.Empty(t, returnPath)
 			require.ErrorContains(t, err, tc.expectedErrorContains)
 		}
 	})
@@ -78,7 +77,7 @@ func TestValidatePath(t *testing.T) {
 
 		for _, tc := range testCases {
 			returnPath, err := validatePath(tc.path, tc.ft)
-			require.Equal(t, "", returnPath)
+			require.Empty(t, returnPath)
 			require.ErrorContains(t, err, tc.expectedErrorContains)
 		}
 	})
@@ -94,7 +93,7 @@ func TestValidatePath(t *testing.T) {
 
 		for _, tc := range testCases {
 			returnPath, err := validatePath(tc.path, tc.ft)
-			require.Equal(t, "", returnPath)
+			require.Empty(t, returnPath)
 			require.ErrorContains(t, err, tc.expectedErrorContains)
 		}
 	})
@@ -164,8 +163,8 @@ func TestLogMetricDataToValue(t *testing.T) {
 		{"00", 0, nil},
 		{"5", 5, nil},
 		{"-010", 0, errors.New("metric can't be negative")},
-		{"", 0, fmt.Errorf("invalid syntax")},
-		{"0Nax10", 0, fmt.Errorf("invalid syntax")},
+		{"", 0, errors.New("invalid syntax")},
+		{"0Nax10", 0, errors.New("invalid syntax")},
 	}
 
 	t.Run("check correct returned values", func(t *testing.T) {

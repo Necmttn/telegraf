@@ -24,7 +24,7 @@ func TestInputShimTimer(t *testing.T) {
 	out, err := r.ReadString('\n')
 	require.NoError(t, err)
 	require.Contains(t, out, "\n")
-	metricLine := strings.Split(out, "\n")[0]
+	metricLine, _, _ := strings.Cut(out, "\n")
 	require.Equal(t, "measurement,tag=tag field=1i 1234000005678", metricLine)
 }
 
@@ -47,17 +47,19 @@ func TestInputShimStdinSignalingWorks(t *testing.T) {
 	err = stdinWriter.Close()
 	require.NoError(t, err)
 	go func() {
-		_, _ = io.ReadAll(r)
+		if _, err = io.ReadAll(r); err != nil {
+			t.Error(err)
+		}
 	}()
 	// check that it exits cleanly
 	<-exited
 }
 
-func runInputPlugin(t *testing.T, interval time.Duration, stdin io.Reader, stdout, stderr io.Writer) (metricProcessed chan bool, exited chan bool) {
-	metricProcessed = make(chan bool, 1)
+func runInputPlugin(t *testing.T, interval time.Duration, stdin io.Reader, stdout, stderr io.Writer) (processed, exited chan bool) {
+	processed = make(chan bool, 1)
 	exited = make(chan bool, 1)
 	inp := &testInput{
-		metricProcessed: metricProcessed,
+		metricProcessed: processed,
 	}
 
 	shim := New()
@@ -72,29 +74,26 @@ func runInputPlugin(t *testing.T, interval time.Duration, stdin io.Reader, stdou
 	}
 	err := shim.AddInput(inp)
 	require.NoError(t, err)
-	go func() {
-		err := shim.Run(interval)
-		require.NoError(t, err)
-		exited <- true
-	}()
-	return metricProcessed, exited
+	go func(e chan bool) {
+		if err := shim.Run(interval); err != nil {
+			t.Error(err)
+		}
+		e <- true
+	}(exited)
+	return processed, exited
 }
 
 type testInput struct {
 	metricProcessed chan bool
 }
 
-func (i *testInput) SampleConfig() string {
+func (*testInput) SampleConfig() string {
 	return ""
-}
-
-func (i *testInput) Description() string {
-	return "test"
 }
 
 func (i *testInput) Gather(acc telegraf.Accumulator) error {
 	acc.AddFields("measurement",
-		map[string]interface{}{
+		map[string]any{
 			"field": 1,
 		},
 		map[string]string{
@@ -104,11 +103,11 @@ func (i *testInput) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (i *testInput) Start(_ telegraf.Accumulator) error {
+func (*testInput) Start(telegraf.Accumulator) error {
 	return nil
 }
 
-func (i *testInput) Stop() {
+func (*testInput) Stop() {
 }
 
 type serviceInput struct {
@@ -117,17 +116,13 @@ type serviceInput struct {
 	SecretValue string `toml:"secret_value"`
 }
 
-func (i *serviceInput) SampleConfig() string {
+func (*serviceInput) SampleConfig() string {
 	return ""
 }
 
-func (i *serviceInput) Description() string {
-	return ""
-}
-
-func (i *serviceInput) Gather(acc telegraf.Accumulator) error {
+func (*serviceInput) Gather(acc telegraf.Accumulator) error {
 	acc.AddFields("measurement",
-		map[string]interface{}{
+		map[string]any{
 			"field": 1,
 		},
 		map[string]string{
@@ -137,9 +132,9 @@ func (i *serviceInput) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (i *serviceInput) Start(_ telegraf.Accumulator) error {
+func (*serviceInput) Start(telegraf.Accumulator) error {
 	return nil
 }
 
-func (i *serviceInput) Stop() {
+func (*serviceInput) Stop() {
 }

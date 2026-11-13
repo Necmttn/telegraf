@@ -2,42 +2,51 @@ package kubernetes
 
 import (
 	"fmt"
-	"github.com/influxdata/telegraf/filter"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/filter"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestKubernetesStats(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.RequestURI == "/stats/summary" {
 			w.WriteHeader(http.StatusOK)
-			_, err := fmt.Fprintln(w, responseStatsSummery)
-			require.NoError(t, err)
+			if _, err := fmt.Fprintln(w, responseStatsSummery); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		}
 		if r.RequestURI == "/pods" {
 			w.WriteHeader(http.StatusOK)
-			_, err := fmt.Fprintln(w, responsePods)
-			require.NoError(t, err)
+			if _, err := fmt.Fprintln(w, responsePods); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		}
 	}))
 	defer ts.Close()
 
-	labelFilter, _ := filter.NewIncludeExcludeFilter([]string{"app", "superkey"}, nil)
+	labelFilter, err := filter.NewIncludeExcludeFilter([]string{"app", "superkey"}, nil)
+	require.NoError(t, err)
 
 	k := &Kubernetes{
-		URL:         ts.URL,
-		labelFilter: labelFilter,
+		URL:            ts.URL,
+		labelFilter:    labelFilter,
+		NodeMetricName: "kubernetes_node",
 	}
 
 	var acc testutil.Accumulator
-	err := acc.GatherError(k.Gather)
+	err = acc.GatherError(k.Gather)
 	require.NoError(t, err)
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"cpu_usage_nanocores":        int64(56652446),
 		"cpu_usage_core_nanoseconds": int64(101437561712262),
 		"memory_usage_bytes":         int64(62529536),
@@ -56,7 +65,7 @@ func TestKubernetesStats(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "kubernetes_system_container", fields, tags)
 
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"cpu_usage_nanocores":              int64(576996212),
 		"cpu_usage_core_nanoseconds":       int64(774129887054161),
 		"memory_usage_bytes":               int64(12313182208),
@@ -81,7 +90,7 @@ func TestKubernetesStats(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "kubernetes_node", fields, tags)
 
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"cpu_usage_nanocores":        int64(846503),
 		"cpu_usage_core_nanoseconds": int64(56507553554),
 		"memory_usage_bytes":         int64(30789632),
@@ -106,7 +115,7 @@ func TestKubernetesStats(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "kubernetes_pod_container", fields, tags)
 
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"cpu_usage_nanocores":        int64(846503),
 		"cpu_usage_core_nanoseconds": int64(56507553554),
 		"memory_usage_bytes":         int64(0),
@@ -131,7 +140,7 @@ func TestKubernetesStats(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "kubernetes_pod_container", fields, tags)
 
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"available_bytes": int64(7903948800),
 		"capacity_bytes":  int64(7903961088),
 		"used_bytes":      int64(12288),
@@ -146,7 +155,7 @@ func TestKubernetesStats(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "kubernetes_pod_volume", fields, tags)
 
-	fields = map[string]interface{}{
+	fields = map[string]any{
 		"rx_bytes":  int64(70749124),
 		"rx_errors": int64(0),
 		"tx_bytes":  int64(47813506),

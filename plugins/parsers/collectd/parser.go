@@ -20,8 +20,8 @@ const (
 type Parser struct {
 	DefaultTags map[string]string `toml:"-"`
 
-	//whether or not to split multi value metric into multiple metrics
-	//default value is split
+	// whether or not to split multi value metric into multiple metrics
+	// default value is split
 	ParseMultiValue string `toml:"collectd_parse_multivalue"`
 
 	popts         network.ParseOpts
@@ -71,7 +71,7 @@ func (p *Parser) Parse(buf []byte) ([]telegraf.Metric, error) {
 		return nil, fmt.Errorf("collectd parser error: %w", err)
 	}
 
-	metrics := []telegraf.Metric{}
+	metrics := make([]telegraf.Metric, 0, len(valueLists))
 	for _, valueList := range valueLists {
 		metrics = append(metrics, p.unmarshalValueList(valueList)...)
 	}
@@ -114,7 +114,7 @@ func (p *Parser) unmarshalValueList(vl *api.ValueList) []telegraf.Metric {
 	var metrics []telegraf.Metric
 
 	var multiValue = p.ParseMultiValue
-	//set multiValue to default "split" if nothing is specified
+	// set multiValue to default "split" if nothing is specified
 	if multiValue == "" {
 		multiValue = "split"
 	}
@@ -123,7 +123,7 @@ func (p *Parser) unmarshalValueList(vl *api.ValueList) []telegraf.Metric {
 		for i := range vl.Values {
 			name := fmt.Sprintf("%s_%s", vl.Identifier.Plugin, vl.DSName(i))
 			tags := make(map[string]string)
-			fields := make(map[string]interface{})
+			fields := make(map[string]any)
 
 			// Convert interface back to actual type, then to float64
 			switch value := vl.Values[i].(type) {
@@ -156,7 +156,7 @@ func (p *Parser) unmarshalValueList(vl *api.ValueList) []telegraf.Metric {
 	case "join":
 		name := vl.Identifier.Plugin
 		tags := make(map[string]string)
-		fields := make(map[string]interface{})
+		fields := make(map[string]any)
 		for i := range vl.Values {
 			switch value := vl.Values[i].(type) {
 			case api.Gauge:
@@ -200,7 +200,7 @@ func LoadTypesDB(path string) (*api.TypesDB, error) {
 
 func init() {
 	parsers.Add("collectd",
-		func(_ string) telegraf.Parser {
+		func(string) telegraf.Parser {
 			return &Parser{
 				AuthFile: DefaultAuthFile,
 			}

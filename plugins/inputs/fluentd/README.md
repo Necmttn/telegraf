@@ -1,34 +1,29 @@
 # Fluentd Input Plugin
 
-The fluentd plugin gathers metrics from plugin endpoint provided by [in_monitor
-plugin][1].  This plugin understands data provided by /api/plugin.json resource
-(/api/config.json is not covered).
+This plugin gathers internal metrics of a [fluentd][fluentd] instance provided
+by fluentd's [monitor agent plugin][monitor_agent]. Data provided
+by the `/api/plugin.json` resource, `/api/config.json` is not covered.
 
-You might need to adjust your fluentd configuration, in order to reduce series
-cardinality in case your fluentd restarts frequently. Every time fluentd starts,
-`plugin_id` value is given a new random value.  According to [fluentd
-documentation][2], you are able to add `@id` parameter for each plugin to avoid
-this behaviour and define custom `plugin_id`.
+> [!IMPORTANT]
+> This plugin might produce high-cardinality series as the `plugin_id` value is
+> random after each restart of fluentd.  You might need to adjust your fluentd
+> configuration, in order to reduce series cardinality in case your fluentd
+> restarts frequently by adding the `@id` parameter to each plugin.
+> See [fluentd's documentation][docs] for details.
 
-example configuration with `@id` parameter for http plugin:
+⭐ Telegraf v1.4.0
+🏷️ server
+💻 all
 
-```text
-<source>
-  @type http
-  @id http
-  port 8888
-</source>
-```
-
-[1]: https://docs.fluentd.org/input/monitor_agent
-[2]: https://docs.fluentd.org/configuration/config-file#common-plugin-parameter
+[fluentd]: https://www.fluentd.org/
+[monitor_agent]: https://docs.fluentd.org/input/monitor_agent
+[docs]: https://docs.fluentd.org/configuration/config-file#common-plugin-parameter
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -88,5 +83,5 @@ fluentd,plugin_category=input,plugin_type=dummy,host=T440s,plugin_id=object:8da9
 fluentd,plugin_id=object:820190,plugin_category=input,plugin_type=monitor_agent,host=T440s retry_count=0,buffer_total_queued_size=0,buffer_queue_length=0 1492006105000000000
 fluentd,plugin_id=object:c5e054,plugin_category=output,plugin_type=stdout,host=T440s buffer_queue_length=0,retry_count=0,buffer_total_queued_size=0 1492006105000000000
 fluentd,plugin_type=s3,host=T440s,plugin_id=object:bd7a90,plugin_category=output buffer_queue_length=0,retry_count=0,buffer_total_queued_size=0 1492006105000000000
-fluentd,plugin_id=output_td, plugin_category=output,plugin_type=tdlog, host=T440s buffer_available_buffer_space_ratios=100,buffer_queue_byte_size=0,buffer_queue_length=0,buffer_stage_byte_size=0,buffer_stage_length=0,buffer_total_queued_size=0,emit_count=0,emit_records=0,flush_time_count=0,retry_count=0,rollback_count=0,slow_flush_count=0,write_count=0 1651474085000000000
+fluentd,plugin_id=output_td,plugin_category=output,plugin_type=tdlog,host=T440s buffer_available_buffer_space_ratios=100,buffer_queue_byte_size=0,buffer_queue_length=0,buffer_stage_byte_size=0,buffer_stage_length=0,buffer_total_queued_size=0,emit_count=0,emit_records=0,flush_time_count=0,retry_count=0,rollback_count=0,slow_flush_count=0,write_count=0 1651474085000000000
 ```

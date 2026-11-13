@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/plugins/common/sudo"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
@@ -17,30 +18,29 @@ import (
 var sampleConfig string
 
 var (
-	execCommand = exec.Command // execCommand is used to mock commands in tests.
+	execCommand    = exec.Command // execCommand is used to mock commands in tests.
+	metricsTargets = []struct {
+		target string
+		field  string
+	}{
+		{
+			target: "Currently failed:",
+			field:  "failed",
+		},
+		{
+			target: "Currently banned:",
+			field:  "banned",
+		},
+	}
 )
+
+const cmd = "fail2ban-client"
 
 type Fail2ban struct {
 	UseSudo bool   `toml:"use_sudo"`
 	Socket  string `toml:"socket"`
 	path    string
 }
-
-var metricsTargets = []struct {
-	target string
-	field  string
-}{
-	{
-		target: "Currently failed:",
-		field:  "failed",
-	},
-	{
-		target: "Currently banned:",
-		field:  "banned",
-	},
-}
-
-const cmd = "fail2ban-client"
 
 func (*Fail2ban) SampleConfig() string {
 	return sampleConfig
@@ -73,7 +73,7 @@ func (f *Fail2ban) Gather(acc telegraf.Accumulator) error {
 	var args []string
 
 	if f.UseSudo {
-		name = "sudo"
+		name = sudo.Binary()
 		args = append(args, f.path)
 	}
 
@@ -91,12 +91,12 @@ func (f *Fail2ban) Gather(acc telegraf.Accumulator) error {
 	const targetString = "Jail list:"
 	var jails []string
 	for _, line := range lines {
-		idx := strings.LastIndex(line, targetString)
-		if idx < 0 {
+		_, end, found := strings.CutLast(line, targetString)
+		if !found {
 			// not target line, skip.
 			continue
 		}
-		jails = strings.Split(strings.TrimSpace(line[idx+len(targetString):]), ", ")
+		jails = strings.Split(strings.TrimSpace(end), ", ")
 		break
 	}
 
@@ -105,15 +105,14 @@ func (f *Fail2ban) Gather(acc telegraf.Accumulator) error {
 		if jail == "" {
 			continue
 		}
-		fields := make(map[string]interface{})
+		fields := make(map[string]any)
 		cmd := execCommand(name, append(args, jail)...)
 		out, err := cmd.Output()
 		if err != nil {
 			return fmt.Errorf("failed to run command %q: %w - %s", strings.Join(cmd.Args, " "), err, string(out))
 		}
 
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			key, value := extractCount(line)
 			if key != "" {
 				fields[key] = value

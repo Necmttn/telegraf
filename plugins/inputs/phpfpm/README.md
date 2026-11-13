@@ -1,13 +1,19 @@
 # PHP-FPM Input Plugin
 
-Get phpfpm stats using either HTTP status page or fpm socket.
+This plugin gathers statistics of the [PHP FastCGI Process Manager][phpfpm]
+using either the HTTP status page or the fpm socket.
+
+⭐ Telegraf v0.1.10
+🏷️ server, web
+💻 all
+
+[phpfpm]: https://www.php.net/manual/en/install.fpm.php
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -42,7 +48,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## Format of stats to parse, set to "status" or "json"
   ## If the user configures the URL to return JSON (e.g.
   ## http://localhost/status?json), set to JSON. Otherwise, will attempt to
-  ## parse line-by-line. The JSON mode will produce additonal metrics.
+  ## parse line-by-line. The JSON mode will produce additional metrics.
   # format = "status"
 
   ## Duration allowed to complete HTTP requests.

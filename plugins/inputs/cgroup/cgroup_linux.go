@@ -4,6 +4,7 @@ package cgroup
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,28 +17,27 @@ import (
 
 const metricName = "cgroup"
 
-func (g *CGroup) Gather(acc telegraf.Accumulator) error {
+func (cg *CGroup) Gather(acc telegraf.Accumulator) error {
 	list := make(chan pathInfo)
-	go g.generateDirs(list)
+	go cg.generateDirs(list)
 
 	for dir := range list {
 		if dir.err != nil {
 			acc.AddError(dir.err)
 			continue
 		}
-		if err := g.gatherDir(acc, dir.path); err != nil {
+		if err := cg.gatherDir(acc, dir.path); err != nil {
 			acc.AddError(err)
 		}
 	}
-
 	return nil
 }
 
-func (g *CGroup) gatherDir(acc telegraf.Accumulator, dir string) error {
-	fields := make(map[string]interface{})
+func (cg *CGroup) gatherDir(acc telegraf.Accumulator, dir string) error {
+	fields := make(map[string]any)
 
 	list := make(chan pathInfo)
-	go g.generateFiles(dir, list)
+	go cg.generateFiles(dir, list)
 
 	for file := range list {
 		if file.err != nil {
@@ -54,10 +54,10 @@ func (g *CGroup) gatherDir(acc telegraf.Accumulator, dir string) error {
 
 		fd := fileData{data: raw, path: file.path}
 		if err := fd.parse(fields); err != nil {
-			if !g.logged[file.path] {
+			if !cg.logged[file.path] {
 				acc.AddError(err)
 			}
-			g.logged[file.path] = true
+			cg.logged[file.path] = true
 			continue
 		}
 	}
@@ -84,9 +84,9 @@ func isDir(pathToCheck string) (bool, error) {
 	return result.IsDir(), nil
 }
 
-func (g *CGroup) generateDirs(list chan<- pathInfo) {
+func (cg *CGroup) generateDirs(list chan<- pathInfo) {
 	defer close(list)
-	for _, dir := range g.Paths {
+	for _, dir := range cg.Paths {
 		// getting all dirs that match the pattern 'dir'
 		items, err := filepath.Glob(dir)
 		if err != nil {
@@ -108,11 +108,11 @@ func (g *CGroup) generateDirs(list chan<- pathInfo) {
 	}
 }
 
-func (g *CGroup) generateFiles(dir string, list chan<- pathInfo) {
+func (cg *CGroup) generateFiles(dir string, list chan<- pathInfo) {
 	dir = strings.Replace(dir, "\\", "\\\\", -1)
 
 	defer close(list)
-	for _, file := range g.Files {
+	for _, file := range cg.Files {
 		// getting all file paths that match the pattern 'dir + file'
 		// path.Base make sure that file variable does not contains part of path
 		items, err := filepath.Glob(path.Join(dir, path.Base(file)))
@@ -156,7 +156,7 @@ func (fd *fileData) format() (*fileFormat, error) {
 	return nil, fmt.Errorf("%v: unknown file format", fd.path)
 }
 
-func (fd *fileData) parse(fields map[string]interface{}) error {
+func (fd *fileData) parse(fields map[string]any) error {
 	format, err := fd.format()
 	if err != nil {
 		return err
@@ -171,18 +171,18 @@ func (fd *fileData) parse(fields map[string]interface{}) error {
 type fileFormat struct {
 	name    string
 	pattern string
-	parser  func(measurement string, fields map[string]interface{}, b []byte)
+	parser  func(measurement string, fields map[string]any, b []byte)
 }
 
 const keyPattern = "[[:alnum:]:_.]+"
-const valuePattern = "[\\d-]+"
+const valuePattern = "(?:max|[\\d-\\.]+)"
 
 var fileFormats = [...]fileFormat{
 	// 	VAL\n
 	{
 		name:    "Single value",
 		pattern: "^" + valuePattern + "\n$",
-		parser: func(measurement string, fields map[string]interface{}, b []byte) {
+		parser: func(measurement string, fields map[string]any, b []byte) {
 			re := regexp.MustCompile("^(" + valuePattern + ")\n$")
 			matches := re.FindAllStringSubmatch(string(b), -1)
 			fields[measurement] = numberOrString(matches[0][1])
@@ -194,7 +194,7 @@ var fileFormats = [...]fileFormat{
 	{
 		name:    "New line separated values",
 		pattern: "^(" + valuePattern + "\n){2,}$",
-		parser: func(measurement string, fields map[string]interface{}, b []byte) {
+		parser: func(measurement string, fields map[string]any, b []byte) {
 			re := regexp.MustCompile("(" + valuePattern + ")\n")
 			matches := re.FindAllStringSubmatch(string(b), -1)
 			for i, v := range matches {
@@ -205,9 +205,9 @@ var fileFormats = [...]fileFormat{
 	// 	VAL0 VAL1 ...\n
 	{
 		name:    "Space separated values",
-		pattern: "^(" + valuePattern + " )+\n$",
-		parser: func(measurement string, fields map[string]interface{}, b []byte) {
-			re := regexp.MustCompile("(" + valuePattern + ") ")
+		pattern: "^(" + valuePattern + " ?)+\n$",
+		parser: func(measurement string, fields map[string]any, b []byte) {
+			re := regexp.MustCompile("(" + valuePattern + ")")
 			matches := re.FindAllStringSubmatch(string(b), -1)
 			for i, v := range matches {
 				fields[measurement+"."+strconv.Itoa(i)] = numberOrString(v[1])
@@ -220,7 +220,7 @@ var fileFormats = [...]fileFormat{
 	{
 		name:    "Space separated keys and value, separated by new line",
 		pattern: "^((" + keyPattern + " )+" + valuePattern + "\n)+$",
-		parser: func(measurement string, fields map[string]interface{}, b []byte) {
+		parser: func(measurement string, fields map[string]any, b []byte) {
 			re := regexp.MustCompile("((?:" + keyPattern + " ?)+) (" + valuePattern + ")\n")
 			matches := re.FindAllStringSubmatch(string(b), -1)
 			for _, v := range matches {
@@ -229,12 +229,64 @@ var fileFormats = [...]fileFormat{
 			}
 		},
 	},
+	// 	NAME0 KEY0=VAL0 ...\n
+	// 	NAME1 KEY1=VAL1 ...\n
+	// 	...
+	{
+		name:    "Equal sign separated key-value pairs,  multiple lines with name",
+		pattern: fmt.Sprintf("^(%s( %s=%s)+\n)+$", keyPattern, keyPattern, valuePattern),
+		parser: func(measurement string, fields map[string]any, b []byte) {
+			for line := range strings.SplitSeq(string(b), "\n") {
+				f := strings.Fields(line)
+				if len(f) == 0 {
+					continue
+				}
+				name := f[0]
+				for _, field := range f[1:] {
+					k, v, found := strings.Cut(field, "=")
+					if found {
+						fields[strings.Join([]string{measurement, name, k}, ".")] = numberOrString(v)
+					}
+				}
+			}
+		},
+	},
+	// 	KEY0=VAL0 KEY1=VAL1 ...\n
+	{
+		name:    "Equal sign separated key-value pairs on a single line",
+		pattern: fmt.Sprintf("^(%s=%s ?)+\n$", keyPattern, valuePattern),
+		parser: func(measurement string, fields map[string]any, b []byte) {
+			f := strings.Fields(string(b))
+			if len(f) == 0 {
+				return
+			}
+			for _, field := range f {
+				k, v, found := strings.Cut(field, "=")
+				if found {
+					fields[strings.Join([]string{measurement, k}, ".")] = numberOrString(v)
+				}
+			}
+		},
+	},
 }
 
-func numberOrString(s string) interface{} {
+func numberOrString(s string) any {
 	i, err := strconv.ParseInt(s, 10, 64)
 	if err == nil {
 		return i
+	}
+	if s == "max" {
+		return int64(math.MaxInt64)
+	}
+
+	// Care should be taken to always interpret each field as the same type on every cycle.
+	// *.pressure files follow the PSI format and contain numbers with fractional parts
+	// that always have a decimal separator, even when the fractional part is 0 (e.g., "0.00"),
+	// thus they will always be interpreted as floats.
+	// https://www.kernel.org/doc/Documentation/accounting/psi.txt
+	f, err := strconv.ParseFloat(s, 64)
+	if err == nil {
+		return f
 	}
 
 	return s

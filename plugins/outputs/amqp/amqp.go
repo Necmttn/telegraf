@@ -17,7 +17,6 @@ import (
 	"github.com/influxdata/telegraf/plugins/common/proxy"
 	"github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/outputs"
-	"github.com/influxdata/telegraf/plugins/serializers"
 )
 
 //go:embed sample.conf
@@ -33,16 +32,15 @@ const (
 
 type externalAuth struct{}
 
-func (a *externalAuth) Mechanism() string {
+func (*externalAuth) Mechanism() string {
 	return "EXTERNAL"
 }
 
-func (a *externalAuth) Response() string {
+func (*externalAuth) Response() string {
 	return "\000"
 }
 
 type AMQP struct {
-	URL                string            `toml:"url" deprecated:"1.7.0;use 'brokers' instead"`
 	Brokers            []string          `toml:"brokers"`
 	Exchange           string            `toml:"exchange"`
 	ExchangeType       string            `toml:"exchange_type"`
@@ -56,9 +54,6 @@ type AMQP struct {
 	RoutingTag         string            `toml:"routing_tag"`
 	RoutingKey         string            `toml:"routing_key"`
 	DeliveryMode       string            `toml:"delivery_mode"`
-	Database           string            `toml:"database" deprecated:"1.7.0;use 'headers' instead"`
-	RetentionPolicy    string            `toml:"retention_policy" deprecated:"1.7.0;use 'headers' instead"`
-	Precision          string            `toml:"precision" deprecated:"1.2.0;option is ignored"`
 	Headers            map[string]string `toml:"headers"`
 	Timeout            config.Duration   `toml:"timeout"`
 	UseBatchFormat     bool              `toml:"use_batch_format"`
@@ -67,10 +62,9 @@ type AMQP struct {
 	tls.ClientConfig
 	proxy.TCPProxy
 
-	serializer   serializers.Serializer
+	serializer   telegraf.Serializer
 	connect      func(*ClientConfig) (Client, error)
 	client       Client
-	config       *ClientConfig
 	sentMessages int
 	encoder      internal.ContentEncoder
 }
@@ -84,17 +78,16 @@ func (*AMQP) SampleConfig() string {
 	return sampleConfig
 }
 
-func (q *AMQP) SetSerializer(serializer serializers.Serializer) {
+func (q *AMQP) SetSerializer(serializer telegraf.Serializer) {
 	q.serializer = serializer
 }
 
-func (q *AMQP) Connect() error {
-	if q.config == nil {
-		clientConfig, err := q.makeClientConfig()
-		if err != nil {
-			return err
-		}
-		q.config = clientConfig
+func (q *AMQP) Init() error {
+	// Validate the configuration early, the client configuration itself is
+	// created on each connect as the AMQP library wipes the credentials after
+	// a successful connection
+	if _, err := q.makeClientConfig(); err != nil {
+		return err
 	}
 
 	var err error
@@ -103,11 +96,19 @@ func (q *AMQP) Connect() error {
 		return err
 	}
 
-	q.client, err = q.connect(q.config)
+	return nil
+}
+
+func (q *AMQP) Connect() error {
+	cfg, err := q.makeClientConfig()
+	if err != nil {
+		return fmt.Errorf("creating client configuration failed: %w", err)
+	}
+	client, err := q.connect(cfg)
 	if err != nil {
 		return err
 	}
-
+	q.client = client
 	return nil
 }
 
@@ -159,21 +160,22 @@ func (q *AMQP) Write(metrics []telegraf.Metric) error {
 
 		err = q.publish(key, body)
 		if err != nil {
-			// If this is the first attempt to publish and the connection is
-			// closed, try to reconnect and retry once.
-
-			var aerr *amqp.Error
-			if first && errors.As(err, &aerr) && errors.Is(aerr, amqp.ErrClosed) {
-				q.client = nil
-				err := q.publish(key, body)
-				if err != nil {
-					return err
-				}
-			} else if q.client != nil {
+			// Only a closed connection on the first attempt is recoverable:
+			// reconnect and retry once. Any other error must be returned so
+			// the metrics stay buffered for retry instead of being dropped.
+			if q.client != nil {
 				if err := q.client.Close(); err != nil {
 					q.Log.Errorf("Closing connection failed: %v", err)
 				}
-				q.client = nil
+			}
+			q.client = nil
+
+			var aerr *amqp.Error
+			recoverable := first && errors.As(err, &aerr) && errors.Is(aerr, amqp.ErrClosed)
+			if !recoverable {
+				return err
+			}
+			if err := q.publish(key, body); err != nil {
 				return err
 			}
 		}
@@ -193,12 +195,10 @@ func (q *AMQP) Write(metrics []telegraf.Metric) error {
 
 func (q *AMQP) publish(key string, body []byte) error {
 	if q.client == nil {
-		client, err := q.connect(q.config)
-		if err != nil {
+		if err := q.Connect(); err != nil {
 			return err
 		}
 		q.sentMessages = 0
-		q.client = client
 	}
 
 	err := q.client.Publish(key, body)
@@ -245,9 +245,6 @@ func (q *AMQP) makeClientConfig() (*ClientConfig, error) {
 	}
 
 	clientConfig.brokers = q.Brokers
-	if len(clientConfig.brokers) == 0 {
-		clientConfig.brokers = []string{q.URL}
-	}
 
 	switch q.DeliveryMode {
 	case "transient":
@@ -262,12 +259,6 @@ func (q *AMQP) makeClientConfig() (*ClientConfig, error) {
 		clientConfig.headers = make(amqp.Table, len(q.Headers))
 		for k, v := range q.Headers {
 			clientConfig.headers[k] = v
-		}
-	} else {
-		// Copy deprecated fields into message header
-		clientConfig.headers = amqp.Table{
-			"database":         q.Database,
-			"retention_policy": q.RetentionPolicy,
 		}
 	}
 
@@ -323,13 +314,15 @@ func connect(clientConfig *ClientConfig) (Client, error) {
 func init() {
 	outputs.Add("amqp", func() telegraf.Output {
 		return &AMQP{
-			URL:             DefaultURL,
-			ExchangeType:    DefaultExchangeType,
-			AuthMethod:      DefaultAuthMethod,
-			Database:        DefaultDatabase,
-			RetentionPolicy: DefaultRetentionPolicy,
-			Timeout:         config.Duration(time.Second * 5),
-			connect:         connect,
+			Brokers:      []string{DefaultURL},
+			ExchangeType: DefaultExchangeType,
+			AuthMethod:   DefaultAuthMethod,
+			Headers: map[string]string{
+				"database":         DefaultDatabase,
+				"retention_policy": DefaultRetentionPolicy,
+			},
+			Timeout: config.Duration(time.Second * 5),
+			connect: connect,
 		}
 	})
 }

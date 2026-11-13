@@ -2,6 +2,7 @@ package timestream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -17,11 +18,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
-	internalaws "github.com/influxdata/telegraf/plugins/common/aws"
+	"github.com/influxdata/telegraf/metric"
+	common_aws "github.com/influxdata/telegraf/plugins/common/aws"
 	"github.com/influxdata/telegraf/testutil"
 )
 
-const tsDbName = "testDb"
+const tsDBName = "testDb"
 
 const testSingleTableName = "SingleTableName"
 const testSingleTableDim = "namespace"
@@ -42,7 +44,7 @@ type mockTimestreamClient struct {
 	WriteRecordsRequestCount int
 }
 
-func (m *mockTimestreamClient) CreateTable(
+func (*mockTimestreamClient) CreateTable(
 	context.Context,
 	*timestreamwrite.CreateTableInput,
 	...func(*timestreamwrite.Options),
@@ -59,38 +61,43 @@ func (m *mockTimestreamClient) WriteRecords(
 	return nil, nil
 }
 
-func (m *mockTimestreamClient) DescribeDatabase(
+func (*mockTimestreamClient) DescribeDatabase(
 	context.Context,
 	*timestreamwrite.DescribeDatabaseInput,
 	...func(*timestreamwrite.Options),
 ) (*timestreamwrite.DescribeDatabaseOutput, error) {
-	return nil, fmt.Errorf("hello from DescribeDatabase")
+	return nil, errors.New("hello from DescribeDatabase")
 }
 
 func TestConnectValidatesConfigParameters(t *testing.T) {
-	WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+	originalWriteFactory := WriteFactory
+	t.Cleanup(func() {
+		WriteFactory = originalWriteFactory
+	})
+
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
 		return &mockTimestreamClient{}, nil
 	}
 	// checking base arguments
 	noDatabaseName := Timestream{Log: testutil.Logger{}}
-	require.Contains(t, noDatabaseName.Connect().Error(), "DatabaseName")
+	require.ErrorContains(t, noDatabaseName.Connect(), "'database_name' key is required")
 
 	noMappingMode := Timestream{
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		Log:          testutil.Logger{},
 	}
-	require.Contains(t, noMappingMode.Connect().Error(), "MappingMode")
+	require.ErrorContains(t, noMappingMode.Connect(), "'mapping_mode' key is required")
 
 	incorrectMappingMode := Timestream{
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		MappingMode:  "foo",
 		Log:          testutil.Logger{},
 	}
 	require.Contains(t, incorrectMappingMode.Connect().Error(), "single-table")
 
-	//multi-measure config validation multi table mode
+	// multi-measure config validation multi table mode
 	validConfigMultiMeasureMultiTableMode := Timestream{
-		DatabaseName:                      tsDbName,
+		DatabaseName:                      tsDBName,
 		MappingMode:                       MappingModeMultiTable,
 		UseMultiMeasureRecords:            true,
 		MeasureNameForMultiMeasureRecords: "multi-measure-name",
@@ -99,7 +106,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 	require.NoError(t, validConfigMultiMeasureMultiTableMode.Connect())
 
 	invalidConfigMultiMeasureMultiTableMode := Timestream{
-		DatabaseName:           tsDbName,
+		DatabaseName:           tsDBName,
 		MappingMode:            MappingModeMultiTable,
 		UseMultiMeasureRecords: true,
 		// without MeasureNameForMultiMeasureRecords set we expect validation failure
@@ -109,7 +116,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 
 	// multi-measure config validation single table mode
 	validConfigMultiMeasureSingleTableMode := Timestream{
-		DatabaseName:           tsDbName,
+		DatabaseName:           tsDBName,
 		MappingMode:            MappingModeSingleTable,
 		SingleTableName:        testSingleTableName,
 		UseMultiMeasureRecords: true, // MeasureNameForMultiMeasureRecords is not needed as
@@ -119,7 +126,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 	require.NoError(t, validConfigMultiMeasureSingleTableMode.Connect())
 
 	invalidConfigMultiMeasureSingleTableMode := Timestream{
-		DatabaseName:                      tsDbName,
+		DatabaseName:                      tsDBName,
 		MappingMode:                       MappingModeSingleTable,
 		SingleTableName:                   testSingleTableName,
 		UseMultiMeasureRecords:            true,
@@ -133,14 +140,14 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 
 	// multi-table arguments
 	validMappingModeMultiTable := Timestream{
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		MappingMode:  MappingModeMultiTable,
 		Log:          testutil.Logger{},
 	}
 	require.NoError(t, validMappingModeMultiTable.Connect())
 
 	singleTableNameWithMultiTable := Timestream{
-		DatabaseName:    tsDbName,
+		DatabaseName:    tsDBName,
 		MappingMode:     MappingModeMultiTable,
 		SingleTableName: testSingleTableName,
 		Log:             testutil.Logger{},
@@ -148,7 +155,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 	require.Contains(t, singleTableNameWithMultiTable.Connect().Error(), "SingleTableName")
 
 	singleTableDimensionWithMultiTable := Timestream{
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		MappingMode:  MappingModeMultiTable,
 		SingleTableDimensionNameForTelegrafMeasurementName: testSingleTableDim,
 		Log: testutil.Logger{},
@@ -158,14 +165,14 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 
 	// single-table arguments
 	noTableNameMappingModeSingleTable := Timestream{
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		MappingMode:  MappingModeSingleTable,
 		Log:          testutil.Logger{},
 	}
 	require.Contains(t, noTableNameMappingModeSingleTable.Connect().Error(), "SingleTableName")
 
 	noDimensionNameMappingModeSingleTable := Timestream{
-		DatabaseName:    tsDbName,
+		DatabaseName:    tsDBName,
 		MappingMode:     MappingModeSingleTable,
 		SingleTableName: testSingleTableName,
 		Log:             testutil.Logger{},
@@ -174,7 +181,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 		"SingleTableDimensionNameForTelegrafMeasurementName")
 
 	validConfigurationMappingModeSingleTable := Timestream{
-		DatabaseName:    tsDbName,
+		DatabaseName:    tsDBName,
 		MappingMode:     MappingModeSingleTable,
 		SingleTableName: testSingleTableName,
 		SingleTableDimensionNameForTelegrafMeasurementName: testSingleTableDim,
@@ -184,7 +191,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 
 	// create table arguments
 	createTableNoMagneticRetention := Timestream{
-		DatabaseName:           tsDbName,
+		DatabaseName:           tsDBName,
 		MappingMode:            MappingModeMultiTable,
 		CreateTableIfNotExists: true,
 		Log:                    testutil.Logger{},
@@ -193,7 +200,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 		"CreateTableMagneticStoreRetentionPeriodInDays")
 
 	createTableNoMemoryRetention := Timestream{
-		DatabaseName:           tsDbName,
+		DatabaseName:           tsDBName,
 		MappingMode:            MappingModeMultiTable,
 		CreateTableIfNotExists: true,
 		CreateTableMagneticStoreRetentionPeriodInDays: 3,
@@ -203,7 +210,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 		"CreateTableMemoryStoreRetentionPeriodInHours")
 
 	createTableValid := Timestream{
-		DatabaseName:           tsDbName,
+		DatabaseName:           tsDBName,
 		MappingMode:            MappingModeMultiTable,
 		CreateTableIfNotExists: true,
 		CreateTableMagneticStoreRetentionPeriodInDays: 3,
@@ -214,7 +221,7 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 
 	// describe table on start arguments
 	describeTableInvoked := Timestream{
-		DatabaseName:            tsDbName,
+		DatabaseName:            tsDBName,
 		MappingMode:             MappingModeMultiTable,
 		DescribeDatabaseOnStart: true,
 		Log:                     testutil.Logger{},
@@ -222,15 +229,35 @@ func TestConnectValidatesConfigParameters(t *testing.T) {
 	require.Contains(t, describeTableInvoked.Connect().Error(), "hello from DescribeDatabase")
 }
 
+func TestConnectReturnsWriteFactoryError(t *testing.T) {
+	originalWriteFactory := WriteFactory
+	t.Cleanup(func() {
+		WriteFactory = originalWriteFactory
+	})
+
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
+		return nil, errors.New("unable to construct client")
+	}
+
+	plugin := Timestream{
+		DatabaseName: tsDBName,
+		MappingMode:  MappingModeMultiTable,
+		Log:          testutil.Logger{},
+	}
+
+	require.ErrorContains(t, plugin.Connect(), "unable to construct client")
+}
+
 func TestWriteMultiMeasuresSingleTableMode(t *testing.T) {
 	const recordCount = 100
 	mockClient := &mockTimestreamClient{0}
 
-	WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
 		return mockClient, nil
 	}
 
-	localTime, _ := strconv.Atoi(time1Epoch)
+	localTime, err := strconv.Atoi(time1Epoch)
+	require.NoError(t, err)
 
 	inputs := make([]telegraf.Metric, 0, recordCount+1)
 	for i := 1; i <= recordCount+1; i++ {
@@ -238,10 +265,10 @@ func TestWriteMultiMeasuresSingleTableMode(t *testing.T) {
 
 		fieldName1 := "value_supported1" + strconv.Itoa(i)
 		fieldName2 := "value_supported2" + strconv.Itoa(i)
-		inputs = append(inputs, testutil.MustMetric(
+		inputs = append(inputs, metric.New(
 			"multi_measure_name",
 			map[string]string{"tag1": "value1"},
-			map[string]interface{}{
+			map[string]any{
 				fieldName1: float64(10),
 				fieldName2: float64(20),
 			},
@@ -252,7 +279,7 @@ func TestWriteMultiMeasuresSingleTableMode(t *testing.T) {
 	plugin := Timestream{
 		MappingMode:            MappingModeSingleTable,
 		SingleTableName:        "test-multi-single-table-mode",
-		DatabaseName:           tsDbName,
+		DatabaseName:           tsDBName,
 		UseMultiMeasureRecords: true, // use multi
 		Log:                    testutil.Logger{},
 	}
@@ -274,7 +301,7 @@ func TestWriteMultiMeasuresSingleTableMode(t *testing.T) {
 	// Expected 101 records
 	require.Len(t, transformedRecords, recordCount+1, "Expected 101 records after transforming")
 	// validate write to TS
-	err := plugin.Write(inputs)
+	err = plugin.Write(inputs)
 	require.NoError(t, err, "Write to Timestream failed")
 	require.Equal(t, 2, mockClient.WriteRecordsRequestCount, "Expected 2 WriteRecords calls")
 }
@@ -283,11 +310,12 @@ func TestWriteMultiMeasuresMultiTableMode(t *testing.T) {
 	const recordCount = 100
 	mockClient := &mockTimestreamClient{0}
 
-	WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
 		return mockClient, nil
 	}
 
-	localTime, _ := strconv.Atoi(time1Epoch)
+	localTime, err := strconv.Atoi(time1Epoch)
+	require.NoError(t, err)
 
 	inputs := make([]telegraf.Metric, 0, recordCount)
 	for i := 1; i <= recordCount; i++ {
@@ -295,10 +323,10 @@ func TestWriteMultiMeasuresMultiTableMode(t *testing.T) {
 
 		fieldName1 := "value_supported1" + strconv.Itoa(i)
 		fieldName2 := "value_supported2" + strconv.Itoa(i)
-		inputs = append(inputs, testutil.MustMetric(
+		inputs = append(inputs, metric.New(
 			"multi_measure_name",
 			map[string]string{"tag1": "value1"},
-			map[string]interface{}{
+			map[string]any{
 				fieldName1: float64(10),
 				fieldName2: float64(20),
 			},
@@ -308,14 +336,14 @@ func TestWriteMultiMeasuresMultiTableMode(t *testing.T) {
 
 	plugin := Timestream{
 		MappingMode:                       MappingModeMultiTable,
-		DatabaseName:                      tsDbName,
+		DatabaseName:                      tsDBName,
 		UseMultiMeasureRecords:            true, // use multi
 		MeasureNameForMultiMeasureRecords: "config-multi-measure-name",
 		Log:                               testutil.Logger{},
 	}
 
 	// validate config correctness
-	err := plugin.Connect()
+	err = plugin.Connect()
 	require.NoError(t, err, "Invalid configuration")
 
 	// validate multi-record generation
@@ -346,55 +374,55 @@ func TestWriteMultiMeasuresMultiTableMode(t *testing.T) {
 }
 
 func TestBuildMultiMeasuresInSingleAndMultiTableMode(t *testing.T) {
-	input1 := testutil.MustMetric(
+	input1 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"measureDouble": aws.Float64(10),
 		},
 		time1,
 	)
 
-	input2 := testutil.MustMetric(
+	input2 := metric.New(
 		metricName1,
 		map[string]string{"tag2": "value2"},
-		map[string]interface{}{
+		map[string]any{
 			"measureBigint": aws.Int32(20),
 		},
 		time1,
 	)
 
-	input3 := testutil.MustMetric(
+	input3 := metric.New(
 		metricName1,
 		map[string]string{"tag3": "value3"},
-		map[string]interface{}{
+		map[string]any{
 			"measureVarchar": "DUMMY",
 		},
 		time1,
 	)
 
-	input4 := testutil.MustMetric(
+	input4 := metric.New(
 		metricName1,
 		map[string]string{"tag4": "value4"},
-		map[string]interface{}{
+		map[string]any{
 			"measureBool": true,
 		},
 		time1,
 	)
 
-	input5 := testutil.MustMetric(
+	input5 := metric.New(
 		metricName1,
 		map[string]string{"tag5": "value5"},
-		map[string]interface{}{
+		map[string]any{
 			"measureMaxUint64": uint64(math.MaxUint64),
 		},
 		time1,
 	)
 
-	input6 := testutil.MustMetric(
+	input6 := metric.New(
 		metricName1,
 		map[string]string{"tag6": "value6"},
-		map[string]interface{}{
+		map[string]any{
 			"measureSmallUint64": uint64(123456),
 		},
 		time1,
@@ -404,7 +432,7 @@ func TestBuildMultiMeasuresInSingleAndMultiTableMode(t *testing.T) {
 
 	plugin := Timestream{
 		MappingMode:                       MappingModeMultiTable,
-		DatabaseName:                      tsDbName,
+		DatabaseName:                      tsDBName,
 		UseMultiMeasureRecords:            true, // use multi
 		MeasureNameForMultiMeasureRecords: "config-multi-measure-name",
 		Log:                               testutil.Logger{},
@@ -418,7 +446,7 @@ func TestBuildMultiMeasuresInSingleAndMultiTableMode(t *testing.T) {
 	result := plugin.TransformMetrics([]telegraf.Metric{input1, input2, input3, input4, input5, input6})
 	require.Len(t, result, 1, "Expected 1 WriteRecordsInput requests")
 
-	require.EqualValues(t, result[0], expectedResultMultiTable)
+	require.EqualValues(t, expectedResultMultiTable, result[0])
 
 	require.True(t, arrayContains(result, expectedResultMultiTable), "Expected that the list of requests to Timestream: %+v\n "+
 		"will contain request: %+v\n\n", result, expectedResultMultiTable)
@@ -428,7 +456,7 @@ func TestBuildMultiMeasuresInSingleAndMultiTableMode(t *testing.T) {
 	plugin = Timestream{
 		MappingMode:            MappingModeSingleTable,
 		SingleTableName:        "singleTableName",
-		DatabaseName:           tsDbName,
+		DatabaseName:           tsDBName,
 		UseMultiMeasureRecords: true, // use multi
 		Log:                    testutil.Logger{},
 	}
@@ -443,79 +471,108 @@ func TestBuildMultiMeasuresInSingleAndMultiTableMode(t *testing.T) {
 	result = plugin.TransformMetrics([]telegraf.Metric{input1, input2, input3, input4, input5, input6})
 	require.Len(t, result, 1, "Expected 1 WriteRecordsInput requests")
 
-	require.EqualValues(t, result[0], expectedResultSingleTable)
+	require.EqualValues(t, expectedResultSingleTable, result[0])
 
 	require.True(t, arrayContains(result, expectedResultSingleTable), "Expected that the list of requests to Timestream: %+v\n "+
 		"will contain request: %+v\n\n", result, expectedResultSingleTable)
 }
 
-func buildExpectedMultiRecords(multiMeasureName string, tableName string) *timestreamwrite.WriteRecordsInput {
-	var recordsMultiTableMode []types.Record
-	recordDouble := buildMultiRecords([]SimpleInput{
-		{
-			t:             time1Epoch,
-			tableName:     metricName1,
-			dimensions:    map[string]string{"tag1": "value1"},
-			measureValues: map[string]string{"measureDouble": "10"},
-		}}, multiMeasureName, types.MeasureValueTypeDouble)
+func buildExpectedMultiRecords(multiMeasureName, tableName string) *timestreamwrite.WriteRecordsInput {
+	var totalRecords int
+	recordDouble := buildMultiRecords(
+		[]SimpleInput{
+			{
+				t:             time1Epoch,
+				tableName:     metricName1,
+				dimensions:    map[string]string{"tag1": "value1"},
+				measureValues: map[string]string{"measureDouble": "10"},
+			},
+		},
+		multiMeasureName,
+		types.MeasureValueTypeDouble,
+	)
+	totalRecords += len(recordDouble)
 
+	recordBigint := buildMultiRecords(
+		[]SimpleInput{
+			{
+				t:             time1Epoch,
+				tableName:     metricName1,
+				dimensions:    map[string]string{"tag2": "value2"},
+				measureValues: map[string]string{"measureBigint": "20"},
+			},
+		},
+		multiMeasureName,
+		types.MeasureValueTypeBigint,
+	)
+	totalRecords += len(recordBigint)
+
+	recordVarchar := buildMultiRecords(
+		[]SimpleInput{
+			{
+				t:             time1Epoch,
+				tableName:     metricName1,
+				dimensions:    map[string]string{"tag3": "value3"},
+				measureValues: map[string]string{"measureVarchar": "DUMMY"},
+			},
+		},
+		multiMeasureName,
+		types.MeasureValueTypeVarchar,
+	)
+	totalRecords += len(recordVarchar)
+
+	recordBool := buildMultiRecords(
+		[]SimpleInput{
+			{
+				t:             time1Epoch,
+				tableName:     metricName1,
+				dimensions:    map[string]string{"tag4": "value4"},
+				measureValues: map[string]string{"measureBool": "true"},
+			},
+		},
+		multiMeasureName,
+		types.MeasureValueTypeBoolean,
+	)
+	totalRecords += len(recordBool)
+
+	recordMaxUint64 := buildMultiRecords(
+		[]SimpleInput{
+			{
+				t:             time1Epoch,
+				tableName:     metricName1,
+				dimensions:    map[string]string{"tag5": "value5"},
+				measureValues: map[string]string{"measureMaxUint64": "9223372036854775807"},
+			},
+		},
+		multiMeasureName,
+		types.MeasureValueTypeBigint,
+	)
+	totalRecords += len(recordMaxUint64)
+
+	recordUint64 := buildMultiRecords(
+		[]SimpleInput{
+			{
+				t:             time1Epoch,
+				tableName:     metricName1,
+				dimensions:    map[string]string{"tag6": "value6"},
+				measureValues: map[string]string{"measureSmallUint64": "123456"},
+			},
+		},
+		multiMeasureName,
+		types.MeasureValueTypeBigint,
+	)
+	totalRecords += len(recordUint64)
+
+	recordsMultiTableMode := make([]types.Record, 0, totalRecords)
 	recordsMultiTableMode = append(recordsMultiTableMode, recordDouble...)
-
-	recordBigint := buildMultiRecords([]SimpleInput{
-		{
-			t:             time1Epoch,
-			tableName:     metricName1,
-			dimensions:    map[string]string{"tag2": "value2"},
-			measureValues: map[string]string{"measureBigint": "20"},
-		}}, multiMeasureName, types.MeasureValueTypeBigint)
-
 	recordsMultiTableMode = append(recordsMultiTableMode, recordBigint...)
-
-	recordVarchar := buildMultiRecords([]SimpleInput{
-		{
-			t:             time1Epoch,
-			tableName:     metricName1,
-			dimensions:    map[string]string{"tag3": "value3"},
-			measureValues: map[string]string{"measureVarchar": "DUMMY"},
-		}}, multiMeasureName, types.MeasureValueTypeVarchar)
-
 	recordsMultiTableMode = append(recordsMultiTableMode, recordVarchar...)
-
-	recordBool := buildMultiRecords([]SimpleInput{
-		{
-			t:             time1Epoch,
-			tableName:     metricName1,
-			dimensions:    map[string]string{"tag4": "value4"},
-			measureValues: map[string]string{"measureBool": "true"},
-		},
-	}, multiMeasureName, types.MeasureValueTypeBoolean)
-
 	recordsMultiTableMode = append(recordsMultiTableMode, recordBool...)
-
-	recordMaxUint64 := buildMultiRecords([]SimpleInput{
-		{
-			t:             time1Epoch,
-			tableName:     metricName1,
-			dimensions:    map[string]string{"tag5": "value5"},
-			measureValues: map[string]string{"measureMaxUint64": "9223372036854775807"},
-		},
-	}, multiMeasureName, types.MeasureValueTypeBigint)
-
 	recordsMultiTableMode = append(recordsMultiTableMode, recordMaxUint64...)
-
-	recordUint64 := buildMultiRecords([]SimpleInput{
-		{
-			t:             time1Epoch,
-			tableName:     metricName1,
-			dimensions:    map[string]string{"tag6": "value6"},
-			measureValues: map[string]string{"measureSmallUint64": "123456"},
-		},
-	}, multiMeasureName, types.MeasureValueTypeBigint)
-
 	recordsMultiTableMode = append(recordsMultiTableMode, recordUint64...)
 
 	expectedResultMultiTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(tableName),
 		Records:          recordsMultiTableMode,
 		CommonAttributes: &types.Record{},
@@ -527,7 +584,7 @@ type mockTimestreamErrorClient struct {
 	ErrorToReturnOnWriteRecords error
 }
 
-func (m *mockTimestreamErrorClient) CreateTable(
+func (*mockTimestreamErrorClient) CreateTable(
 	context.Context,
 	*timestreamwrite.CreateTableInput,
 	...func(*timestreamwrite.Options),
@@ -543,7 +600,7 @@ func (m *mockTimestreamErrorClient) WriteRecords(
 	return nil, m.ErrorToReturnOnWriteRecords
 }
 
-func (m *mockTimestreamErrorClient) DescribeDatabase(
+func (*mockTimestreamErrorClient) DescribeDatabase(
 	context.Context,
 	*timestreamwrite.DescribeDatabaseInput,
 	...func(*timestreamwrite.Options),
@@ -552,7 +609,7 @@ func (m *mockTimestreamErrorClient) DescribeDatabase(
 }
 
 func TestThrottlingErrorIsReturnedToTelegraf(t *testing.T) {
-	WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
 		return &mockTimestreamErrorClient{
 			ErrorToReturnOnWriteRecords: &types.ThrottlingException{Message: aws.String("Throttling Test")},
 		}, nil
@@ -560,14 +617,14 @@ func TestThrottlingErrorIsReturnedToTelegraf(t *testing.T) {
 
 	plugin := Timestream{
 		MappingMode:  MappingModeMultiTable,
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		Log:          testutil.Logger{},
 	}
 	require.NoError(t, plugin.Connect())
-	input := testutil.MustMetric(
+	input := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{"value": float64(1)},
+		map[string]any{"value": float64(1)},
 		time1,
 	)
 
@@ -578,7 +635,7 @@ func TestThrottlingErrorIsReturnedToTelegraf(t *testing.T) {
 }
 
 func TestRejectedRecordsErrorResultsInMetricsBeingSkipped(t *testing.T) {
-	WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
 		return &mockTimestreamErrorClient{
 			ErrorToReturnOnWriteRecords: &types.RejectedRecordsException{Message: aws.String("RejectedRecords Test")},
 		}, nil
@@ -586,14 +643,14 @@ func TestRejectedRecordsErrorResultsInMetricsBeingSkipped(t *testing.T) {
 
 	plugin := Timestream{
 		MappingMode:  MappingModeMultiTable,
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		Log:          testutil.Logger{},
 	}
 	require.NoError(t, plugin.Connect())
-	input := testutil.MustMetric(
+	input := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{"value": float64(1)},
+		map[string]any{"value": float64(1)},
 		time1,
 	)
 
@@ -609,13 +666,14 @@ func TestWriteWhenRequestsGreaterThanMaxWriteGoRoutinesCount(t *testing.T) {
 	const totalRecords = maxWriteRecordsCalls * maxRecordsInWriteRecordsCall
 	mockClient := &mockTimestreamClient{0}
 
-	WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+	//nolint:unparam // False-positive as this is only a mock and we must adhere to the interface
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
 		return mockClient, nil
 	}
 
 	plugin := Timestream{
 		MappingMode:  MappingModeMultiTable,
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		// Spawn only one go routine to serve all 5 write requests
 		MaxWriteGoRoutinesCount: 2,
 		Log:                     testutil.Logger{},
@@ -626,10 +684,10 @@ func TestWriteWhenRequestsGreaterThanMaxWriteGoRoutinesCount(t *testing.T) {
 	inputs := make([]telegraf.Metric, 0, totalRecords)
 	for i := 1; i <= totalRecords; i++ {
 		fieldName := "value_supported" + strconv.Itoa(i)
-		inputs = append(inputs, testutil.MustMetric(
+		inputs = append(inputs, metric.New(
 			metricName1,
 			map[string]string{"tag1": "value1"},
-			map[string]interface{}{
+			map[string]any{
 				fieldName: float64(10),
 			},
 			time1,
@@ -648,13 +706,14 @@ func TestWriteWhenRequestsLesserThanMaxWriteGoRoutinesCount(t *testing.T) {
 	const totalRecords = maxWriteRecordsCalls * maxRecordsInWriteRecordsCall
 	mockClient := &mockTimestreamClient{0}
 
-	WriteFactory = func(credentialConfig *internalaws.CredentialConfig) (WriteClient, error) {
+	//nolint:unparam // False-positive as this is only a mock and we must adhere to the interface
+	WriteFactory = func(*common_aws.CredentialConfig) (WriteClient, error) {
 		return mockClient, nil
 	}
 
 	plugin := Timestream{
 		MappingMode:  MappingModeMultiTable,
-		DatabaseName: tsDbName,
+		DatabaseName: tsDBName,
 		// Spawn 5 parallel go routines to serve 2 write requests
 		// In this case only 2 of the 5 go routines will process the write requests
 		MaxWriteGoRoutinesCount: 5,
@@ -665,10 +724,10 @@ func TestWriteWhenRequestsLesserThanMaxWriteGoRoutinesCount(t *testing.T) {
 	inputs := make([]telegraf.Metric, 0, totalRecords)
 	for i := 1; i <= totalRecords; i++ {
 		fieldName := "value_supported" + strconv.Itoa(i)
-		inputs = append(inputs, testutil.MustMetric(
+		inputs = append(inputs, metric.New(
 			metricName1,
 			map[string]string{"tag1": "value1"},
-			map[string]interface{}{
+			map[string]any{
 				fieldName: float64(10),
 			},
 			time1,
@@ -681,24 +740,24 @@ func TestWriteWhenRequestsLesserThanMaxWriteGoRoutinesCount(t *testing.T) {
 }
 
 func TestTransformMetricsSkipEmptyMetric(t *testing.T) {
-	input1 := testutil.MustMetric(
+	input1 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{}, //no fields here
+		map[string]any{},
 		time1,
 	)
-	input2 := testutil.MustMetric(
+	input2 := metric.New(
 		metricName1,
 		map[string]string{"tag2": "value2"},
-		map[string]interface{}{
+		map[string]any{
 			"value": float64(10),
 		},
 		time1,
 	)
-	input3 := testutil.MustMetric(
+	input3 := metric.New(
 		metricName1,
-		map[string]string{}, //record with no dimensions should appear in the results
-		map[string]interface{}{
+		map[string]string{}, // record with no dimensions should appear in the results
+		map[string]any{
 			"value": float64(20),
 		},
 		time1,
@@ -721,7 +780,7 @@ func TestTransformMetricsSkipEmptyMetric(t *testing.T) {
 	})
 
 	expectedResultSingleTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(testSingleTableName),
 		Records:          records,
 		CommonAttributes: &types.Record{},
@@ -747,7 +806,7 @@ func TestTransformMetricsSkipEmptyMetric(t *testing.T) {
 	})
 
 	expectedResultMultiTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(metricName1),
 		Records:          recordsMulti,
 		CommonAttributes: &types.Record{},
@@ -764,10 +823,10 @@ func TestTransformMetricsRequestsAboveLimitAreSplit(t *testing.T) {
 	inputs := make([]telegraf.Metric, 0, maxRecordsInWriteRecordsCall+1)
 	for i := 1; i <= maxRecordsInWriteRecordsCall+1; i++ {
 		fieldName := "value_supported" + strconv.Itoa(i)
-		inputs = append(inputs, testutil.MustMetric(
+		inputs = append(inputs, metric.New(
 			metricName1,
 			map[string]string{"tag1": "value1"},
-			map[string]interface{}{
+			map[string]any{
 				fieldName: float64(10),
 			},
 			time1,
@@ -816,24 +875,26 @@ func TestTransformMetricsRequestsAboveLimitAreSplit(t *testing.T) {
 func TestTransformMetricsRequestsAboveLimitAreSplitSingleTable(t *testing.T) {
 	const maxRecordsInWriteRecordsCall = 100
 
-	localTime, _ := strconv.Atoi(time1Epoch)
+	localTime, err := strconv.Atoi(time1Epoch)
+	require.NoError(t, err)
 
 	inputs := make([]telegraf.Metric, 0, maxRecordsInWriteRecordsCall+1)
 	for i := 1; i <= maxRecordsInWriteRecordsCall+1; i++ {
 		localTime++
 
 		fieldName := "value_supported" + strconv.Itoa(i)
-		inputs = append(inputs, testutil.MustMetric(
+		inputs = append(inputs, metric.New(
 			metricName1,
 			map[string]string{"tag1": "value1"},
-			map[string]interface{}{
+			map[string]any{
 				fieldName: float64(10),
 			},
 			time.Unix(int64(localTime), 0),
 		))
 	}
 
-	localTime, _ = strconv.Atoi(time1Epoch)
+	localTime, err = strconv.Atoi(time1Epoch)
+	require.NoError(t, err)
 
 	var recordsFirstReq []types.Record
 
@@ -849,25 +910,25 @@ func TestTransformMetricsRequestsAboveLimitAreSplitSingleTable(t *testing.T) {
 	}
 
 	expectedResult1SingleTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(testSingleTableName),
 		Records:          recordsFirstReq,
 		CommonAttributes: &types.Record{},
 	}
 
-	var recordsSecondReq []types.Record
-
 	localTime++
 
-	recordsSecondReq = append(recordsSecondReq, buildRecord(SimpleInput{
-		t:             strconv.Itoa(localTime),
-		tableName:     testSingleTableName,
-		dimensions:    map[string]string{"tag1": "value1", testSingleTableDim: metricName1},
-		measureValues: map[string]string{"value_supported" + strconv.Itoa(maxRecordsInWriteRecordsCall+1): "10"},
-	})...)
+	recordsSecondReq := buildRecord(
+		SimpleInput{
+			t:             strconv.Itoa(localTime),
+			tableName:     testSingleTableName,
+			dimensions:    map[string]string{"tag1": "value1", testSingleTableDim: metricName1},
+			measureValues: map[string]string{"value_supported" + strconv.Itoa(maxRecordsInWriteRecordsCall+1): "10"},
+		},
+	)
 
 	expectedResult2SingleTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(testSingleTableName),
 		Records:          recordsSecondReq,
 		CommonAttributes: &types.Record{},
@@ -879,19 +940,19 @@ func TestTransformMetricsRequestsAboveLimitAreSplitSingleTable(t *testing.T) {
 }
 
 func TestTransformMetricsDifferentDimensionsSameTimestampsAreWrittenSeparate(t *testing.T) {
-	input1 := testutil.MustMetric(
+	input1 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported1": float64(10), "value_supported2": float64(20),
 		},
 		time1,
 	)
 
-	input2 := testutil.MustMetric(
+	input2 := metric.New(
 		metricName2,
 		map[string]string{"tag2": "value2"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported3": float64(30),
 		},
 		time1,
@@ -913,7 +974,7 @@ func TestTransformMetricsDifferentDimensionsSameTimestampsAreWrittenSeparate(t *
 	})
 
 	expectedResultSingleTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(testSingleTableName),
 		Records:          recordsSingle,
 		CommonAttributes: &types.Record{},
@@ -943,18 +1004,18 @@ func TestTransformMetricsDifferentDimensionsSameTimestampsAreWrittenSeparate(t *
 }
 
 func TestTransformMetricsSameDimensionsDifferentDimensionValuesAreWrittenSeparate(t *testing.T) {
-	input1 := testutil.MustMetric(
+	input1 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported1": float64(10),
 		},
 		time1,
 	)
-	input2 := testutil.MustMetric(
+	input2 := metric.New(
 		metricName2,
 		map[string]string{"tag1": "value2"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported1": float64(20),
 		},
 		time1,
@@ -976,7 +1037,7 @@ func TestTransformMetricsSameDimensionsDifferentDimensionValuesAreWrittenSeparat
 	})
 
 	expectedResultSingleTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(testSingleTableName),
 		Records:          recordsSingle,
 		CommonAttributes: &types.Record{},
@@ -1005,18 +1066,18 @@ func TestTransformMetricsSameDimensionsDifferentDimensionValuesAreWrittenSeparat
 }
 
 func TestTransformMetricsSameDimensionsDifferentTimestampsAreWrittenSeparate(t *testing.T) {
-	input1 := testutil.MustMetric(
+	input1 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported1": float64(10), "value_supported2": float64(20),
 		},
 		time1,
 	)
-	input2 := testutil.MustMetric(
+	input2 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported3": float64(30),
 		},
 		time2,
@@ -1038,7 +1099,7 @@ func TestTransformMetricsSameDimensionsDifferentTimestampsAreWrittenSeparate(t *
 	})
 
 	expectedResultSingleTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(testSingleTableName),
 		Records:          recordsSingle,
 		CommonAttributes: &types.Record{},
@@ -1064,7 +1125,7 @@ func TestTransformMetricsSameDimensionsDifferentTimestampsAreWrittenSeparate(t *
 	})
 
 	expectedResultMultiTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(metricName1),
 		Records:          recordsMultiTable,
 		CommonAttributes: &types.Record{},
@@ -1076,18 +1137,18 @@ func TestTransformMetricsSameDimensionsDifferentTimestampsAreWrittenSeparate(t *
 }
 
 func TestTransformMetricsSameDimensionsSameTimestampsAreWrittenTogether(t *testing.T) {
-	input1 := testutil.MustMetric(
+	input1 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported1": float64(10), "value_supported2": float64(20),
 		},
 		time1,
 	)
-	input2 := testutil.MustMetric(
+	input2 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported3": float64(30),
 		},
 		time1,
@@ -1117,18 +1178,18 @@ func TestTransformMetricsSameDimensionsSameTimestampsAreWrittenTogether(t *testi
 }
 
 func TestTransformMetricsDifferentMetricsAreWrittenToDifferentTablesInMultiTableMapping(t *testing.T) {
-	input1 := testutil.MustMetric(
+	input1 := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported1": float64(10), "value_supported2": float64(20),
 		},
 		time1,
 	)
-	input2 := testutil.MustMetric(
+	input2 := metric.New(
 		metricName2,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported3": float64(30),
 		},
 		time1,
@@ -1150,7 +1211,7 @@ func TestTransformMetricsDifferentMetricsAreWrittenToDifferentTablesInMultiTable
 	})
 
 	expectedResultSingleTable := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(testSingleTableName),
 		Records:          recordsSingle,
 		CommonAttributes: &types.Record{},
@@ -1179,10 +1240,10 @@ func TestTransformMetricsDifferentMetricsAreWrittenToDifferentTablesInMultiTable
 }
 
 func TestTransformMetricsUnsupportedFieldsAreSkipped(t *testing.T) {
-	metricWithUnsupportedField := testutil.MustMetric(
+	metricWithUnsupportedField := metric.New(
 		metricName1,
 		map[string]string{"tag1": "value1"},
-		map[string]interface{}{
+		map[string]any{
 			"value_supported1": float64(10), "value_unsupported": time.Now(),
 		},
 		time1,
@@ -1213,10 +1274,10 @@ func TestTransformMetricsUnsupportedFieldsAreSkipped(t *testing.T) {
 func TestCustomEndpoint(t *testing.T) {
 	customEndpoint := "http://test.custom.endpoint.com"
 	plugin := Timestream{
-		MappingMode:      MappingModeMultiTable,
-		DatabaseName:     tsDbName,
-		Log:              testutil.Logger{},
-		CredentialConfig: internalaws.CredentialConfig{EndpointURL: customEndpoint},
+		MappingMode:  MappingModeMultiTable,
+		DatabaseName: tsDBName,
+		Log:          testutil.Logger{},
+		EndpointURL:  customEndpoint,
 	}
 
 	// validate config correctness
@@ -1236,7 +1297,7 @@ func comparisonTest(t *testing.T,
 	case MappingModeSingleTable:
 		plugin = Timestream{
 			MappingMode:  mappingMode,
-			DatabaseName: tsDbName,
+			DatabaseName: tsDBName,
 
 			SingleTableName: testSingleTableName,
 			SingleTableDimensionNameForTelegrafMeasurementName: testSingleTableDim,
@@ -1245,7 +1306,7 @@ func comparisonTest(t *testing.T,
 	case MappingModeMultiTable:
 		plugin = Timestream{
 			MappingMode:  mappingMode,
-			DatabaseName: tsDbName,
+			DatabaseName: tsDBName,
 			Log:          testutil.Logger{},
 		}
 	}
@@ -1260,7 +1321,7 @@ func comparison(t *testing.T,
 	timestreamRecords []*timestreamwrite.WriteRecordsInput) {
 	result := plugin.TransformMetrics(telegrafMetrics)
 
-	require.Equal(t, len(timestreamRecords), len(result), "The number of transformed records was expected to be different")
+	require.Len(t, result, len(timestreamRecords), "The number of transformed records was expected to be different")
 	for _, tsRecord := range timestreamRecords {
 		require.True(t, arrayContains(result, tsRecord), "Expected that the list of requests to Timestream: \n%s\n\n "+
 			"will contain request: \n%s\n\nUsed MappingMode: %s", result, tsRecord, mappingMode)
@@ -1332,7 +1393,7 @@ func buildExpectedInput(i SimpleInput) *timestreamwrite.WriteRecordsInput {
 	}
 
 	result := &timestreamwrite.WriteRecordsInput{
-		DatabaseName:     aws.String(tsDbName),
+		DatabaseName:     aws.String(tsDBName),
 		TableName:        aws.String(i.tableName),
 		Records:          tsRecords,
 		CommonAttributes: &types.Record{},
@@ -1342,8 +1403,7 @@ func buildExpectedInput(i SimpleInput) *timestreamwrite.WriteRecordsInput {
 }
 
 func buildRecords(inputs []SimpleInput) []types.Record {
-	var tsRecords []types.Record
-
+	tsRecords := make([]types.Record, 0, len(inputs))
 	for _, inp := range inputs {
 		tsRecords = append(tsRecords, buildRecord(inp)...)
 	}

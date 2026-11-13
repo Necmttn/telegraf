@@ -8,7 +8,6 @@ import (
 	"hash/maphash"
 	"log" //nolint:depguard // Required for tracing connection issues
 	"net"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,14 +17,13 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
-
-const addressRegexp = `^(?P<area>[A-Z]+)(?P<no>[0-9]+)\.(?P<type>[A-Z]+)(?P<start>[0-9]+)(?:\.(?P<extra>.*))?$`
 
 var (
 	regexAddr = regexp.MustCompile(addressRegexp)
@@ -48,15 +46,37 @@ var (
 		"I":  0x05, // Integer (16 bit)
 		"DW": 0x06, // Double Word (32 bit)
 		"DI": 0x07, // Double integer (32 bit)
+		"LI": 0x06, // Long integer (64 bit)
 		"R":  0x08, // IEEE 754 real (32 bit)
+		"LR": 0x06, // IEEE 754 double (64-bit)
 		// see https://support.industry.siemens.com/cs/document/36479/date_and_time-format-for-s7-?dti=0&lc=en-DE
 		"DT": 0x0F, // Date and time (7 byte)
 	}
+
+	connectionTypeMap = map[string]int{
+		"PD":    1,
+		"OP":    2,
+		"basic": 3,
+	}
 )
 
-type metricFieldDefinition struct {
-	Name    string `toml:"name"`
-	Address string `toml:"address"`
+const addressRegexp = `^(?P<area>[A-Z]+)(?P<no>[0-9]+)\.(?P<type>[A-Z]+)(?P<start>[0-9]+)(?:\.(?P<extra>.*))?$`
+
+type S7comm struct {
+	Server          string             `toml:"server"`
+	Rack            int                `toml:"rack"`
+	Slot            int                `toml:"slot"`
+	ConnectionType  string             `toml:"connection_type"`
+	BatchMaxSize    int                `toml:"pdu_size"`
+	Timeout         config.Duration    `toml:"timeout"`
+	IdleTimeout     config.Duration    `toml:"idle_timeout"`
+	DebugConnection bool               `toml:"debug_connection" deprecated:"1.35.0;use 'log_level' 'trace' instead"`
+	Configs         []metricDefinition `toml:"metric"`
+	Log             telegraf.Logger    `toml:"-"`
+
+	handler *gos7.TCPClientHandler
+	client  gos7.Client
+	batches []batch
 }
 
 type metricDefinition struct {
@@ -65,7 +85,10 @@ type metricDefinition struct {
 	Tags   map[string]string       `toml:"tags"`
 }
 
-type converterFunc func([]byte) interface{}
+type metricFieldDefinition struct {
+	Name    string `toml:"name"`
+	Address string `toml:"address"`
+}
 
 type batch struct {
 	items    []gos7.S7DataItem
@@ -79,29 +102,12 @@ type fieldMapping struct {
 	convert     converterFunc
 }
 
-// S7comm represents the plugin
-type S7comm struct {
-	Server          string             `toml:"server"`
-	Rack            int                `toml:"rack"`
-	Slot            int                `toml:"slot"`
-	BatchMaxSize    int                `toml:"pdu_size"`
-	Timeout         config.Duration    `toml:"timeout"`
-	DebugConnection bool               `toml:"debug_connection"`
-	Configs         []metricDefinition `toml:"metric"`
-	Log             telegraf.Logger    `toml:"-"`
+type converterFunc func([]byte) any
 
-	handler *gos7.TCPClientHandler
-	client  gos7.Client
-	batches []batch
-}
-
-// SampleConfig returns a basic configuration for the plugin
 func (*S7comm) SampleConfig() string {
 	return sampleConfig
 }
 
-// Init checks the config settings and prepares the plugin. It's called
-// once by the Telegraf agent after parsing the config settings.
 func (s *S7comm) Init() error {
 	// Check settings
 	if s.Server == "" {
@@ -112,6 +118,12 @@ func (s *S7comm) Init() error {
 	}
 	if s.Slot < 0 {
 		return errors.New("'slot' has to be specified")
+	}
+	if s.ConnectionType == "" {
+		s.ConnectionType = "PD"
+	}
+	if _, found := connectionTypeMap[s.ConnectionType]; !found {
+		return fmt.Errorf("invalid 'connection_type' %q", s.ConnectionType)
 	}
 	if len(s.Configs) == 0 {
 		return errors.New("no metric defined")
@@ -127,36 +139,31 @@ func (s *S7comm) Init() error {
 	}
 
 	// Create handler for the connection
-	s.handler = gos7.NewTCPClientHandler(s.Server, s.Rack, s.Slot)
+	s.handler = gos7.NewTCPClientHandlerWithConnectType(s.Server, s.Rack, s.Slot, connectionTypeMap[s.ConnectionType])
 	s.handler.Timeout = time.Duration(s.Timeout)
-	if s.DebugConnection {
-		s.handler.Logger = log.New(os.Stderr, "D! [inputs.s7comm]", log.LstdFlags)
+	s.handler.IdleTimeout = time.Duration(s.IdleTimeout)
+	if s.Log.Level().Includes(telegraf.Trace) || s.DebugConnection { // for backward compatibility
+		s.handler.Logger = log.New(&tracelogger{log: s.Log}, "", 0)
 	}
 
 	// Create the requests
 	return s.createRequests()
 }
 
-// Start initializes the connection to the remote endpoint
-func (s *S7comm) Start(_ telegraf.Accumulator) error {
+func (s *S7comm) Start(telegraf.Accumulator) error {
 	s.Log.Debugf("Connecting to %q...", s.Server)
 	if err := s.handler.Connect(); err != nil {
-		return fmt.Errorf("connecting to %q failed: %w", s.Server, err)
+		s.handler.Close()
+		return &internal.StartupError{
+			Err:   fmt.Errorf("connecting to %q failed: %w", s.Server, err),
+			Retry: true,
+		}
 	}
 	s.client = gos7.NewClient(s.handler)
 
 	return nil
 }
 
-// Stop disconnects from the remote endpoint and cleans up
-func (s *S7comm) Stop() {
-	if s.handler != nil {
-		s.Log.Debugf("Disconnecting from %q...", s.handler.Address)
-		s.handler.Close()
-	}
-}
-
-// Gather collects the data from the device
 func (s *S7comm) Gather(acc telegraf.Accumulator) error {
 	timestamp := time.Now()
 	grouper := metric.NewSeriesGrouper()
@@ -192,7 +199,13 @@ func (s *S7comm) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-// Internal functions
+func (s *S7comm) Stop() {
+	if s.handler != nil {
+		s.Log.Debugf("Disconnecting from %q...", s.handler.Address)
+		s.handler.Close()
+	}
+}
+
 func (s *S7comm) createRequests() error {
 	seed := maphash.MakeSeed()
 	seenFields := make(map[uint64]bool)
@@ -352,12 +365,15 @@ func handleFieldAddress(address string) (*gos7.S7DataItem, converterFunc, error)
 		buflen = 2
 	case "DW", "DI", "R": // 32-bit types
 		buflen = 4
+	case "LR", "LI": // 64-bit types
+		buflen = 8
+		amount = 2
 	case "DT": // 7-byte
 		buflen = 7
 	case "S":
-		amount = extra
 		// Extra bytes as the first byte is the max-length of the string and
 		// the second byte is the actual length of the string.
+		amount = extra + 2
 		buflen = extra + 2
 	default:
 		return nil, nil, errors.New("invalid data type")
@@ -400,6 +416,16 @@ func fieldID(seed maphash.Seed, def metricDefinition, field metricFieldDefinitio
 	return mh.Sum64()
 }
 
+// Logger for tracing internal messages
+type tracelogger struct {
+	log telegraf.Logger
+}
+
+func (l *tracelogger) Write(b []byte) (n int, err error) {
+	l.log.Trace(string(b))
+	return len(b), nil
+}
+
 // Add this plugin to telegraf
 func init() {
 	inputs.Add("s7comm", func() telegraf.Input {
@@ -408,6 +434,7 @@ func init() {
 			Slot:         -1,
 			BatchMaxSize: 20,
 			Timeout:      config.Duration(10 * time.Second),
+			IdleTimeout:  config.Duration(60 * time.Second),
 		}
 	})
 }

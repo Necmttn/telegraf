@@ -19,22 +19,8 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-type passenger struct {
-	Command string
-}
-
-func (p *passenger) parseCommand() (string, []string) {
-	var arguments []string
-	if !strings.Contains(p.Command, " ") {
-		return p.Command, arguments
-	}
-
-	arguments = strings.Split(p.Command, " ")
-	if len(arguments) == 1 {
-		return arguments[0], arguments[1:]
-	}
-
-	return arguments[0], arguments[1:]
+type Passenger struct {
+	Command string `toml:"command"`
 }
 
 type info struct {
@@ -91,6 +77,39 @@ type process struct {
 	ProcessGroupID      string `xml:"process_group_id"`
 }
 
+func (*Passenger) SampleConfig() string {
+	return sampleConfig
+}
+
+func (p *Passenger) Gather(acc telegraf.Accumulator) error {
+	if p.Command == "" {
+		p.Command = "passenger-status -v --show=xml"
+	}
+
+	cmd, args := p.parseCommand()
+	out, err := exec.Command(cmd, args...).Output()
+
+	if err != nil {
+		return err
+	}
+
+	return importMetric(out, acc)
+}
+
+func (p *Passenger) parseCommand() (string, []string) {
+	var arguments []string
+	if !strings.Contains(p.Command, " ") {
+		return p.Command, arguments
+	}
+
+	arguments = strings.Split(p.Command, " ")
+	if len(arguments) == 1 {
+		return arguments[0], arguments[1:]
+	}
+
+	return arguments[0], arguments[1:]
+}
+
 func (p *process) getUptime() int64 {
 	if p.Uptime == "" {
 		return 0
@@ -131,25 +150,6 @@ func (p *process) getUptime() int64 {
 	return uptime
 }
 
-func (*passenger) SampleConfig() string {
-	return sampleConfig
-}
-
-func (p *passenger) Gather(acc telegraf.Accumulator) error {
-	if p.Command == "" {
-		p.Command = "passenger-status -v --show=xml"
-	}
-
-	cmd, args := p.parseCommand()
-	out, err := exec.Command(cmd, args...).Output()
-
-	if err != nil {
-		return err
-	}
-
-	return importMetric(out, acc)
-}
-
 func importMetric(stat []byte, acc telegraf.Accumulator) error {
 	var p info
 
@@ -162,7 +162,7 @@ func importMetric(stat []byte, acc telegraf.Accumulator) error {
 	tags := map[string]string{
 		"passenger_version": p.PassengerVersion,
 	}
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"process_count":      p.ProcessCount,
 		"max":                p.Max,
 		"capacity_used":      p.CapacityUsed,
@@ -174,7 +174,7 @@ func importMetric(stat []byte, acc telegraf.Accumulator) error {
 		tags := map[string]string{
 			"name": sg.Name,
 		}
-		fields := map[string]interface{}{
+		fields := map[string]any{
 			"get_wait_list_size": sg.GetWaitListSize,
 			"capacity_used":      sg.CapacityUsed,
 		}
@@ -186,7 +186,7 @@ func importMetric(stat []byte, acc telegraf.Accumulator) error {
 				"app_root": group.AppRoot,
 				"app_type": group.AppType,
 			}
-			fields := map[string]interface{}{
+			fields := map[string]any{
 				"get_wait_list_size":      group.GetWaitListSize,
 				"capacity_used":           group.CapacityUsed,
 				"processes_being_spawned": group.ProcessesBeingSpawned,
@@ -203,7 +203,7 @@ func importMetric(stat []byte, acc telegraf.Accumulator) error {
 					"life_status":      process.LifeStatus,
 					"process_group_id": process.ProcessGroupID,
 				}
-				fields := map[string]interface{}{
+				fields := map[string]any{
 					"concurrency":           process.Concurrency,
 					"sessions":              process.Sessions,
 					"busyness":              process.Busyness,
@@ -231,6 +231,6 @@ func importMetric(stat []byte, acc telegraf.Accumulator) error {
 
 func init() {
 	inputs.Add("passenger", func() telegraf.Input {
-		return &passenger{}
+		return &Passenger{}
 	})
 }

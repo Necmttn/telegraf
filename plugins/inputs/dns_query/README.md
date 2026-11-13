@@ -1,14 +1,17 @@
 # DNS Query Input Plugin
 
-The DNS plugin gathers dns query times in milliseconds - like
-[Dig](https://en.wikipedia.org/wiki/Dig_\(command\))
+This plugin gathers information about DNS queries such as response time and
+result codes.
+
+⭐ Telegraf v1.4.0
+🏷️ system, network
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -28,7 +31,7 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
   ## Query record type.
   ## Possible values: A, AAAA, CNAME, MX, NS, PTR, TXT, SOA, SPF, SRV.
-  # record_type = "A"
+  # record_type = "NS"
 
   ## Dns server port.
   # port = 53

@@ -1,6 +1,9 @@
 package starlark
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,17 +18,89 @@ import (
 )
 
 type Common struct {
-	Source    string                 `toml:"source"`
-	Script    string                 `toml:"script"`
-	Constants map[string]interface{} `toml:"constants"`
+	Source    string         `toml:"source"`
+	Script    string         `toml:"script"`
+	Constants map[string]any `toml:"constants"`
 
 	Log              telegraf.Logger `toml:"-"`
 	StarlarkLoadFunc func(module string, logger telegraf.Logger) (starlark.StringDict, error)
 
 	thread     *starlark.Thread
+	builtins   starlark.StringDict
 	globals    starlark.StringDict
 	functions  map[string]*starlark.Function
 	parameters map[string]starlark.Tuple
+	state      *starlark.Dict
+}
+
+func (s *Common) GetState() any {
+	// Return an empty string allowing the persister to guess the state type
+	// for later restore
+	if s.state == nil {
+		return ""
+	}
+
+	// Marshal the state
+	state, err := marshal(s.state)
+	if err != nil {
+		s.Log.Errorf("encoding state failed: %v", err)
+		return ""
+	}
+	return "v1:" + state
+}
+
+func (s *Common) SetState(state any) error {
+	// Handle old and new serialization format
+	data, ok := state.(string)
+	if !ok {
+		return fmt.Errorf("unexpected type %T for state", state)
+	}
+
+	// An empty string denotes an empty state
+	if data == "" {
+		return nil
+	}
+
+	// We need to handle the new format with a version prefix as well as the
+	// old format where data is encoded in GOB binary format. For the old format
+	// data is base64 encoded through JSON marshaling.
+	// So determine if we do see a version prefix and additionally check for
+	// base64 encoding for a robust guess.
+	if version, d, found := strings.Cut(data, ":"); found {
+		if version != "v1" {
+			return fmt.Errorf("invalid state format version %q, only supporting v1", version)
+		}
+		// We got the new format
+		decodedState, err := unmarshal(d)
+		if err != nil {
+			return fmt.Errorf("decoding state failed: %w", err)
+		}
+		s.state = decodedState
+	} else {
+		// We likely got the old format so try old deserialization
+		buf, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			return errors.New("invalid state format")
+		}
+		var dict map[string]any
+		if err := gob.NewDecoder(bytes.NewBuffer(buf)).Decode(&dict); err != nil {
+			return fmt.Errorf("decoding state (old format) failed: %w", err)
+		}
+
+		// Convert the golang dict back to starlark types
+		s.state = starlark.NewDict(len(dict))
+		for k, v := range dict {
+			sv, err := asStarlarkValue(v)
+			if err != nil {
+				return fmt.Errorf("value %v of state item %q cannot be set: %w", v, k, err)
+			}
+			if err := s.state.SetKey(starlark.String(k), sv); err != nil {
+				return fmt.Errorf("state item %q cannot be set: %w", k, err)
+			}
+		}
+	}
+	s.builtins["state"] = s.state
+	return s.InitProgram()
 }
 
 func (s *Common) Init() error {
@@ -36,44 +111,65 @@ func (s *Common) Init() error {
 		return errors.New("both source or script cannot be set")
 	}
 
-	s.thread = &starlark.Thread{
-		Print: func(_ *starlark.Thread, msg string) { s.Log.Debug(msg) },
-		Load: func(thread *starlark.Thread, module string) (starlark.StringDict, error) {
-			return s.StarlarkLoadFunc(module, s.Log)
-		},
-	}
+	s.builtins = starlark.StringDict{}
+	s.builtins["Metric"] = starlark.NewBuiltin("Metric", newMetric)
+	s.builtins["deepcopy"] = starlark.NewBuiltin("deepcopy", deepcopy)
+	s.builtins["catch"] = starlark.NewBuiltin("catch", catch)
 
-	builtins := starlark.StringDict{}
-	builtins["Metric"] = starlark.NewBuiltin("Metric", newMetric)
-	builtins["deepcopy"] = starlark.NewBuiltin("deepcopy", deepcopy)
-	builtins["catch"] = starlark.NewBuiltin("catch", catch)
-	err := s.addConstants(&builtins)
-	if err != nil {
+	if err := s.addConstants(&s.builtins); err != nil {
 		return err
 	}
 
-	program, err := s.sourceProgram(builtins)
+	// Initialize the program
+	if err := s.InitProgram(); err != nil {
+		// Try again with a declared state. This might be necessary for
+		// state persistence.
+		s.state = starlark.NewDict(0)
+		s.builtins["state"] = s.state
+		if serr := s.InitProgram(); serr != nil {
+			return err
+		}
+	}
+
+	s.functions = make(map[string]*starlark.Function)
+	s.parameters = make(map[string]starlark.Tuple)
+
+	return nil
+}
+
+func (s *Common) InitProgram() error {
+	// Load the program. In case of an error we can try to insert the state
+	// which can be used implicitly e.g. when persisting states
+	program, err := s.sourceProgram(s.builtins)
 	if err != nil {
 		return err
 	}
 
 	// Execute source
-	globals, err := program.Init(s.thread, builtins)
+	s.thread = &starlark.Thread{
+		Print: func(_ *starlark.Thread, msg string) { s.Log.Debug(msg) },
+		Load: func(_ *starlark.Thread, module string) (starlark.StringDict, error) {
+			return s.StarlarkLoadFunc(module, s.Log)
+		},
+	}
+	globals, err := program.Init(s.thread, s.builtins)
 	if err != nil {
 		return err
 	}
-	// Make available a shared state to the apply function
-	globals["state"] = starlark.NewDict(0)
 
-	// Freeze the global state.  This prevents modifications to the processor
+	// In case the program declares a global "state" we should insert it to
+	// avoid warnings about inserting into a frozen variable
+	if _, found := globals["state"]; found {
+		globals["state"] = starlark.NewDict(0)
+	}
+
+	// Freeze the global state. This prevents modifications to the processor
 	// state and prevents scripts from containing errors storing tracking
-	// metrics.  Tasks that require global state will not be possible due to
+	// metrics. Tasks that require global state will not be possible due to
 	// this, so maybe we should relax this in the future.
 	globals.Freeze()
-
 	s.globals = globals
-	s.functions = make(map[string]*starlark.Function)
-	s.parameters = make(map[string]starlark.Tuple)
+
 	return nil
 }
 
@@ -107,6 +203,9 @@ func (s *Common) AddFunction(name string, params ...starlark.Value) error {
 // Add all the constants defined in the plugin as constants of the script
 func (s *Common) addConstants(builtins *starlark.StringDict) error {
 	for key, val := range s.Constants {
+		if key == "state" {
+			return errors.New("'state' constant uses reserved name")
+		}
 		sVal, err := asStarlarkValue(val)
 		if err != nil {
 			return fmt.Errorf("converting type %T failed: %w", val, err)
@@ -117,7 +216,7 @@ func (s *Common) addConstants(builtins *starlark.StringDict) error {
 }
 
 func (s *Common) sourceProgram(builtins starlark.StringDict) (*starlark.Program, error) {
-	var src interface{}
+	var src any
 	if s.Source != "" {
 		src = s.Source
 	}
@@ -149,9 +248,8 @@ func (s *Common) Call(name string) (starlark.Value, error) {
 }
 
 func (s *Common) LogError(err error) {
-	var evalErr *starlark.EvalError
-	if errors.As(err, &evalErr) {
-		for _, line := range strings.Split(evalErr.Backtrace(), "\n") {
+	if evalErr, ok := errors.AsType[*starlark.EvalError](err); ok {
+		for line := range strings.SplitSeq(evalErr.Backtrace(), "\n") {
 			s.Log.Error(line)
 		}
 	} else {

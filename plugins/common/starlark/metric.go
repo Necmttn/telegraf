@@ -56,7 +56,7 @@ func (m *Metric) String() string {
 	return buf.String()
 }
 
-func (m *Metric) Type() string {
+func (*Metric) Type() string {
 	return "Metric"
 }
 
@@ -64,16 +64,16 @@ func (m *Metric) Freeze() {
 	m.frozen = true
 }
 
-func (m *Metric) Truth() starlark.Bool {
+func (*Metric) Truth() starlark.Bool {
 	return true
 }
 
-func (m *Metric) Hash() (uint32, error) {
+func (*Metric) Hash() (uint32, error) {
 	return 0, errors.New("not hashable")
 }
 
 // AttrNames implements the starlark.HasAttrs interface.
-func (m *Metric) AttrNames() []string {
+func (*Metric) AttrNames() []string {
 	return []string{"name", "tags", "fields", "time"}
 }
 
@@ -97,7 +97,7 @@ func (m *Metric) Attr(name string) (starlark.Value, error) {
 // SetField implements the starlark.HasSetField interface.
 func (m *Metric) SetField(name string, value starlark.Value) error {
 	if m.frozen {
-		return fmt.Errorf("cannot modify frozen metric")
+		return errors.New("cannot modify frozen metric")
 	}
 
 	switch name {

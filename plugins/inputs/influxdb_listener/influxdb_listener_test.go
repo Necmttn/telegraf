@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -96,7 +96,7 @@ func getSecureClient() *http.Client {
 	}
 }
 
-func createURL(listener *InfluxDBListener, scheme string, path string, rawquery string) string {
+func createURL(listener *InfluxDBListener, scheme, path, rawquery string) string {
 	u := url.URL{
 		Scheme:   scheme,
 		Host:     "localhost:" + strconv.Itoa(listener.port),
@@ -126,7 +126,7 @@ func TestWriteSecureNoClientAuth(t *testing.T) {
 	}
 
 	// post single message to listener
-	resp, err := noClientAuthClient.Post(createURL(listener, "https", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testMsg)))
+	resp, err := noClientAuthClient.Post(createURL(listener, "https", "/write", "db=mydb"), "", bytes.NewBufferString(testMsg))
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.EqualValues(t, 204, resp.StatusCode)
@@ -141,7 +141,7 @@ func TestWriteSecureWithClientAuth(t *testing.T) {
 	defer listener.Stop()
 
 	// post single message to listener
-	resp, err := getSecureClient().Post(createURL(listener, "https", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testMsg)))
+	resp, err := getSecureClient().Post(createURL(listener, "https", "/write", "db=mydb"), "", bytes.NewBufferString(testMsg))
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.EqualValues(t, 204, resp.StatusCode)
@@ -157,7 +157,7 @@ func TestWriteBasicAuth(t *testing.T) {
 
 	client := &http.Client{}
 
-	req, err := http.NewRequest("POST", createURL(listener, "http", "/write", "db=mydb"), bytes.NewBuffer([]byte(testMsg)))
+	req, err := http.NewRequest("POST", createURL(listener, "http", "/write", "db=mydb"), bytes.NewBufferString(testMsg))
 	require.NoError(t, err)
 	req.SetBasicAuth(basicUsername, basicPassword)
 	resp, err := client.Do(req)
@@ -188,7 +188,7 @@ func TestWriteToken(t *testing.T) {
 	defer plugin.Stop()
 
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", createURL(plugin, "http", "/write", "db=mydb"), bytes.NewBuffer([]byte(testMsg)))
+	req, err := http.NewRequest("POST", createURL(plugin, "http", "/write", "db=mydb"), bytes.NewBufferString(testMsg))
 	require.NoError(t, err)
 	req.Header.Add("Authentication", "Bearer "+token)
 	resp, err := client.Do(req)
@@ -219,7 +219,7 @@ func TestWriteTokenInvalidUser(t *testing.T) {
 	defer plugin.Stop()
 
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", createURL(plugin, "http", "/write", "db=mydb"), bytes.NewBuffer([]byte(testMsg)))
+	req, err := http.NewRequest("POST", createURL(plugin, "http", "/write", "db=mydb"), bytes.NewBufferString(testMsg))
 	require.NoError(t, err)
 	req.Header.Add("Authentication", "Bearer "+token)
 	resp, err := client.Do(req)
@@ -250,7 +250,7 @@ func TestWriteTokenExpired(t *testing.T) {
 	defer plugin.Stop()
 
 	client := &http.Client{}
-	req, err := http.NewRequest("POST", createURL(plugin, "http", "/write", "db=mydb"), bytes.NewBuffer([]byte(testMsg)))
+	req, err := http.NewRequest("POST", createURL(plugin, "http", "/write", "db=mydb"), bytes.NewBufferString(testMsg))
 	require.NoError(t, err)
 	req.Header.Add("Authentication", "Bearer "+token)
 	resp, err := client.Do(req)
@@ -266,7 +266,7 @@ func TestWriteKeepDatabase(t *testing.T) {
 	testMsgWithDB := "cpu_load_short,host=server01,database=wrongdb value=12.0 1422568543702900257\n"
 
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 			listener.DatabaseTag = "database"
@@ -277,31 +277,31 @@ func TestWriteKeepDatabase(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testMsg)))
+			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(testMsg))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 204, resp.StatusCode)
 
 			acc.Wait(1)
 			acc.AssertContainsTaggedFields(t, "cpu_load_short",
-				map[string]interface{}{"value": float64(12)},
+				map[string]any{"value": float64(12)},
 				map[string]string{"host": "server01", "database": "mydb"},
 			)
 
 			// post single message to listener with a database tag in it already. It should be clobbered.
-			resp, err = http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testMsgWithDB)))
+			resp, err = http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(testMsgWithDB))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 204, resp.StatusCode)
 
 			acc.Wait(1)
 			acc.AssertContainsTaggedFields(t, "cpu_load_short",
-				map[string]interface{}{"value": float64(12)},
+				map[string]any{"value": float64(12)},
 				map[string]string{"host": "server01", "database": "mydb"},
 			)
 
 			// post multiple message to listener
-			resp, err = http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testMsgs)))
+			resp, err = http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(testMsgs))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 204, resp.StatusCode)
@@ -311,7 +311,7 @@ func TestWriteKeepDatabase(t *testing.T) {
 				"server04", "server05", "server06"}
 			for _, hostTag := range hostTags {
 				acc.AssertContainsTaggedFields(t, "cpu_load_short",
-					map[string]interface{}{"value": float64(12)},
+					map[string]any{"value": float64(12)},
 					map[string]string{"host": hostTag, "database": "mydb"},
 				)
 			}
@@ -328,18 +328,18 @@ func TestWriteRetentionPolicyTag(t *testing.T) {
 	require.NoError(t, listener.Start(acc))
 	defer listener.Stop()
 
-	resp, err := http.Post(createURL(listener, "http", "/write", "rp=myrp"), "", bytes.NewBuffer([]byte("cpu time_idle=42")))
+	resp, err := http.Post(createURL(listener, "http", "/write", "rp=myrp"), "", bytes.NewBufferString("cpu time_idle=42"))
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, 204, resp.StatusCode)
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"cpu",
 			map[string]string{
 				"rp": "myrp",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"time_idle": 42.0,
 			},
 			time.Unix(0, 0),
@@ -353,7 +353,7 @@ func TestWriteRetentionPolicyTag(t *testing.T) {
 // http listener should add a newline at the end of the buffer if it's not there
 func TestWriteNoNewline(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -363,14 +363,14 @@ func TestWriteNoNewline(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testMsgNoNewline)))
+			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(testMsgNoNewline))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 204, resp.StatusCode)
 
 			acc.Wait(1)
 			acc.AssertContainsTaggedFields(t, "cpu_load_short",
-				map[string]interface{}{"value": float64(12)},
+				map[string]any{"value": float64(12)},
 				map[string]string{"host": "server01"},
 			)
 		})
@@ -379,7 +379,7 @@ func TestWriteNoNewline(t *testing.T) {
 
 func TestPartialWrite(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -389,18 +389,18 @@ func TestPartialWrite(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testPartial)))
+			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(testPartial))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 400, resp.StatusCode)
 
 			acc.Wait(1)
 			acc.AssertContainsTaggedFields(t, "cpu",
-				map[string]interface{}{"value1": float64(1)},
+				map[string]any{"value1": float64(1)},
 				map[string]string{"host": "a"},
 			)
 			acc.AssertContainsTaggedFields(t, "cpu",
-				map[string]interface{}{"value1": float64(1)},
+				map[string]any{"value1": float64(1)},
 				map[string]string{"host": "c"},
 			)
 		})
@@ -413,7 +413,7 @@ func TestWriteMaxLineSizeIncrease(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := &InfluxDBListener{
 				Log:            testutil.Logger{},
 				ServiceAddress: "localhost:0",
@@ -441,7 +441,7 @@ func TestWriteVerySmallMaxBody(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := &InfluxDBListener{
 				Log:            testutil.Logger{},
 				ServiceAddress: "localhost:0",
@@ -474,7 +474,7 @@ func TestWriteLargeLine(t *testing.T) {
 	hugeMetricString := string(hugeMetric)
 
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := &InfluxDBListener{
 				Log:            testutil.Logger{},
 				ServiceAddress: "localhost:0",
@@ -489,16 +489,16 @@ func TestWriteLargeLine(t *testing.T) {
 			require.NoError(t, listener.Start(acc))
 			defer listener.Stop()
 
-			resp, err := http.Post(createURL(listener, "http", "/write", ""), "", bytes.NewBuffer([]byte(hugeMetricString+testMsgs)))
+			resp, err := http.Post(createURL(listener, "http", "/write", ""), "", bytes.NewBufferString(hugeMetricString+testMsgs))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
-			//todo: with the new parser, long lines aren't a problem.  Do we need to skip them?
-			//require.EqualValues(t, 400, resp.StatusCode)
+			// TODO: with the new parser, long lines aren't a problem.  Do we need to skip them?
+			// require.EqualValues(t, 400, resp.StatusCode)
 
-			expected := testutil.MustMetric(
+			expected := metric.New(
 				"super_long_metric",
 				map[string]string{"foo": "bar"},
-				map[string]interface{}{
+				map[string]any{
 					"clients":                     42,
 					"connected_followers":         43,
 					"evicted_keys":                44,
@@ -543,7 +543,7 @@ func TestWriteLargeLine(t *testing.T) {
 			acc.Wait(len(hostTags))
 			for _, hostTag := range hostTags {
 				acc.AssertContainsTaggedFields(t, "cpu_load_short",
-					map[string]interface{}{"value": float64(12)},
+					map[string]any{"value": float64(12)},
 					map[string]string{"host": hostTag},
 				)
 			}
@@ -554,7 +554,7 @@ func TestWriteLargeLine(t *testing.T) {
 // test that writing gzipped data works
 func TestWriteGzippedData(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -581,7 +581,7 @@ func TestWriteGzippedData(t *testing.T) {
 			acc.Wait(len(hostTags))
 			for _, hostTag := range hostTags {
 				acc.AssertContainsTaggedFields(t, "cpu_load_short",
-					map[string]interface{}{"value": float64(12)},
+					map[string]any{"value": float64(12)},
 					map[string]string{"host": hostTag},
 				)
 			}
@@ -607,12 +607,12 @@ func TestWriteHighTraffic(t *testing.T) {
 
 	// post many messages to listener
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(1)
 		go func(innerwg *sync.WaitGroup) {
 			defer innerwg.Done()
-			for i := 0; i < 500; i++ {
-				resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(testMsgs)))
+			for range 500 {
+				resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(testMsgs))
 				if err != nil {
 					return
 				}
@@ -635,7 +635,7 @@ func TestWriteHighTraffic(t *testing.T) {
 
 func TestReceive404ForInvalidEndpoint(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -645,7 +645,7 @@ func TestReceive404ForInvalidEndpoint(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/foobar", ""), "", bytes.NewBuffer([]byte(testMsg)))
+			resp, err := http.Post(createURL(listener, "http", "/foobar", ""), "", bytes.NewBufferString(testMsg))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 404, resp.StatusCode)
@@ -655,7 +655,7 @@ func TestReceive404ForInvalidEndpoint(t *testing.T) {
 
 func TestWriteInvalid(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -665,7 +665,7 @@ func TestWriteInvalid(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(badMsg)))
+			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(badMsg))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 400, resp.StatusCode)
@@ -675,7 +675,7 @@ func TestWriteInvalid(t *testing.T) {
 
 func TestWriteEmpty(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -685,7 +685,7 @@ func TestWriteEmpty(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBuffer([]byte(emptyMsg)))
+			resp, err := http.Post(createURL(listener, "http", "/write", "db=mydb"), "", bytes.NewBufferString(emptyMsg))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 204, resp.StatusCode)
@@ -695,7 +695,7 @@ func TestWriteEmpty(t *testing.T) {
 
 func TestQuery(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -716,7 +716,7 @@ func TestQuery(t *testing.T) {
 
 func TestPing(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -738,7 +738,7 @@ func TestPing(t *testing.T) {
 
 func TestPingVerbose(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -760,7 +760,7 @@ func TestPingVerbose(t *testing.T) {
 
 func TestWriteWithPrecision(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 
@@ -771,7 +771,7 @@ func TestWriteWithPrecision(t *testing.T) {
 
 			msg := "xyzzy value=42 1422568543\n"
 			resp, err := http.Post(
-				createURL(listener, "http", "/write", "precision=s"), "", bytes.NewBuffer([]byte(msg)))
+				createURL(listener, "http", "/write", "precision=s"), "", bytes.NewBufferString(msg))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 204, resp.StatusCode)
@@ -787,7 +787,7 @@ func TestWriteWithPrecision(t *testing.T) {
 
 func TestWriteWithPrecisionNoTimestamp(t *testing.T) {
 	for _, tc := range parserTestCases {
-		t.Run(fmt.Sprintf("parser %s", tc.parser), func(t *testing.T) {
+		t.Run("parser "+tc.parser, func(t *testing.T) {
 			listener := newTestListener()
 			listener.ParserType = tc.parser
 			listener.timeFunc = func() time.Time {
@@ -801,7 +801,7 @@ func TestWriteWithPrecisionNoTimestamp(t *testing.T) {
 
 			msg := "xyzzy value=42\n"
 			resp, err := http.Post(
-				createURL(listener, "http", "/write", "precision=s"), "", bytes.NewBuffer([]byte(msg)))
+				createURL(listener, "http", "/write", "precision=s"), "", bytes.NewBufferString(msg))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 204, resp.StatusCode)
@@ -849,7 +849,7 @@ func TestWriteUpstreamParseErrors(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/write", ""), "", bytes.NewBuffer([]byte(tt.input)))
+			resp, err := http.Post(createURL(listener, "http", "/write", ""), "", bytes.NewBufferString(tt.input))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 400, resp.StatusCode)
@@ -891,7 +891,7 @@ func TestWriteParseErrors(t *testing.T) {
 			defer listener.Stop()
 
 			// post single message to listener
-			resp, err := http.Post(createURL(listener, "http", "/write", ""), "", bytes.NewBuffer([]byte(tt.input)))
+			resp, err := http.Post(createURL(listener, "http", "/write", ""), "", bytes.NewBufferString(tt.input))
 			require.NoError(t, err)
 			require.NoError(t, resp.Body.Close())
 			require.EqualValues(t, 400, resp.StatusCode)

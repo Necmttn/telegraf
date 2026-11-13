@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/filter"
@@ -71,14 +72,11 @@ func (c *converter) setup(ct converterType, log telegraf.Logger) error {
 		if c.ResultKey == "" && c.Replacement == "" {
 			groups := c.re.SubexpNames()
 			allNamed := len(groups) > 1
-			for _, g := range groups[1:] {
-				if g == "" {
-					allNamed = false
-					break
-				}
+			if slices.Contains(groups[1:], "") {
+				allNamed = false
 			}
 			if allNamed {
-				log.Infof("%s: Using named-group mode...", ct)
+				log.Debugf("%s: Using named-group mode...", ct)
 				c.groups = groups[1:]
 			} else {
 				msg := "Neither 'result_key' nor 'replacement' given with unnamed or mixed groups;"
@@ -86,7 +84,7 @@ func (c *converter) setup(ct converterType, log telegraf.Logger) error {
 				log.Warnf("%s: %s", ct, msg)
 			}
 		} else {
-			log.Infof("%s: Using explicit mode...", ct)
+			log.Debugf("%s: Using explicit mode...", ct)
 		}
 	case convertTagRename, convertFieldRename:
 		switch c.ResultKey {

@@ -11,16 +11,15 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/metric"
-	"github.com/influxdata/telegraf/plugins/inputs"
-	"github.com/influxdata/telegraf/plugins/inputs/file"
-	"github.com/influxdata/telegraf/plugins/parsers/influx"
 	"github.com/influxdata/telegraf/testutil"
+	test "github.com/influxdata/telegraf/testutil/plugin_input"
 )
 
 var dummyEntry = Entry{
@@ -30,7 +29,7 @@ var dummyEntry = Entry{
 	Assignment: "field",
 }
 
-func generateBinary(data []interface{}, order binary.ByteOrder) ([]byte, error) {
+func generateBinary(data []any, order binary.ByteOrder) ([]byte, error) {
 	var buf bytes.Buffer
 
 	for _, x := range data {
@@ -204,7 +203,7 @@ func TestFilterMatchInvalid(t *testing.T) {
 }
 
 func TestFilterNoMatch(t *testing.T) {
-	testdata := []interface{}{uint16(0x0102)}
+	testdata := []any{uint16(0x0102)}
 
 	t.Run("no match error", func(t *testing.T) {
 		parser := &Parser{
@@ -250,7 +249,7 @@ func TestFilterNoMatch(t *testing.T) {
 }
 
 func TestFilterNone(t *testing.T) {
-	testdata := []interface{}{
+	testdata := []any{
 		uint64(0x01020304050607),
 		uint64(0x08090A0B0C0D0E),
 		uint64(0x0F101213141516),
@@ -260,7 +259,7 @@ func TestFilterNone(t *testing.T) {
 
 	var tests = []struct {
 		name       string
-		data       []interface{}
+		data       []any
 		filter     *Filter
 		endianness string
 	}{
@@ -329,7 +328,7 @@ func TestFilterNone(t *testing.T) {
 }
 
 func TestFilterLength(t *testing.T) {
-	testdata := []interface{}{
+	testdata := []any{
 		uint64(0x01020304050607),
 		uint64(0x08090A0B0C0D0E),
 		uint64(0x0F101213141516),
@@ -339,7 +338,7 @@ func TestFilterLength(t *testing.T) {
 
 	var tests = []struct {
 		name     string
-		data     []interface{}
+		data     []any
 		filter   *Filter
 		expected bool
 	}{
@@ -571,13 +570,13 @@ func TestFilterContent(t *testing.T) {
 func TestParseLineInvalid(t *testing.T) {
 	var tests = []struct {
 		name     string
-		data     []interface{}
+		data     []any
 		configs  []Config
 		expected string
 	}{
 		{
 			name: "out-of-bounds",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T20:41:29+02:00", // time
 				uint16(0x0102),              // address
 				float64(42.123),             // value
@@ -605,7 +604,7 @@ func TestParseLineInvalid(t *testing.T) {
 		},
 		{
 			name: "multiple matches",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T20:41:29+02:00", // time
 				uint16(0x0102),              // address
 				float64(42.123),             // value
@@ -677,14 +676,14 @@ func TestParseLineInvalid(t *testing.T) {
 func TestParseLine(t *testing.T) {
 	var tests = []struct {
 		name     string
-		data     []interface{}
+		data     []any
 		filter   *Filter
 		entries  []Entry
 		expected telegraf.Metric
 	}{
 		{
 			name: "no match",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T20:41:29+02:00", // time
 				uint16(0x0102),              // address
 				float64(42.123),             // value
@@ -708,7 +707,7 @@ func TestParseLine(t *testing.T) {
 		},
 		{
 			name: "single match",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T20:41:29+02:00", // time
 				uint16(0x0102),              // address
 				float64(42.123),             // value
@@ -731,7 +730,7 @@ func TestParseLine(t *testing.T) {
 			expected: metric.New(
 				"binary",
 				map[string]string{},
-				map[string]interface{}{"value": float64(42.123)},
+				map[string]any{"value": float64(42.123)},
 				time.Unix(1658774489, 0),
 			),
 		},
@@ -769,13 +768,13 @@ func TestParseLine(t *testing.T) {
 func TestParseInvalid(t *testing.T) {
 	var tests = []struct {
 		name     string
-		data     []interface{}
+		data     []any
 		entries  []Entry
 		expected string
 	}{
 		{
 			name: "message too short",
-			data: []interface{}{uint64(0x0102030405060708)},
+			data: []any{uint64(0x0102030405060708)},
 			entries: []Entry{
 				{
 					Name:       "command",
@@ -801,7 +800,7 @@ func TestParseInvalid(t *testing.T) {
 		},
 		{
 			name: "non-terminated string",
-			data: []interface{}{
+			data: []any{
 				uint16(0xAB42),       // address
 				"testmetric",         // metric
 				float64(42.23432243), // value
@@ -826,7 +825,7 @@ func TestParseInvalid(t *testing.T) {
 		},
 		{
 			name: "invalid time",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T18:41:XYZ", // time
 				uint16(0x0102),         // address
 				float64(42.123),        // value
@@ -881,14 +880,14 @@ func TestParse(t *testing.T) {
 
 	var tests = []struct {
 		name       string
-		data       []interface{}
+		data       []any
 		entries    []Entry
 		ignoreTime bool
 		expected   []telegraf.Metric
 	}{
 		{
 			name: "fixed numbers",
-			data: []interface{}{
+			data: []any{
 				uint16(0xAB42),             // command
 				uint8(0x02),                // version
 				uint32(0x010000FF),         // address
@@ -1003,7 +1002,7 @@ func TestParse(t *testing.T) {
 						"ok_part3":     "true",
 						"ok_part4":     "true",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"x":         float32(3.1415),
 						"y":         float32(99.471),
 						"z":         float64(0.23432243),
@@ -1020,7 +1019,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			name: "fixed length string",
-			data: []interface{}{
+			data: []any{
 				uint16(0xAB42),      // address
 				"test",              // metric
 				float64(0.23432243), // value
@@ -1047,7 +1046,7 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "43842"},
-					map[string]interface{}{
+					map[string]any{
 						"app":   "test",
 						"value": float64(0.23432243),
 					},
@@ -1057,7 +1056,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			name: "null-terminated string",
-			data: []interface{}{
+			data: []any{
 				uint16(0xAB42),                     // address
 				append([]byte("testmetric"), 0x00), // metric
 				float64(42.23432243),               // value
@@ -1083,14 +1082,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"testmetric",
 					map[string]string{"address": "43842"},
-					map[string]interface{}{"value": float64(42.23432243)},
+					map[string]any{"value": float64(42.23432243)},
 					time.Unix(0, 0),
 				),
 			},
 		},
 		{
 			name: "char-terminated string",
-			data: []interface{}{
+			data: []any{
 				uint16(0xAB42),                           // address
 				append([]byte("testmetric"), 0x0A, 0x0B), // metric
 				float64(42.23432243),                     // value
@@ -1116,14 +1115,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"testmetric",
 					map[string]string{"address": "43842"},
-					map[string]interface{}{"value": float64(42.23432243)},
+					map[string]any{"value": float64(42.23432243)},
 					time.Unix(0, 0),
 				),
 			},
 		},
 		{
 			name: "time (unix/UTC)",
-			data: []interface{}{
+			data: []any{
 				uint64(1658774489), // time
 				uint16(0x0102),     // address
 				float64(42.123),    // value
@@ -1147,14 +1146,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "258"},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					time.Unix(1658774489, 0),
 				),
 			},
 		},
 		{
 			name: "time (unix/Berlin)",
-			data: []interface{}{
+			data: []any{
 				uint64(1658774489), // time
 				uint16(0x0102),     // address
 				float64(42.123),    // value
@@ -1179,14 +1178,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "258"},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					timeBerlin,
 				),
 			},
 		},
 		{
 			name: "time (unix_ms/UTC)",
-			data: []interface{}{
+			data: []any{
 				uint64(1658774489123), // time
 				uint16(0x0102),        // address
 				float64(42.123),       // value
@@ -1210,14 +1209,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "258"},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					time.Unix(0, 1658774489123*1_000_000),
 				),
 			},
 		},
 		{
 			name: "time (unix_ms/Berlin)",
-			data: []interface{}{
+			data: []any{
 				uint64(1658774489123), // time
 				uint16(0x0102),        // address
 				float64(42.123),       // value
@@ -1242,14 +1241,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "258"},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					timeBerlinMilli,
 				),
 			},
 		},
 		{
 			name: "time (RFC3339/UTC)",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T18:41:29Z", // time
 				uint16(0x0102),         // address
 				float64(42.123),        // value
@@ -1273,14 +1272,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "258"},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					time.Unix(1658774489, 0),
 				),
 			},
 		},
 		{
 			name: "time (RFC3339/Berlin)",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T20:41:29+02:00", // time
 				uint16(0x0102),              // address
 				float64(42.123),             // value
@@ -1305,14 +1304,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "258"},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					timeBerlin,
 				),
 			},
 		},
 		{
 			name: "time (RFC3339/Berlin->UTC)",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T20:41:29+02:00", // time
 				uint16(0x0102),              // address
 				float64(42.123),             // value
@@ -1337,14 +1336,14 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{"address": "258"},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					time.Unix(1658774489, 0),
 				),
 			},
 		},
 		{
 			name: "omit",
-			data: []interface{}{
+			data: []any{
 				"2022-07-25T20:41:29+02:00", // time
 				uint16(0x0102),              // address
 				float64(42.123),             // value
@@ -1368,7 +1367,7 @@ func TestParse(t *testing.T) {
 				metric.New(
 					"binary",
 					map[string]string{},
-					map[string]interface{}{"value": float64(42.123)},
+					map[string]any{"value": float64(42.123)},
 					time.Unix(1658774489, 0),
 				),
 			},
@@ -1410,66 +1409,51 @@ func TestCases(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, folders)
 
-	// Register the plugin
-	inputs.Add("file", func() telegraf.Input {
-		return &file.File{}
-	})
-
-	// Prepare the influx parser for expectations
-	parser := &influx.Parser{}
-	require.NoError(t, parser.Init())
-
 	for _, f := range folders {
 		testcasePath := filepath.Join("testcases", f.Name())
 		configFilename := filepath.Join(testcasePath, "telegraf.conf")
-		expectedFilename := filepath.Join(testcasePath, "expected.out")
-		expectedErrorFilename := filepath.Join(testcasePath, "expected.err")
 
 		t.Run(f.Name(), func(t *testing.T) {
-			// Read the expected output if any
-			var expected []telegraf.Metric
-			if _, err := os.Stat(expectedFilename); err == nil {
-				var err error
-				expected, err = testutil.ParseMetricsFromFile(expectedFilename, parser)
-				require.NoError(t, err)
-			}
-
-			// Read the expected errors if any
-			var expectedErrors []string
-			if _, err := os.Stat(expectedErrorFilename); err == nil {
-				var err error
-				expectedErrors, err = testutil.ParseLinesFromFile(expectedErrorFilename)
-				require.NoError(t, err)
-				require.NotEmpty(t, expectedErrors)
-			}
-
 			// Configure the plugin
 			cfg := config.NewConfig()
 			require.NoError(t, cfg.LoadConfig(configFilename))
 			require.NoError(t, err)
+			require.Len(t, cfg.Inputs, 1)
 
-			// Gather the metrics from the input file configure
+			// Tune the test-plugin
+			plugin := cfg.Inputs[0].Input.(*test.Plugin)
+			plugin.Path = testcasePath
+			require.NoError(t, plugin.Init())
+
+			// Gather the metrics and check for potential errors
 			var acc testutil.Accumulator
-			var actualErrors []string
-			for _, input := range cfg.Inputs {
-				require.NoError(t, input.Init())
-				if err := input.Gather(&acc); err != nil {
-					actualErrors = append(actualErrors, err.Error())
-				}
+			err := plugin.Gather(&acc)
+			switch len(plugin.ExpectedErrors) {
+			case 0:
+				require.NoError(t, err)
+			case 1:
+				require.ErrorContains(t, err, plugin.ExpectedErrors[0])
+			default:
+				require.Contains(t, plugin.ExpectedErrors, err.Error())
 			}
 
-			// Check for potential errors
-			require.ElementsMatch(t, actualErrors, expectedErrors)
+			// Determine checking options
+			options := []cmp.Option{
+				cmpopts.EquateApprox(0, 1e-6),
+			}
+			if plugin.ShouldIgnoreTimestamp {
+				options = append(options, testutil.IgnoreTime())
+			}
 
 			// Process expected metrics and compare with resulting metrics
 			actual := acc.GetTelegrafMetrics()
-			testutil.RequireMetricsEqual(t, expected, actual)
+			testutil.RequireMetricsEqual(t, plugin.Expected, actual, options...)
 		})
 	}
 }
 
 func TestHexEncoding(t *testing.T) {
-	testdata := []interface{}{
+	testdata := []any{
 		uint64(0x01020304050607),
 		uint64(0x08090A0B0C0D0E),
 		uint64(0x0F101213141516),
@@ -1478,8 +1462,8 @@ func TestHexEncoding(t *testing.T) {
 	}
 
 	parser := &Parser{
-		Endianness:  "be",
-		HexEncoding: true,
+		Endianness: "be",
+		Encoding:   "hex",
 		Configs: []Config{
 			{
 				Entries: []Entry{dummyEntry},
@@ -1559,7 +1543,7 @@ func TestBenchmarkData(t *testing.T) {
 				"tags_platform": "python",
 				"tags_sdkver":   "3.11.5",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 5.0,
 			},
 			time.Unix(0, 0),
@@ -1571,7 +1555,7 @@ func TestBenchmarkData(t *testing.T) {
 				"tags_platform": "python",
 				"tags_sdkver":   "3.11.4",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"value": 4.0,
 			},
 			time.Unix(0, 0),
@@ -1624,6 +1608,7 @@ func BenchmarkParsing(b *testing.B) {
 	require.NoError(b, plugin.Init())
 
 	for n := 0; n < b.N; n++ {
-		_, _ = plugin.Parse(benchmarkData[n%2])
+		//nolint:errcheck // Benchmarking so skip the error check to avoid the unnecessary operations
+		plugin.Parse(benchmarkData[n%2])
 	}
 }

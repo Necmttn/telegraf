@@ -7,8 +7,8 @@ package exec
 
 import (
 	"bytes"
-	"fmt"
-	"runtime"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,260 +44,576 @@ const malformedJSON = `
     "status": "green",
 `
 
-type CarriageReturnTest struct {
-	input  []byte
-	output []byte
-}
-
-var crTests = []CarriageReturnTest{
-	{[]byte{0x4c, 0x69, 0x6e, 0x65, 0x20, 0x31, 0x0d, 0x0a, 0x4c, 0x69,
-		0x6e, 0x65, 0x20, 0x32, 0x0d, 0x0a, 0x4c, 0x69, 0x6e, 0x65,
-		0x20, 0x33},
-		[]byte{0x4c, 0x69, 0x6e, 0x65, 0x20, 0x31, 0x0a, 0x4c, 0x69, 0x6e,
-			0x65, 0x20, 0x32, 0x0a, 0x4c, 0x69, 0x6e, 0x65, 0x20, 0x33}},
-	{[]byte{0x4c, 0x69, 0x6e, 0x65, 0x20, 0x31, 0x0a, 0x4c, 0x69, 0x6e,
-		0x65, 0x20, 0x32, 0x0a, 0x4c, 0x69, 0x6e, 0x65, 0x20, 0x33},
-		[]byte{0x4c, 0x69, 0x6e, 0x65, 0x20, 0x31, 0x0a, 0x4c, 0x69, 0x6e,
-			0x65, 0x20, 0x32, 0x0a, 0x4c, 0x69, 0x6e, 0x65, 0x20, 0x33}},
-	{[]byte{0x54, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x61, 0x6c,
-		0x6c, 0x20, 0x6f, 0x6e, 0x65, 0x20, 0x62, 0x69, 0x67, 0x20,
-		0x6c, 0x69, 0x6e, 0x65},
-		[]byte{0x54, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x61, 0x6c,
-			0x6c, 0x20, 0x6f, 0x6e, 0x65, 0x20, 0x62, 0x69, 0x67, 0x20,
-			0x6c, 0x69, 0x6e, 0x65}},
-}
-
-type runnerMock struct {
-	out    []byte
-	errout []byte
-	err    error
-}
-
-func newRunnerMock(out []byte, errout []byte, err error) Runner {
-	return &runnerMock{
-		out:    out,
-		errout: errout,
-		err:    err,
-	}
-}
-
-func (r runnerMock) Run(_ string, _ []string, _ time.Duration) ([]byte, []byte, error) {
-	return r.out, r.errout, r.err
-}
-
-func TestExec(t *testing.T) {
-	parser := &json.Parser{MetricName: "exec"}
-	require.NoError(t, parser.Init())
-	e := &Exec{
-		Log:      testutil.Logger{},
-		runner:   newRunnerMock([]byte(validJSON), nil, nil),
-		Commands: []string{"testcommand arg1"},
-		parser:   parser,
-	}
-
-	var acc testutil.Accumulator
-	err := acc.GatherError(e.Gather)
-	require.NoError(t, err)
-	require.Equal(t, 8, acc.NFields(), "non-numeric measurements should be ignored")
-
-	fields := map[string]interface{}{
-		"num_processes": float64(82),
-		"cpu_used":      float64(8234),
-		"cpu_free":      float64(32),
-		"percent":       float64(0.81),
-		"users_0":       float64(0),
-		"users_1":       float64(1),
-		"users_2":       float64(2),
-		"users_3":       float64(3),
-	}
-	acc.AssertContainsFields(t, "exec", fields)
-}
-
-func TestExecMalformed(t *testing.T) {
-	parser := &json.Parser{MetricName: "exec"}
-	require.NoError(t, parser.Init())
-	e := &Exec{
-		Log:      testutil.Logger{},
-		runner:   newRunnerMock([]byte(malformedJSON), nil, nil),
-		Commands: []string{"badcommand arg1"},
-		parser:   parser,
-	}
-
-	var acc testutil.Accumulator
-	require.Error(t, acc.GatherError(e.Gather))
-	require.Equal(t, 0, acc.NFields(), "No new points should have been added")
-}
-
-func TestCommandError(t *testing.T) {
-	parser := &json.Parser{MetricName: "exec"}
-	require.NoError(t, parser.Init())
-	e := &Exec{
-		Log:      testutil.Logger{},
-		runner:   newRunnerMock(nil, nil, fmt.Errorf("exit status code 1")),
-		Commands: []string{"badcommand"},
-		parser:   parser,
-	}
-
-	var acc testutil.Accumulator
-	require.Error(t, acc.GatherError(e.Gather))
-	require.Equal(t, 0, acc.NFields(), "No new points should have been added")
-}
-
-func TestExecCommandWithGlob(t *testing.T) {
-	parser := value.Parser{
-		MetricName: "metric",
-		DataType:   "string",
-	}
-	require.NoError(t, parser.Init())
-
-	e := NewExec()
-	e.Commands = []string{"/bin/ech* metric_value"}
-	e.SetParser(&parser)
-
-	var acc testutil.Accumulator
-	require.NoError(t, acc.GatherError(e.Gather))
-
-	fields := map[string]interface{}{
-		"value": "metric_value",
-	}
-	acc.AssertContainsFields(t, "metric", fields)
-}
-
-func TestExecCommandWithoutGlob(t *testing.T) {
-	parser := value.Parser{
-		MetricName: "metric",
-		DataType:   "string",
-	}
-	require.NoError(t, parser.Init())
-
-	e := NewExec()
-	e.Commands = []string{"/bin/echo metric_value"}
-	e.SetParser(&parser)
-
-	var acc testutil.Accumulator
-	require.NoError(t, acc.GatherError(e.Gather))
-
-	fields := map[string]interface{}{
-		"value": "metric_value",
-	}
-	acc.AssertContainsFields(t, "metric", fields)
-}
-
-func TestExecCommandWithoutGlobAndPath(t *testing.T) {
-	parser := value.Parser{
-		MetricName: "metric",
-		DataType:   "string",
-	}
-	require.NoError(t, parser.Init())
-	e := NewExec()
-	e.Commands = []string{"echo metric_value"}
-	e.SetParser(&parser)
-
-	var acc testutil.Accumulator
-	require.NoError(t, acc.GatherError(e.Gather))
-
-	fields := map[string]interface{}{
-		"value": "metric_value",
-	}
-	acc.AssertContainsFields(t, "metric", fields)
-}
-
-func TestExecCommandWithEnv(t *testing.T) {
-	parser := value.Parser{
-		MetricName: "metric",
-		DataType:   "string",
-	}
-	require.NoError(t, parser.Init())
-	e := NewExec()
-	e.Commands = []string{"/bin/sh -c 'echo ${METRIC_NAME}'"}
-	e.Environment = []string{"METRIC_NAME=metric_value"}
-	e.SetParser(&parser)
-
-	var acc testutil.Accumulator
-	require.NoError(t, acc.GatherError(e.Gather))
-
-	fields := map[string]interface{}{
-		"value": "metric_value",
-	}
-	acc.AssertContainsFields(t, "metric", fields)
-}
-
-func TestTruncate(t *testing.T) {
+func TestInitFail(t *testing.T) {
 	tests := []struct {
-		name string
-		bufF func() *bytes.Buffer
-		expF func() *bytes.Buffer
+		name     string
+		config   string
+		expected string
 	}{
 		{
-			name: "should not truncate",
-			bufF: func() *bytes.Buffer {
-				var b bytes.Buffer
-				b.WriteString("hello world")
-				return &b
-			},
-			expF: func() *bytes.Buffer {
-				var b bytes.Buffer
-				b.WriteString("hello world")
-				return &b
-			},
+			name: "no command",
+			config: `
+				[[inputs.exec]]
+				commands = []
+			`,
+			expected: "no command specified",
 		},
 		{
-			name: "should truncate up to the new line",
-			bufF: func() *bytes.Buffer {
-				var b bytes.Buffer
-				b.WriteString("hello world\nand all the people")
-				return &b
-			},
-			expF: func() *bytes.Buffer {
-				var b bytes.Buffer
-				b.WriteString("hello world...")
-				return &b
-			},
+			name: "empty command",
+			config: `
+				[[inputs.exec]]
+				commands = [[]]
+			`,
+			expected: "command cannot be empty",
 		},
 		{
-			name: "should truncate to the MaxStderrBytes",
-			bufF: func() *bytes.Buffer {
-				var b bytes.Buffer
-				for i := 0; i < 2*MaxStderrBytes; i++ {
-					b.WriteByte('b')
-				}
-				return &b
-			},
-			expF: func() *bytes.Buffer {
-				var b bytes.Buffer
-				for i := 0; i < MaxStderrBytes; i++ {
-					b.WriteByte('b')
-				}
-				b.WriteString("...")
-				return &b
-			},
+			name: "invalid type in command",
+			config: `
+				[[inputs.exec]]
+				commands = [[21, 42]]
+			`,
+			expected: "command [21 42] has invalid entry 21 of type int64",
 		},
 	}
 
-	c := CommandRunner{}
+	// Register the plugin
+	inputs.Add("exec", func() telegraf.Input {
+		return &Exec{
+			Timeout: config.Duration(5 * time.Second),
+			Log:     testutil.Logger{},
+		}
+	})
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := c.truncate(*tt.bufF())
-			require.Equal(t, tt.expF().Bytes(), res.Bytes())
+			// Setup the plugin
+			cfg := config.NewConfig()
+			require.NoError(t, cfg.LoadConfigData([]byte(tt.config), config.EmptySourcePath))
+			require.Len(t, cfg.Inputs, 1)
+			plugin := cfg.Inputs[0]
+			require.ErrorContains(t, plugin.Init(), tt.expected)
 		})
 	}
 }
 
-func TestRemoveCarriageReturns(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// Test that all carriage returns are removed
-		for _, test := range crTests {
-			b := bytes.NewBuffer(test.input)
-			out := removeWindowsCarriageReturns(*b)
-			require.True(t, bytes.Equal(test.output, out.Bytes()))
-		}
-	} else {
-		// Test that the buffer is returned unaltered
-		for _, test := range crTests {
-			b := bytes.NewBuffer(test.input)
-			out := removeWindowsCarriageReturns(*b)
-			require.True(t, bytes.Equal(test.input, out.Bytes()))
-		}
+func TestExec(t *testing.T) {
+	// Setup parser
+	parser := &json.Parser{MetricName: "exec"}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands: []any{[]string{"testcommand", "arg1"}},
+		Log:      testutil.Logger{},
+	}
+	plugin.SetParser(parser)
+	require.NoError(t, plugin.Init())
+	plugin.runner = &runnerMock{out: []byte(validJSON)}
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"exec",
+			map[string]string{},
+			map[string]any{
+				"num_processes": float64(82),
+				"cpu_used":      float64(8234),
+				"cpu_free":      float64(32),
+				"percent":       float64(0.81),
+				"users_0":       float64(0),
+				"users_1":       float64(1),
+				"users_2":       float64(2),
+				"users_3":       float64(3),
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestExecMalformed(t *testing.T) {
+	// Setup parser
+	parser := &json.Parser{MetricName: "exec"}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands: []any{[]string{"badcommand", "arg1"}},
+		Log:      testutil.Logger{},
+	}
+	plugin.SetParser(parser)
+	require.NoError(t, plugin.Init())
+	plugin.runner = &runnerMock{out: []byte(malformedJSON)}
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.ErrorContains(t, acc.GatherError(plugin.Gather), "unexpected end of JSON input")
+	require.Empty(t, acc.GetTelegrafMetrics())
+}
+
+func TestCommandError(t *testing.T) {
+	// Setup parser
+	parser := &json.Parser{MetricName: "exec"}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands: []any{[]string{"badcommand"}},
+		Log:      testutil.Logger{},
+	}
+	plugin.SetParser(parser)
+	require.NoError(t, plugin.Init())
+	plugin.runner = &runnerMock{err: errors.New("exit status code 1")}
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.ErrorContains(t, acc.GatherError(plugin.Gather), "exit status code 1 for command")
+	require.Equal(t, 0, acc.NFields(), "No new points should have been added")
+}
+
+func TestCommandIgnoreError(t *testing.T) {
+	// Setup parser
+	parser := &json.Parser{MetricName: "exec"}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands:    []any{[]string{"badcommand"}},
+		IgnoreError: true,
+		Log:         testutil.Logger{},
+	}
+	plugin.SetParser(parser)
+	require.NoError(t, plugin.Init())
+	plugin.runner = &runnerMock{
+		out:    []byte(validJSON),
+		errout: []byte("error"),
+		err:    errors.New("exit status code 1"),
+	}
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"exec",
+			map[string]string{},
+			map[string]any{
+				"num_processes": float64(82),
+				"cpu_used":      float64(8234),
+				"cpu_free":      float64(32),
+				"percent":       float64(0.81),
+				"users_0":       float64(0),
+				"users_1":       float64(1),
+				"users_2":       float64(2),
+				"users_3":       float64(3),
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestExecCommandWithGlob(t *testing.T) {
+	// Setup parser
+	parser := value.Parser{
+		MetricName: "metric",
+		DataType:   "string",
+	}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands: []any{[]string{"/bin/ech[o]", "metric_value"}},
+		Timeout:  config.Duration(5 * time.Second),
+		Log:      testutil.Logger{},
+	}
+	plugin.SetParser(&parser)
+	require.NoError(t, plugin.Init())
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"metric",
+			map[string]string{},
+			map[string]any{
+				"value": "metric_value",
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestExecCommandWithoutGlob(t *testing.T) {
+	// Setup parser
+	parser := value.Parser{
+		MetricName: "metric",
+		DataType:   "string",
+	}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands: []any{[]string{"/bin/echo", "metric_value"}},
+		Timeout:  config.Duration(5 * time.Second),
+		Log:      testutil.Logger{},
+	}
+	plugin.SetParser(&parser)
+	require.NoError(t, plugin.Init())
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"metric",
+			map[string]string{},
+			map[string]any{
+				"value": "metric_value",
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestExecCommandWithoutGlobAndPath(t *testing.T) {
+	// Setup parser
+	parser := value.Parser{
+		MetricName: "metric",
+		DataType:   "string",
+	}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands: []any{[]string{"echo", "metric_value"}},
+		Timeout:  config.Duration(5 * time.Second),
+		Log:      testutil.Logger{},
+	}
+	plugin.SetParser(&parser)
+	require.NoError(t, plugin.Init())
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"metric",
+			map[string]string{},
+			map[string]any{
+				"value": "metric_value",
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestExecCommandWithEnv(t *testing.T) {
+	// Setup parser
+	parser := value.Parser{
+		MetricName: "metric",
+		DataType:   "string",
+	}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands:    []any{[]string{"/bin/sh", "-c", "echo ${METRIC_NAME}"}},
+		Environment: []string{"METRIC_NAME=metric_value"},
+		Timeout:     config.Duration(5 * time.Second),
+		Log:         testutil.Logger{},
+	}
+	plugin.SetParser(&parser)
+	require.NoError(t, plugin.Init())
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"metric",
+			map[string]string{},
+			map[string]any{
+				"value": "metric_value",
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestDeprecatedSingleCommand(t *testing.T) {
+	// Setup parser
+	parser := value.Parser{
+		MetricName: "metric",
+		DataType:   "string",
+	}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Command: "/bin/sh -c 'echo metric_value'",
+		Timeout: config.Duration(5 * time.Second),
+		Log:     testutil.Logger{},
+	}
+	plugin.SetParser(&parser)
+	require.NoError(t, plugin.Init())
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"metric",
+			map[string]string{},
+			map[string]any{
+				"value": "metric_value",
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestDeprecatedStringBasedCommands(t *testing.T) {
+	// Setup parser
+	parser := value.Parser{
+		MetricName: "metric",
+		DataType:   "string",
+	}
+	require.NoError(t, parser.Init())
+
+	// Setup plugin
+	plugin := &Exec{
+		Commands: []any{"/bin/sh -c 'echo metric_value'"},
+		Timeout:  config.Duration(5 * time.Second),
+		Log:      testutil.Logger{},
+	}
+	plugin.SetParser(&parser)
+	require.NoError(t, plugin.Init())
+
+	// Gather the metrics and check the result
+	var acc testutil.Accumulator
+	require.NoError(t, acc.GatherError(plugin.Gather))
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"metric",
+			map[string]string{},
+			map[string]any{
+				"value": "metric_value",
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+}
+
+func TestStderrLogging(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected []testutil.Entry
+	}{
+		{
+			name:   "no level",
+			output: `an error message`,
+			expected: []testutil.Entry{
+				{
+					Level: testutil.LevelError,
+					Name:  "inputs.exec",
+					Text:  `an error message`,
+				},
+			},
+		},
+		{
+			name:   "error",
+			output: `E! an error message`,
+			expected: []testutil.Entry{
+				{
+					Level: testutil.LevelError,
+					Name:  "inputs.exec",
+					Text:  `an error message`,
+				},
+			},
+		},
+		{
+			name:   "warning",
+			output: `W! a warning message`,
+			expected: []testutil.Entry{
+				{
+					Level: testutil.LevelWarn,
+					Name:  "inputs.exec",
+					Text:  `a warning message`,
+				},
+			},
+		},
+		{
+			name:   "info",
+			output: `I! an info message`,
+			expected: []testutil.Entry{
+				{
+					Level: testutil.LevelInfo,
+					Name:  "inputs.exec",
+					Text:  `an info message`,
+				},
+			},
+		},
+		{
+			name:   "debug",
+			output: `D! a debug message`,
+			expected: []testutil.Entry{
+				{
+					Level: testutil.LevelDebug,
+					Name:  "inputs.exec",
+					Text:  `a debug message`,
+				},
+			},
+		},
+		{
+			name:   "trace",
+			output: `T! a trace message`,
+			expected: []testutil.Entry{
+				{
+					Level: testutil.LevelTrace,
+					Name:  "inputs.exec",
+					Text:  `a trace message`,
+				},
+			},
+		},
+
+		{
+			name: "multiline output",
+			output: `
+E! an error message
+D! some details
+D! some more details
+T! very detailed details
+`,
+			expected: []testutil.Entry{
+				{
+					Level: testutil.LevelError,
+					Name:  "inputs.exec",
+					Text:  `an error message`,
+				},
+				{
+					Level: testutil.LevelDebug,
+					Name:  "inputs.exec",
+					Text:  `some details`,
+				},
+				{
+					Level: testutil.LevelDebug,
+					Name:  "inputs.exec",
+					Text:  `some more details`,
+				},
+				{
+					Level: testutil.LevelTrace,
+					Name:  "inputs.exec",
+					Text:  `very detailed details`,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup parser
+			parser := &value.Parser{
+				MetricName: "exec",
+				DataType:   "integer",
+			}
+			require.NoError(t, parser.Init())
+
+			// Setup logger
+			logger := &testutil.CaptureLogger{Name: "inputs.exec"}
+
+			// Setup plugin
+			plugin := &Exec{
+				Commands:  []any{[]string{"echo", "42"}},
+				LogStdErr: true,
+				Log:       logger,
+			}
+			plugin.SetParser(parser)
+			require.NoError(t, plugin.Init())
+
+			// Mock the runner
+			plugin.runner = &runnerMock{
+				out:    []byte("42"),
+				errout: []byte(tt.output),
+			}
+
+			// Gather the metrics and check the result
+			var acc testutil.Accumulator
+			require.NoError(t, acc.GatherError(plugin.Gather))
+
+			expected := []telegraf.Metric{
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{"value": int64(42)},
+					time.Unix(0, 0),
+				),
+			}
+			testutil.RequireMetricsEqual(t, expected, acc.GetTelegrafMetrics(), testutil.IgnoreTime())
+
+			// Check the received log-messages
+			require.ElementsMatch(t, tt.expected, logger.Messages())
+		})
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name     string
+		bufF     func() *bytes.Buffer
+		expected string
+	}{
+		{
+			name: "should not truncate",
+			bufF: func() *bytes.Buffer {
+				return bytes.NewBufferString("hello world")
+			},
+			expected: "hello world",
+		},
+		{
+			name: "should truncate up to the new line",
+			bufF: func() *bytes.Buffer {
+				return bytes.NewBufferString("hello world\nand all the people")
+			},
+			expected: "hello world...",
+		},
+		{
+			name: "should truncate to the maxStderrBytes",
+			bufF: func() *bytes.Buffer {
+				var b bytes.Buffer
+				for range 2 * maxStderrBytes {
+					b.WriteByte('b')
+				}
+				return &b
+			},
+			expected: strings.Repeat("b", maxStderrBytes) + "...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := tt.bufF()
+			truncate(buf)
+			require.Equal(t, tt.expected, buf.String())
+		})
 	}
 }
 
@@ -311,9 +627,11 @@ func TestCSVBehavior(t *testing.T) {
 	require.NoError(t, parser.Init())
 
 	// Setup the plugin
-	plugin := NewExec()
-	plugin.Commands = []string{"echo \"a,b\n1,2\n3,4\""}
-	plugin.Log = testutil.Logger{}
+	plugin := &Exec{
+		Commands: []any{[]string{"echo", "a,b\n1,2\n3,4"}},
+		Timeout:  config.Duration(5 * time.Second),
+		Log:      testutil.Logger{},
+	}
 	plugin.SetParser(parser)
 	require.NoError(t, plugin.Init())
 
@@ -321,7 +639,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"exec",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(1),
 				"b": int64(2),
 			},
@@ -330,7 +648,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"exec",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(3),
 				"b": int64(4),
 			},
@@ -339,7 +657,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"exec",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(1),
 				"b": int64(2),
 			},
@@ -348,7 +666,7 @@ func TestCSVBehavior(t *testing.T) {
 		metric.New(
 			"exec",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"a": int64(3),
 				"b": int64(4),
 			},
@@ -377,78 +695,199 @@ func TestCSVBehavior(t *testing.T) {
 }
 
 func TestCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   string
+		expected []telegraf.Metric
+	}{
+		{
+			name: "deprecated single command",
+			config: `
+				[[inputs.exec]]
+				command = "echo \"a,b\n1,2\n3,4\""
+				data_format = "csv"
+				csv_header_row_count = 1
+			`,
+			expected: []telegraf.Metric{
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(1),
+						"b": int64(2),
+					},
+					time.Unix(0, 1),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(3),
+						"b": int64(4),
+					},
+					time.Unix(0, 2),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(1),
+						"b": int64(2),
+					},
+					time.Unix(0, 3),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(3),
+						"b": int64(4),
+					},
+					time.Unix(0, 4),
+				),
+			},
+		},
+		{
+			name: "deprecated commands string",
+			config: `
+				[[inputs.exec]]
+				commands = ["echo \"a,b\n1,2\n3,4\""]
+				data_format = "csv"
+				csv_header_row_count = 1
+			`,
+			expected: []telegraf.Metric{
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(1),
+						"b": int64(2),
+					},
+					time.Unix(0, 1),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(3),
+						"b": int64(4),
+					},
+					time.Unix(0, 2),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(1),
+						"b": int64(2),
+					},
+					time.Unix(0, 3),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(3),
+						"b": int64(4),
+					},
+					time.Unix(0, 4),
+				),
+			},
+		},
+		{
+			name: "native",
+			config: `
+				[[inputs.exec]]
+				commands = [["echo", "a,b\n1,2\n3,4"]]
+				data_format = "csv"
+				csv_header_row_count = 1
+			`,
+			expected: []telegraf.Metric{
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(1),
+						"b": int64(2),
+					},
+					time.Unix(0, 1),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(3),
+						"b": int64(4),
+					},
+					time.Unix(0, 2),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(1),
+						"b": int64(2),
+					},
+					time.Unix(0, 3),
+				),
+				metric.New(
+					"exec",
+					map[string]string{},
+					map[string]any{
+						"a": int64(3),
+						"b": int64(4),
+					},
+					time.Unix(0, 4),
+				),
+			},
+		},
+	}
+
 	// Register the plugin
 	inputs.Add("exec", func() telegraf.Input {
-		return NewExec()
+		return &Exec{
+			Timeout: config.Duration(5 * time.Second),
+			Log:     testutil.Logger{},
+		}
 	})
 
-	// Setup the plugin
-	cfg := config.NewConfig()
-	require.NoError(t, cfg.LoadConfigData([]byte(`
-	[[inputs.exec]]
-	commands = [ "echo \"a,b\n1,2\n3,4\"" ]
-	data_format = "csv"
-	csv_header_row_count = 1
-`)))
-	require.Len(t, cfg.Inputs, 1)
-	plugin := cfg.Inputs[0]
-	require.NoError(t, plugin.Init())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup the plugin
+			cfg := config.NewConfig()
+			require.NoError(t, cfg.LoadConfigData([]byte(tt.config), config.EmptySourcePath))
+			require.Len(t, cfg.Inputs, 1)
+			plugin := cfg.Inputs[0]
+			require.NoError(t, plugin.Init())
 
-	expected := []telegraf.Metric{
-		metric.New(
-			"exec",
-			map[string]string{},
-			map[string]interface{}{
-				"a": int64(1),
-				"b": int64(2),
-			},
-			time.Unix(0, 1),
-		),
-		metric.New(
-			"exec",
-			map[string]string{},
-			map[string]interface{}{
-				"a": int64(3),
-				"b": int64(4),
-			},
-			time.Unix(0, 2),
-		),
-		metric.New(
-			"exec",
-			map[string]string{},
-			map[string]interface{}{
-				"a": int64(1),
-				"b": int64(2),
-			},
-			time.Unix(0, 3),
-		),
-		metric.New(
-			"exec",
-			map[string]string{},
-			map[string]interface{}{
-				"a": int64(3),
-				"b": int64(4),
-			},
-			time.Unix(0, 4),
-		),
+			// Run gather twice to collect metrics
+			var acc testutil.Accumulator
+			require.NoError(t, plugin.Gather(&acc))
+			require.NoError(t, plugin.Gather(&acc))
+
+			require.Eventuallyf(t, func() bool {
+				acc.Lock()
+				defer acc.Unlock()
+				return acc.NMetrics() >= uint64(len(tt.expected))
+			}, time.Second, 100*time.Millisecond, "Expected %d metrics found %d", len(tt.expected), acc.NMetrics())
+
+			// Check the result
+			options := []cmp.Option{
+				testutil.SortMetrics(),
+				testutil.IgnoreTime(),
+			}
+			actual := acc.GetTelegrafMetrics()
+			testutil.RequireMetricsEqual(t, tt.expected, actual, options...)
+		})
 	}
+}
 
-	var acc testutil.Accumulator
-	// Run gather once
-	require.NoError(t, plugin.Gather(&acc))
-	// Run gather a second time
-	require.NoError(t, plugin.Gather(&acc))
-	require.Eventuallyf(t, func() bool {
-		acc.Lock()
-		defer acc.Unlock()
-		return acc.NMetrics() >= uint64(len(expected))
-	}, time.Second, 100*time.Millisecond, "Expected %d metrics found %d", len(expected), acc.NMetrics())
+type runnerMock struct {
+	out    []byte
+	errout []byte
+	err    error
+}
 
-	// Check the result
-	options := []cmp.Option{
-		testutil.SortMetrics(),
-		testutil.IgnoreTime(),
-	}
-	actual := acc.GetTelegrafMetrics()
-	testutil.RequireMetricsEqual(t, expected, actual, options...)
+func (r runnerMock) run([]string) (out, errout []byte, err error) {
+	return r.out, r.errout, r.err
 }

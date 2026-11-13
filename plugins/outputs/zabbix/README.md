@@ -1,27 +1,21 @@
 # Zabbix Output Plugin
 
-This plugin send metrics to [Zabbix](https://www.zabbix.com/) via
-[traps][traps].
+This plugin writes metrics to [Zabbix][zabbix] via [traps][traps]. It has been
+tested with versions v3.0, v4.0 and v6.0 but should work with newer versions
+of Zabbix as long as the protocol doesn't change.
 
-It has been tested with versions
-[3.0](https://www.zabbix.com/documentation/3.0/en/manual/appendix/items/trapper)
-,
-[4.0](https://www.zabbix.com/documentation/4.0/en/manual/appendix/items/trapper)
-and
-[6.0](https://www.zabbix.com/documentation/6.0/en/manual/appendix/items/trapper)
-.
+⭐ Telegraf v1.30.0
+🏷️ datastore
+💻 all
 
-[traps]: https://www.zabbix.com/documentation/current/en/manual/appendix/items/trapper
-
-It should work with newer versions as long as Zabbix does not change the
-protocol.
+[zabbix]: https://www.zabbix.com/
+[traps]: https://www.zabbix.com/documentation/current/en/manual/config/items/itemtypes/trapper
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -75,8 +69,8 @@ items configured in Zabbix are [Zabbix trapper][zabbixtrapper] or
 `agent_active = true` will send data as _agent data_, expecting active Zabbix
 agent items.
 
-[zabbixtrapper]: https://www.zabbix.com/documentation/6.4/en/manual/config/items/itemtypes/trapper?hl=Trapper
-[zabbixagentactive]: https://www.zabbix.com/documentation/6.4/en/manual/config/items/itemtypes/zabbix_agent
+[zabbixtrapper]: https://www.zabbix.com/documentation/current/en/manual/config/items/itemtypes/trapper?hl=Trapper
+[zabbixagentactive]: https://www.zabbix.com/documentation/current/en/manual/config/items/itemtypes/zabbix_agent
 
 ### key_prefix
 
@@ -180,7 +174,7 @@ measurement,host=hostname valueA=0,valueB=1
 
 It will generate this Zabbix metrics:
 
-```json
+```jsonl
 {"host": "hostname", "key": "telegraf.measurement.valueA", "value": "0"}
 {"host": "hostname", "key": "telegraf.measurement.valueB", "value": "1"}
 ```
@@ -194,7 +188,7 @@ measurement,host=hostname,tagA=keyA,tagB=keyB valueA=0,valueB=1
 
 Zabbix generated metrics:
 
-```json
+```jsonl
 {"host": "hostname", "key": "telegraf.measurement.valueA[keyA,keyB]", "value": "0"}
 {"host": "hostname", "key": "telegraf.measurement.valueB[keyA,keyB]", "value": "1"}
 ```
@@ -208,7 +202,7 @@ measurement,host=hostname,aaaTag=999,zzzTag=111 value=0
 
 Will generate this Zabbix metric:
 
-```json
+```jsonl
 {"host": "hostname", "key": "telegraf.measurement.value[999,111]", "value": "0"}
 ```
 
@@ -219,7 +213,7 @@ not know in advance what are we going to send, for example, the name of a
 container to send its cpu and memory consumption.
 
 For this case Zabbix provides [low-level discovery][lld] that allow to create
-new items dinamically based on the parameters sent by the trap.
+new items dynamically based on the parameters sent by the trap.
 
 As explained previously, this output plugin will format the Zabbix key using
 the tags seen in the Telegraf metric following the LLD format.
@@ -234,7 +228,7 @@ the low-level discovery (LLD) data is sent.
 Sending LLD to Zabbix is a heavy-weight process and is only done at the interval
 per the lld_send_interval setting.
 
-[lld]: https://www.zabbix.com/documentation/current/manual/discovery/low_level_discovery
+[lld]: https://www.zabbix.com/documentation/current/en/manual/discovery/low_level_discovery
 
 ### Design
 
@@ -356,7 +350,7 @@ taginclude = ["host", "container_name"]
 ```
 
 Allowing only the tags "host" and "container_name" to be used to generate the
-key (and loosing the information provided in the others tags).
+key (and losing the information provided in the others tags).
 
 ## Examples of metrics converted to traps
 

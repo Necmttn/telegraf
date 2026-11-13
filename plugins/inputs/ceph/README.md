@@ -1,68 +1,22 @@
 # Ceph Storage Input Plugin
 
-Collects performance metrics from the MON and OSD nodes in a Ceph storage
-cluster.
+This plugin collects performance metrics from MON and OSD nodes in a
+[Ceph storage cluster][ceph]. Support for Telegraf has been introduced in the
+v13.x Mimic release where data is sent to a socket (see
+[their documnetation][docs]).
 
-Ceph has introduced a Telegraf and Influx plugin in the 13.x Mimic release.
-The Telegraf module sends to a Telegraf configured with a socket_listener.
-[Learn more in their docs](https://docs.ceph.com/en/latest/mgr/telegraf/)
+⭐ Telegraf v0.13.1
+🏷️ system
+💻 all
 
-## Admin Socket Stats
-
-This gatherer works by scanning the configured SocketDir for OSD, MON, MDS
-and RGW socket files.  When it finds a MON socket, it runs
-
-```shell
-ceph --admin-daemon $file perfcounters_dump
-```
-
-For OSDs it runs
-
-```shell
-ceph --admin-daemon $file perf dump
-```
-
-The resulting JSON is parsed and grouped into collections, based on
-top-level key. Top-level keys are used as collection tags, and all
-sub-keys are flattened. For example:
-
-```json
- {
-   "paxos": {
-     "refresh": 9363435,
-     "refresh_latency": {
-       "avgcount": 9363435,
-       "sum": 5378.794002000
-     }
-   }
- }
-```
-
-Would be parsed into the following metrics, all of which would be tagged
-with `collection=paxos`:
-
-- refresh = 9363435
-- refresh_latency.avgcount: 9363435
-- refresh_latency.sum: 5378.794002000
-
-## Cluster Stats
-
-This gatherer works by invoking ceph commands against the cluster thus only
-requires the ceph client, valid ceph configuration and an access key to
-function (the ceph_config and ceph_user configuration variables work in
-conjunction to specify these prerequisites). It may be run on any server you
-wish which has access to the cluster.  The currently supported commands are:
-
-- ceph status
-- ceph df
-- ceph osd pool stats
+[ceph]: https://ceph.com
+[docs]: https://docs.ceph.com/en/latest/mgr/telegraf
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -113,6 +67,56 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
   ## and ceph_config to be specified
   gather_cluster_stats = false
 ```
+
+## Admin Socket Stats
+
+This gatherer works by scanning the configured SocketDir for OSD, MON, MDS
+and RGW socket files.  When it finds a MON socket, it runs
+
+```shell
+ceph --admin-daemon $file perfcounters_dump
+```
+
+For OSDs it runs
+
+```shell
+ceph --admin-daemon $file perf dump
+```
+
+The resulting JSON is parsed and grouped into collections, based on
+top-level key. Top-level keys are used as collection tags, and all
+sub-keys are flattened. For example:
+
+```json
+ {
+   "paxos": {
+     "refresh": 9363435,
+     "refresh_latency": {
+       "avgcount": 9363435,
+       "sum": 5378.794002000
+     }
+   }
+ }
+```
+
+Would be parsed into the following metrics, all of which would be tagged
+with `collection=paxos`:
+
+- refresh = 9363435
+- refresh_latency.avgcount: 9363435
+- refresh_latency.sum: 5378.794002000
+
+## Cluster Stats
+
+This gatherer works by invoking ceph commands against the cluster thus only
+requires the ceph client, valid ceph configuration and an access key to
+function (the ceph_config and ceph_user configuration variables work in
+conjunction to specify these prerequisites). It may be run on any server you
+wish which has access to the cluster.  The currently supported commands are:
+
+- ceph status
+- ceph df
+- ceph osd pool stats
 
 ## Metrics
 

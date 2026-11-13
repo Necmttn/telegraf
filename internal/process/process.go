@@ -23,6 +23,7 @@ type Process struct {
 	ReadStdoutFn func(io.Reader)
 	ReadStderrFn func(io.Reader)
 	RestartDelay time.Duration
+	StopOnError  bool
 	Log          telegraf.Logger
 
 	name       string
@@ -31,10 +32,12 @@ type Process struct {
 	pid        int32
 	cancel     context.CancelFunc
 	mainLoopWg sync.WaitGroup
+
+	sync.Mutex
 }
 
 // New creates a new process wrapper
-func New(command []string, envs []string) (*Process, error) {
+func New(command, envs []string) (*Process, error) {
 	if len(command) == 0 {
 		return nil, errors.New("no command")
 	}
@@ -42,7 +45,7 @@ func New(command []string, envs []string) (*Process, error) {
 	p := &Process{
 		RestartDelay: 5 * time.Second,
 		name:         command[0],
-		args:         []string{},
+		args:         make([]string, 0),
 		envs:         envs,
 	}
 
@@ -63,13 +66,11 @@ func (p *Process) Start() error {
 		return err
 	}
 
-	p.mainLoopWg.Add(1)
-	go func() {
+	p.mainLoopWg.Go(func() {
 		if err := p.cmdLoop(ctx); err != nil {
 			p.Log.Errorf("Process quit with message: %v", err)
 		}
-		p.mainLoopWg.Done()
-	}()
+	})
 
 	return nil
 }
@@ -81,10 +82,22 @@ func (p *Process) Stop() {
 		p.cancel()
 	}
 	// close stdin so the app can shut down gracefully.
-	if err := p.Stdin.Close(); err != nil {
+	if err := p.Stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 		p.Log.Errorf("Stdin closed with message: %v", err)
 	}
 	p.mainLoopWg.Wait()
+}
+
+func (p *Process) Pid() int {
+	pid := atomic.LoadInt32(&p.pid)
+	return int(pid)
+}
+
+func (p *Process) State() (state *os.ProcessState, running bool) {
+	p.Lock()
+	defer p.Unlock()
+
+	return p.Cmd.ProcessState, p.Cmd.ProcessState.ExitCode() == -1
 }
 
 func (p *Process) cmdStart() error {
@@ -100,34 +113,47 @@ func (p *Process) cmdStart() error {
 		return fmt.Errorf("error opening stdin pipe: %w", err)
 	}
 
-	p.Stdout, err = p.Cmd.StdoutPipe()
+	// Create the output pipes ourselves instead of using StdoutPipe and
+	// StderrPipe, as Wait closes those before all output is read.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("error opening stdout pipe: %w", err)
 	}
-
-	p.Stderr, err = p.Cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
+		stdout.Close()
+		stdoutWriter.Close()
 		return fmt.Errorf("error opening stderr pipe: %w", err)
 	}
+	p.Cmd.Stdout = stdoutWriter
+	p.Cmd.Stderr = stderrWriter
+	p.Stdout = stdout
+	p.Stderr = stderr
 
 	p.Log.Infof("Starting process: %s %s", p.name, p.args)
 
-	if err := p.Cmd.Start(); err != nil {
+	err = p.Cmd.Start()
+
+	// The process holds its own copy of the write ends now, close ours so the
+	// readers get EOF when the process exits
+	stdoutWriter.Close()
+	stderrWriter.Close()
+	if err != nil {
+		stdout.Close()
+		stderr.Close()
 		return fmt.Errorf("error starting process: %w", err)
 	}
 	atomic.StoreInt32(&p.pid, int32(p.Cmd.Process.Pid))
 	return nil
 }
 
-func (p *Process) Pid() int {
-	pid := atomic.LoadInt32(&p.pid)
-	return int(pid)
-}
-
 // cmdLoop watches an already running process, restarting it when appropriate.
 func (p *Process) cmdLoop(ctx context.Context) error {
 	for {
 		err := p.cmdWait(ctx)
+		if err != nil && p.StopOnError {
+			return err
+		}
 		if isQuitting(ctx) {
 			p.Log.Infof("Process %s shut down", p.Cmd.Path)
 			return nil
@@ -162,31 +188,45 @@ func (p *Process) cmdWait(ctx context.Context) error {
 	processCtx, processCancel := context.WithCancel(context.Background())
 	defer processCancel()
 
-	wg.Add(1)
-	go func() {
+	var readers sync.WaitGroup
+	readers.Go(func() {
 		p.ReadStdoutFn(p.Stdout)
-		wg.Done()
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
+	readers.Go(func() {
 		p.ReadStderrFn(p.Stderr)
-		wg.Done()
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		select {
 		case <-ctx.Done():
 			p.gracefulStop(processCtx, p.Cmd, 5*time.Second)
 		case <-processCtx.Done():
 		}
-		wg.Done()
-	}()
+	})
 
+	p.Lock()
 	err := p.Cmd.Wait()
+	p.Unlock()
 	processCancel()
 	wg.Wait()
+
+	// Let the readers consume everything the process wrote before exiting.
+	// Close the pipes after the grace period in case a child of the process
+	// still holds them open.
+	drained := make(chan struct{})
+	go func() {
+		readers.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+	}
+	p.Stdout.Close()
+	p.Stderr.Close()
+	<-drained
+
 	return err
 }
 
@@ -195,5 +235,6 @@ func isQuitting(ctx context.Context) bool {
 }
 
 func defaultReadPipe(r io.Reader) {
-	_, _ = io.Copy(io.Discard, r)
+	//nolint:errcheck // Discarding the data, no need to handle an error
+	io.Copy(io.Discard, r)
 }

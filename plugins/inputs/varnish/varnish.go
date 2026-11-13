@@ -20,6 +20,7 @@ import (
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/filter"
 	"github.com/influxdata/telegraf/internal"
+	"github.com/influxdata/telegraf/plugins/common/sudo"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
@@ -33,32 +34,31 @@ var (
 	defaultAdmBinary     = "/usr/bin/varnishadm"
 	defaultTimeout       = config.Duration(time.Second)
 
-	//vcl name and backend restriction regexp [A-Za-z][A-Za-z0-9_-]*
+	// vcl name and backend restriction regexp [A-Za-z][A-Za-z0-9_-]*
 	defaultRegexps = []*regexp.Regexp{
-		//dynamic backends
+		// dynamic backends
 		//nolint:lll // conditionally long line allowed to have a better understanding of following regexp
-		//VBE.VCL_xxxx_xxx_VOD_SHIELD_Vxxxxxxxxxxxxx_xxxxxxxxxxxxx.goto.000007c8.(xx.xx.xxx.xx).(http://xxxxxxx-xxxxx-xxxxx-xxxxxx-xx-xxxx-x-xxxx.xx-xx-xxxx-x.amazonaws.com:80).(ttl:5.000000).fail_eaddrnotavail
+		// VBE.VCL_xxxx_xxx_VOD_SHIELD_Vxxxxxxxxxxxxx_xxxxxxxxxxxxx.goto.000007c8.(xx.xx.xxx.xx).(http://xxxxxxx-xxxxx-xxxxx-xxxxxx-xx-xxxx-x-xxxx.xx-xx-xxxx-x.amazonaws.com:80).(ttl:5.000000).fail_eaddrnotavail
 		regexp.MustCompile(
 			`^VBE\.(?P<_vcl>[\w\-]*)\.goto\.[[:alnum:]]+\.\((?P<backend>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)\.\((?P<server>.*)\)\.\(ttl:\d*\.\d*.*\)`,
 		),
 
-		//VBE.reload_20210622_153544_23757.default.unhealthy
+		// VBE.reload_20210622_153544_23757.default.unhealthy
 		regexp.MustCompile(`^VBE\.(?P<_vcl>[\w\-]*)\.(?P<backend>[\w\-]*)\.([\w\-]*)`),
 
-		//KVSTORE values
+		// KVSTORE values
 		regexp.MustCompile(`^KVSTORE\.(?P<id>[\w\-]*)\.(?P<_vcl>[\w\-]*)\.([\w\-]*)`),
 
-		//XCNT.abc1234.XXX+_YYYY.cr.pass.val
+		// XCNT.abc1234.XXX+_YYYY.cr.pass.val
 		regexp.MustCompile(`^XCNT\.(?P<_vcl>[\w\-]*)(\.)*(?P<group>[\w\-.+]*)\.(?P<_field>[\w\-.+]*)\.val`),
 
-		//generic metric like MSE_STORE.store-1-1.g_aio_running_bytes_write
+		// generic metric like MSE_STORE.store-1-1.g_aio_running_bytes_write
 		regexp.MustCompile(`([\w\-]*)\.(?P<_field>[\w\-.]*)`),
 	}
 )
 
 type runner func(cmdName string, useSudo bool, args []string, timeout config.Duration) (*bytes.Buffer, error)
 
-// Varnish is used to store configuration values
 type Varnish struct {
 	Stats         []string
 	Binary        string
@@ -84,7 +84,7 @@ func varnishRunner(cmdName string, useSudo bool, cmdArgs []string, timeout confi
 	if useSudo {
 		cmdArgs = append([]string{cmdName}, cmdArgs...)
 		cmdArgs = append([]string{"-n"}, cmdArgs...)
-		cmd = exec.Command("sudo", cmdArgs...)
+		cmd = exec.Command(sudo.Binary(), cmdArgs...)
 	}
 
 	var out bytes.Buffer
@@ -146,7 +146,7 @@ func (s *Varnish) Gather(acc telegraf.Accumulator) error {
 	}
 
 	if s.MetricVersion == 2 {
-		//run varnishadm to get active vcl
+		// run varnishadm to get active vcl
 		var activeVcl = "boot"
 		if s.admRun != nil {
 			admOut, err := s.admRun(s.AdmBinary, s.UseSudo, admArgs, s.Timeout)
@@ -164,27 +164,27 @@ func (s *Varnish) Gather(acc telegraf.Accumulator) error {
 }
 
 // Prepare varnish cli tools arguments
-func (s *Varnish) prepareCmdArgs() ([]string, []string) {
-	//default varnishadm arguments
+func (s *Varnish) prepareCmdArgs() (adm, stats []string) {
+	// default varnishadm arguments
 	admArgs := []string{"vcl.list", "-j"}
 
-	//default varnish stats arguments
+	// default varnish stats arguments
 	statsArgs := []string{"-j"}
 	if s.MetricVersion == 1 {
 		statsArgs = []string{"-1"}
 	}
 
-	//add optional instance name
+	// add optional instance name
 	if s.InstanceName != "" {
 		statsArgs = append(statsArgs, []string{"-n", s.InstanceName}...)
 		admArgs = append([]string{"-n", s.InstanceName}, admArgs...)
 	}
 
-	//override custom arguments
+	// override custom arguments
 	if len(s.AdmBinaryArgs) > 0 {
 		admArgs = s.AdmBinaryArgs
 	}
-	//override custom arguments
+	// override custom arguments
 	if len(s.BinaryArgs) > 0 {
 		statsArgs = s.BinaryArgs
 	}
@@ -192,7 +192,7 @@ func (s *Varnish) prepareCmdArgs() ([]string, []string) {
 }
 
 func (s *Varnish) processMetricsV1(acc telegraf.Accumulator, out *bytes.Buffer) error {
-	sectionMap := make(map[string]map[string]interface{})
+	sectionMap := make(map[string]map[string]any)
 	scanner := bufio.NewScanner(out)
 	for scanner.Scan() {
 		cols := strings.Fields(scanner.Text())
@@ -216,7 +216,7 @@ func (s *Varnish) processMetricsV1(acc telegraf.Accumulator, out *bytes.Buffer) 
 
 		// Init the section if necessary
 		if _, ok := sectionMap[section]; !ok {
-			sectionMap[section] = make(map[string]interface{})
+			sectionMap[section] = make(map[string]any)
 		}
 
 		var err error
@@ -241,7 +241,7 @@ func (s *Varnish) processMetricsV1(acc telegraf.Accumulator, out *bytes.Buffer) 
 
 // metrics version 2 - parsing json
 func (s *Varnish) processMetricsV2(activeVcl string, acc telegraf.Accumulator, out *bytes.Buffer) error {
-	rootJSON := make(map[string]interface{})
+	rootJSON := make(map[string]any)
 	dec := json.NewDecoder(out)
 	dec.UseNumber()
 	if err := dec.Decode(&rootJSON); err != nil {
@@ -256,25 +256,25 @@ func (s *Varnish) processMetricsV2(activeVcl string, acc telegraf.Accumulator, o
 		if s.filter != nil && !s.filter.Match(fieldName) {
 			continue
 		}
-		data, ok := raw.(map[string]interface{})
+		data, ok := raw.(map[string]any)
 		if !ok {
 			acc.AddError(fmt.Errorf("unexpected data from json: %s: %#v", fieldName, raw))
 			continue
 		}
 
-		var metricValue interface{}
+		var metricValue any
 		var parseError error
 		flag := data["flag"]
 
 		if value, ok := data["value"]; ok {
 			if number, ok := value.(json.Number); ok {
-				//parse bitmap value
+				// parse bitmap value
 				if flag == "b" {
 					if metricValue, parseError = strconv.ParseUint(number.String(), 10, 64); parseError != nil {
 						parseError = fmt.Errorf("%q value uint64 error: %w", fieldName, parseError)
 					}
 				} else if metricValue, parseError = number.Int64(); parseError != nil {
-					//try parse float
+					// try parse float
 					if metricValue, parseError = number.Float64(); parseError != nil {
 						parseError = fmt.Errorf("stat %q value %q is not valid number: %w", fieldName, value, parseError)
 					}
@@ -291,11 +291,11 @@ func (s *Varnish) processMetricsV2(activeVcl string, acc telegraf.Accumulator, o
 
 		metric := s.parseMetricV2(fieldName)
 		if metric.vclName != "" && activeVcl != "" && metric.vclName != activeVcl {
-			//skip not active vcl
+			// skip not active vcl
 			continue
 		}
 
-		fields := make(map[string]interface{})
+		fields := make(map[string]any)
 		fields[metric.fieldName] = metricValue
 		switch flag {
 		case "c", "a":
@@ -318,7 +318,7 @@ func getActiveVCLJson(out io.Reader) (string, error) {
 	// workaround for non valid json in varnish 6.6.1 https://github.com/varnishcache/varnish-cache/issues/3687
 	output = strings.TrimPrefix(output, "200")
 
-	var jsonOut []interface{}
+	var jsonOut []any
 	err := json.Unmarshal([]byte(output), &jsonOut)
 	if err != nil {
 		return "", err
@@ -326,17 +326,17 @@ func getActiveVCLJson(out io.Reader) (string, error) {
 
 	for _, item := range jsonOut {
 		switch s := item.(type) {
-		case []interface{}:
+		case []any:
 			command := s[0]
 			if command != "vcl.list" {
 				return "", fmt.Errorf("unsupported varnishadm command %v", jsonOut[1])
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			if s["status"] == "active" {
 				return s["name"].(string), nil
 			}
 		default:
-			//ignore
+			// ignore
 			continue
 		}
 	}
@@ -344,10 +344,10 @@ func getActiveVCLJson(out io.Reader) (string, error) {
 }
 
 // Gets the "counters" section from varnishstat json (there is change in schema structure in varnish 6.5+)
-func getCountersJSON(rootJSON map[string]interface{}) map[string]interface{} {
-	//version 1 contains "counters" wrapper
+func getCountersJSON(rootJSON map[string]any) map[string]any {
+	// version 1 contains "counters" wrapper
 	if counters, exists := rootJSON["counters"]; exists {
-		return counters.(map[string]interface{})
+		return counters.(map[string]any)
 	}
 	return rootJSON
 }
@@ -364,7 +364,7 @@ func (s *Varnish) parseMetricV2(name string) (metric varnishMetric) {
 		"section": section,
 	}
 
-	//parse name using regexpsCompiled
+	// parse name using regexpsCompiled
 	for _, re := range s.regexpsCompiled {
 		submatch := re.FindStringSubmatch(name)
 		if len(submatch) < 1 {
@@ -408,7 +408,6 @@ func init() {
 			UseSudo:         false,
 			InstanceName:    "",
 			Timeout:         defaultTimeout,
-			Regexps:         []string{},
 		}
 	})
 }

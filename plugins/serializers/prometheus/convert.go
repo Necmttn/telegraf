@@ -10,13 +10,13 @@ import (
 	"github.com/influxdata/telegraf"
 )
 
-type Table struct {
-	First *unicode.RangeTable
-	Rest  *unicode.RangeTable
+type table struct {
+	first *unicode.RangeTable
+	rest  *unicode.RangeTable
 }
 
-var MetricNameTable = Table{
-	First: &unicode.RangeTable{
+var metricNameTable = table{
+	first: &unicode.RangeTable{
 		R16: []unicode.Range16{
 			{0x003A, 0x003A, 1}, // :
 			{0x0041, 0x005A, 1}, // A-Z
@@ -25,7 +25,7 @@ var MetricNameTable = Table{
 		},
 		LatinOffset: 4,
 	},
-	Rest: &unicode.RangeTable{
+	rest: &unicode.RangeTable{
 		R16: []unicode.Range16{
 			{0x0030, 0x003A, 1}, // 0-:
 			{0x0041, 0x005A, 1}, // A-Z
@@ -36,8 +36,8 @@ var MetricNameTable = Table{
 	},
 }
 
-var LabelNameTable = Table{
-	First: &unicode.RangeTable{
+var labelNameTable = table{
+	first: &unicode.RangeTable{
 		R16: []unicode.Range16{
 			{0x0041, 0x005A, 1}, // A-Z
 			{0x005F, 0x005F, 1}, // _
@@ -45,7 +45,7 @@ var LabelNameTable = Table{
 		},
 		LatinOffset: 3,
 	},
-	Rest: &unicode.RangeTable{
+	rest: &unicode.RangeTable{
 		R16: []unicode.Range16{
 			{0x0030, 0x0039, 1}, // 0-9
 			{0x0041, 0x005A, 1}, // A-Z
@@ -56,20 +56,19 @@ var LabelNameTable = Table{
 	},
 }
 
-// Sanitize checks if the name is valid according to the table.  If not, it
-// attempts to replaces invalid runes with an underscore to create a valid
-// name.
-func sanitize(name string, table Table) (string, bool) {
+// sanitize checks if the name is valid, according to the table.
+// If not, it attempts to replace invalid runes with an underscore to create a valid name.
+func sanitize(name string, table table) (string, bool) {
 	var b strings.Builder
 
 	for i, r := range name {
-		switch {
-		case i == 0:
-			if unicode.In(r, table.First) {
+		switch i {
+		case 0:
+			if unicode.In(r, table.first) {
 				b.WriteRune(r)
 			}
 		default:
-			if unicode.In(r, table.Rest) {
+			if unicode.In(r, table.rest) {
 				b.WriteRune(r)
 			} else {
 				b.WriteString("_")
@@ -84,24 +83,64 @@ func sanitize(name string, table Table) (string, bool) {
 	return name, true
 }
 
-// SanitizeMetricName checks if the name is a valid Prometheus metric name.  If
-// not, it attempts to replaces invalid runes with an underscore to create a
-// valid name.
+// SanitizeMetricName checks if the name is a valid Prometheus metric name.
+// If not, it attempts to replace invalid runes with an underscore to create a valid name.
 func SanitizeMetricName(name string) (string, bool) {
-	if model.IsValidMetricName(model.LabelValue(name)) {
+	if model.LegacyValidation.IsValidMetricName(name) {
 		return name, true
 	}
-	return sanitize(name, MetricNameTable)
+	return sanitize(name, metricNameTable)
 }
 
-// SanitizeLabelName checks if the name is a valid Prometheus label name.  If
-// not, it attempts to replaces invalid runes with an underscore to create a
-// valid name.
+// SanitizeLabelName checks if the name is a valid Prometheus label name.
+// If not, it attempts to replace invalid runes with an underscore to create a valid name.
 func SanitizeLabelName(name string) (string, bool) {
-	if model.LabelName(name).IsValid() {
+	if model.LegacyValidation.IsValidLabelName(name) {
 		return name, true
 	}
-	return sanitize(name, LabelNameTable)
+	return sanitize(name, labelNameTable)
+}
+
+// sanitizeMetricNameUTF8 checks if the name is a valid Prometheus metric name
+// using UTF-8 validation. If the name is invalid (including non-UTF-8 input),
+// it falls back to legacy ASCII sanitization.
+func sanitizeMetricNameUTF8(name string) (string, bool) {
+	if model.UTF8Validation.IsValidMetricName(name) {
+		return name, true
+	}
+	return sanitize(name, metricNameTable)
+}
+
+// sanitizeLabelNameUTF8 checks if the name is a valid Prometheus label name
+// using UTF-8 validation. If the name is invalid (including non-UTF-8 input),
+// it falls back to legacy ASCII sanitization.
+func sanitizeLabelNameUTF8(name string) (string, bool) {
+	if model.UTF8Validation.IsValidLabelName(name) {
+		return name, true
+	}
+	return sanitize(name, labelNameTable)
+}
+
+// SanitizeMetricNameByEncoding sanitizes metric names according to the
+// configured name sanitization mode.
+func SanitizeMetricNameByEncoding(name, mode string) (string, bool) {
+	switch mode {
+	case "utf8":
+		return sanitizeMetricNameUTF8(name)
+	default:
+		return SanitizeMetricName(name)
+	}
+}
+
+// SanitizeLabelNameByEncoding sanitizes label names according to the configured
+// name sanitization mode.
+func SanitizeLabelNameByEncoding(name, mode string) (string, bool) {
+	switch mode {
+	case "utf8":
+		return sanitizeLabelNameUTF8(name)
+	default:
+		return SanitizeLabelName(name)
+	}
 }
 
 // MetricName returns the Prometheus metric name.
@@ -124,7 +163,7 @@ func MetricName(measurement, fieldKey string, valueType telegraf.ValueType) stri
 	return measurement + "_" + fieldKey
 }
 
-func MetricType(valueType telegraf.ValueType) *dto.MetricType {
+func metricType(valueType telegraf.ValueType) *dto.MetricType {
 	switch valueType {
 	case telegraf.Counter:
 		return dto.MetricType_COUNTER.Enum()
@@ -142,7 +181,7 @@ func MetricType(valueType telegraf.ValueType) *dto.MetricType {
 }
 
 // SampleValue converts a field value into a value suitable for a simple sample value.
-func SampleValue(value interface{}) (float64, bool) {
+func SampleValue(value any) (float64, bool) {
 	switch v := value.(type) {
 	case float64:
 		return v, true
@@ -162,7 +201,7 @@ func SampleValue(value interface{}) (float64, bool) {
 
 // SampleCount converts a field value into a count suitable for a metric family
 // of the Histogram or Summary type.
-func SampleCount(value interface{}) (uint64, bool) {
+func SampleCount(value any) (uint64, bool) {
 	switch v := value.(type) {
 	case float64:
 		if v < 0 {
@@ -183,7 +222,7 @@ func SampleCount(value interface{}) (uint64, bool) {
 
 // SampleSum converts a field value into a sum suitable for a metric family
 // of the Histogram or Summary type.
-func SampleSum(value interface{}) (float64, bool) {
+func SampleSum(value any) (float64, bool) {
 	switch v := value.(type) {
 	case float64:
 		return v, true

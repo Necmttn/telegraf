@@ -15,7 +15,8 @@ var sampleConfig string
 // Defaults is a processor for ensuring certain fields always exist
 // on your Metrics with at least a default value.
 type Defaults struct {
-	DefaultFieldsSets map[string]interface{} `toml:"fields"`
+	DefaultFieldsSets map[string]any    `toml:"fields"`
+	DefaultTagsSets   map[string]string `toml:"tags"`
 }
 
 func (*Defaults) SampleConfig() string {
@@ -37,11 +38,19 @@ func (def *Defaults) Apply(inputMetrics ...telegraf.Metric) []telegraf.Metric {
 				metric.AddField(defField, defValue)
 			}
 		}
+		for defTag, defValue := range def.DefaultTagsSets {
+			if maybeCurrent, isSet := metric.GetTag(defTag); !isSet {
+				metric.AddTag(defTag, defValue)
+			} else if trimmed := strings.TrimSpace(maybeCurrent); trimmed == "" {
+				metric.RemoveTag(defTag)
+				metric.AddTag(defTag, defValue)
+			}
+		}
 	}
 	return inputMetrics
 }
 
-func maybeTrimmedString(v interface{}) (string, bool) {
+func maybeTrimmedString(v any) (string, bool) {
 	if value, ok := v.(string); ok {
 		return strings.TrimSpace(value), true
 	}

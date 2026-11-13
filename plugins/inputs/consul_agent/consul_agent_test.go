@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 func TestConsulStats(t *testing.T) {
@@ -21,10 +23,10 @@ func TestConsulStats(t *testing.T) {
 		{
 			name: "Metrics",
 			expected: []telegraf.Metric{
-				testutil.MustMetric(
+				metric.New(
 					"consul.rpc.request",
 					map[string]string{},
-					map[string]interface{}{
+					map[string]any{
 						"count":  int(5),
 						"max":    float64(1),
 						"mean":   float64(1),
@@ -36,24 +38,24 @@ func TestConsulStats(t *testing.T) {
 					time.Unix(1639218930, 0),
 					1,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"consul.consul.members.clients",
 					map[string]string{
 						"datacenter": "dc1",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"value": float64(0),
 					},
 					time.Unix(1639218930, 0),
 					2,
 				),
-				testutil.MustMetric(
+				metric.New(
 					"consul.api.http",
 					map[string]string{
 						"method": "GET",
 						"path":   "v1_agent_self",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"count":  int(1),
 						"max":    float64(4.14815616607666),
 						"mean":   float64(4.14815616607666),
@@ -74,9 +76,17 @@ func TestConsulStats(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.RequestURI == "/v1/agent/metrics" {
 					w.WriteHeader(http.StatusOK)
-					responseKeyMetrics, _ := os.ReadFile("testdata/response_key_metrics.json")
-					_, err := fmt.Fprintln(w, string(responseKeyMetrics))
-					require.NoError(t, err)
+					responseKeyMetrics, err := os.ReadFile("testdata/response_key_metrics.json")
+					if err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+						return
+					}
+					if _, err = fmt.Fprintln(w, string(responseKeyMetrics)); err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						t.Error(err)
+						return
+					}
 				}
 			}))
 			defer ts.Close()

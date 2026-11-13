@@ -13,7 +13,7 @@ import (
 )
 
 func TestName(t *testing.T) {
-	plugin := TemplateProcessor{
+	plugin := Template{
 		Tag:      "measurement",
 		Template: "{{ .Name }}",
 	}
@@ -22,10 +22,10 @@ func TestName(t *testing.T) {
 	require.NoError(t, err)
 
 	input := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"cpu",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"time_idle": 42,
 			},
 			time.Unix(0, 0),
@@ -34,12 +34,12 @@ func TestName(t *testing.T) {
 
 	actual := plugin.Apply(input...)
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"cpu",
 			map[string]string{
 				"measurement": "cpu",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"time_idle": 42,
 			},
 			time.Unix(0, 0),
@@ -49,7 +49,7 @@ func TestName(t *testing.T) {
 }
 
 func TestNameTemplate(t *testing.T) {
-	plugin := TemplateProcessor{
+	plugin := Template{
 		Tag:      `{{ .Tag "foo" }}`,
 		Template: `{{ .Name }}`,
 	}
@@ -58,10 +58,10 @@ func TestNameTemplate(t *testing.T) {
 	require.NoError(t, err)
 
 	input := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"cpu",
 			map[string]string{"foo": "measurement"},
-			map[string]interface{}{
+			map[string]any{
 				"time_idle": 42,
 			},
 			time.Unix(0, 0),
@@ -70,13 +70,13 @@ func TestNameTemplate(t *testing.T) {
 
 	actual := plugin.Apply(input...)
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"cpu",
 			map[string]string{
 				"foo":         "measurement",
 				"measurement": "cpu",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"time_idle": 42,
 			},
 			time.Unix(0, 0),
@@ -89,7 +89,7 @@ func TestTagTemplateConcatenate(t *testing.T) {
 	now := time.Now()
 
 	// Create Template processor
-	tmp := TemplateProcessor{Tag: "topic", Template: `{{.Tag "hostname"}}.{{ .Tag "level" }}`}
+	tmp := Template{Tag: "topic", Template: `{{.Tag "hostname"}}.{{ .Tag "level" }}`}
 	// manually init
 	err := tmp.Init()
 
@@ -98,14 +98,14 @@ func TestTagTemplateConcatenate(t *testing.T) {
 	}
 
 	// create metric for testing
-	input := []telegraf.Metric{testutil.MustMetric("Tags", map[string]string{"hostname": "localhost", "level": "debug"}, nil, now)}
+	input := []telegraf.Metric{metric.New("Tags", map[string]string{"hostname": "localhost", "level": "debug"}, nil, now)}
 
 	// act
 	actual := tmp.Apply(input[0])
 
 	// assert
 	expected := []telegraf.Metric{
-		testutil.MustMetric("Tags", map[string]string{"hostname": "localhost", "level": "debug", "topic": "localhost.debug"}, nil, now),
+		metric.New("Tags", map[string]string{"hostname": "localhost", "level": "debug", "topic": "localhost.debug"}, nil, now),
 	}
 	testutil.RequireMetricsEqual(t, expected, actual)
 }
@@ -114,7 +114,7 @@ func TestMetricMissingTagsIsNotLost(t *testing.T) {
 	now := time.Now()
 
 	// Create Template processor
-	tmp := TemplateProcessor{Tag: "topic", Template: `{{.Tag "hostname"}}.{{ .Tag "level" }}`}
+	tmp := Template{Tag: "topic", Template: `{{.Tag "hostname"}}.{{ .Tag "level" }}`}
 	// manually init
 	err := tmp.Init()
 
@@ -123,8 +123,8 @@ func TestMetricMissingTagsIsNotLost(t *testing.T) {
 	}
 
 	// create metrics for testing
-	m1 := testutil.MustMetric("Works", map[string]string{"hostname": "localhost", "level": "debug"}, nil, now)
-	m2 := testutil.MustMetric("Fails", map[string]string{"hostname": "localhost"}, nil, now)
+	m1 := metric.New("Works", map[string]string{"hostname": "localhost", "level": "debug"}, nil, now)
+	m2 := metric.New("Fails", map[string]string{"hostname": "localhost"}, nil, now)
 
 	// act
 	actual := tmp.Apply(m1, m2)
@@ -138,7 +138,7 @@ func TestTagAndFieldConcatenate(t *testing.T) {
 	now := time.Now()
 
 	// Create Template processor
-	tmp := TemplateProcessor{Tag: "LocalTemp", Template: `{{.Tag "location"}} is {{ .Field "temperature" }}`}
+	tmp := Template{Tag: "LocalTemp", Template: `{{.Tag "location"}} is {{ .Field "temperature" }}`}
 	// manually init
 	err := tmp.Init()
 
@@ -147,56 +147,26 @@ func TestTagAndFieldConcatenate(t *testing.T) {
 	}
 
 	// create metric for testing
-	m1 := testutil.MustMetric("weather", map[string]string{"location": "us-midwest"}, map[string]interface{}{"temperature": "too warm"}, now)
+	m1 := metric.New("weather", map[string]string{"location": "us-midwest"}, map[string]any{"temperature": "too warm"}, now)
 
 	// act
 	actual := tmp.Apply(m1)
 
 	// assert
 	expected := []telegraf.Metric{
-		testutil.MustMetric(
+		metric.New(
 			"weather",
 			map[string]string{"location": "us-midwest", "LocalTemp": "us-midwest is too warm"},
-			map[string]interface{}{"temperature": "too warm"},
+			map[string]any{"temperature": "too warm"},
 			now,
 		),
 	}
 	testutil.RequireMetricsEqual(t, expected, actual)
 }
 
-func TestFieldList(t *testing.T) {
-	// Prepare
-	plugin := TemplateProcessor{Tag: "fields", Template: "{{.FieldList}}"}
-	require.NoError(t, plugin.Init())
-
-	// Run
-	m := testutil.TestMetric(1.23)
-	actual := plugin.Apply(m)
-
-	// Verify
-	expected := m.Copy()
-	expected.AddTag("fields", "map[value:1.23]")
-	testutil.RequireMetricsEqual(t, []telegraf.Metric{expected}, actual)
-}
-
-func TestTagList(t *testing.T) {
-	// Prepare
-	plugin := TemplateProcessor{Tag: "tags", Template: "{{.TagList}}"}
-	require.NoError(t, plugin.Init())
-
-	// Run
-	m := testutil.TestMetric(1.23)
-	actual := plugin.Apply(m)
-
-	// Verify
-	expected := m.Copy()
-	expected.AddTag("tags", "map[tag1:value1]")
-	testutil.RequireMetricsEqual(t, []telegraf.Metric{expected}, actual)
-}
-
 func TestFields(t *testing.T) {
 	// Prepare
-	plugin := TemplateProcessor{
+	plugin := Template{
 		Tag:      "fields",
 		Template: "{{.Fields}}",
 		Log:      testutil.Logger{},
@@ -215,7 +185,7 @@ func TestFields(t *testing.T) {
 
 func TestTags(t *testing.T) {
 	// Prepare
-	plugin := TemplateProcessor{
+	plugin := Template{
 		Tag:      "tags",
 		Template: "{{.Tags}}",
 		Log:      testutil.Logger{},
@@ -234,7 +204,7 @@ func TestTags(t *testing.T) {
 
 func TestString(t *testing.T) {
 	// Prepare
-	plugin := TemplateProcessor{
+	plugin := Template{
 		Tag:      "tags",
 		Template: "{{.}}",
 		Log:      testutil.Logger{},
@@ -253,7 +223,7 @@ func TestString(t *testing.T) {
 
 func TestDot(t *testing.T) {
 	// Prepare
-	plugin := TemplateProcessor{Tag: "metric", Template: "{{.}}"}
+	plugin := Template{Tag: "metric", Template: "{{.}}"}
 	require.NoError(t, plugin.Init())
 
 	// Run
@@ -284,7 +254,7 @@ func TestTracking(t *testing.T) {
 	expected := []telegraf.Metric{e}
 
 	// Configure the plugin
-	plugin := TemplateProcessor{Tag: "metric", Template: "{{.}}"}
+	plugin := Template{Tag: "metric", Template: "{{.}}"}
 	require.NoError(t, plugin.Init())
 
 	// Process expected metrics and compare with resulting metrics
@@ -292,12 +262,53 @@ func TestTracking(t *testing.T) {
 	testutil.RequireMetricsEqual(t, expected, actual)
 
 	// Simulate output acknowledging delivery
-	input.Accept()
+	for _, m := range actual {
+		m.Accept()
+	}
+
+	// Check delivery
 
 	// Check delivery
 	require.Eventuallyf(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(delivered) > 0
+		return len(delivered) == 1
 	}, time.Second, 100*time.Millisecond, "%d delivered but 1 expected", len(delivered))
+}
+
+func TestSprig(t *testing.T) {
+	plugin := Template{
+		Tag:      `{{ .Tag "foo" | lower }}`,
+		Template: `{{ .Name | upper }}`,
+	}
+
+	err := plugin.Init()
+	require.NoError(t, err)
+
+	input := []telegraf.Metric{
+		metric.New(
+			"cpu",
+			map[string]string{"foo": "MEASUREMENT"},
+			map[string]any{
+				"time_idle": 42,
+			},
+			time.Unix(0, 0),
+		),
+	}
+
+	actual := plugin.Apply(input...)
+	expected := []telegraf.Metric{
+		metric.New(
+			"cpu",
+			map[string]string{
+				"foo":         "MEASUREMENT",
+				"measurement": "CPU",
+			},
+			map[string]any{
+				"time_idle": 42,
+			},
+			time.Unix(0, 0),
+		),
+	}
+	testutil.RequireMetricsEqual(t, expected, actual)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/jeremywohl/flatten/v2"
@@ -39,7 +40,9 @@ type Parser struct {
 	UnionMode        string            `toml:"avro_union_mode"`
 	DefaultTags      map[string]string `toml:"tags"`
 	Log              telegraf.Logger   `toml:"-"`
-	registryObj      *schemaRegistry
+
+	registryObj *schemaRegistry
+	timeFunc    func() time.Time
 }
 
 func (p *Parser) Init() error {
@@ -51,6 +54,7 @@ func (p *Parser) Init() error {
 	default:
 		return fmt.Errorf("unknown 'avro_format' %q", p.Format)
 	}
+
 	switch p.UnionMode {
 	case "":
 		p.UnionMode = "flatten"
@@ -63,6 +67,7 @@ func (p *Parser) Init() error {
 	if (p.Schema == "" && p.SchemaRegistry == "") || (p.Schema != "" && p.SchemaRegistry != "") {
 		return errors.New("exactly one of 'schema_registry' or 'schema' must be specified")
 	}
+
 	switch p.TimestampFormat {
 	case "":
 		p.TimestampFormat = "unix"
@@ -79,7 +84,15 @@ func (p *Parser) Init() error {
 		p.registryObj = registry
 	}
 
+	if p.timeFunc == nil {
+		p.timeFunc = time.Now
+	}
+
 	return nil
+}
+
+func (p *Parser) SetTimeFunc(fn func() time.Time) {
+	p.timeFunc = fn
 }
 
 func (p *Parser) Parse(buf []byte) ([]telegraf.Metric, error) {
@@ -119,7 +132,7 @@ func (p *Parser) Parse(buf []byte) ([]telegraf.Metric, error) {
 		}
 	}
 
-	var native interface{}
+	var native any
 	switch p.Format {
 	case "binary":
 		native, _, err = codec.NativeFromBinary(message)
@@ -131,17 +144,35 @@ func (p *Parser) Parse(buf []byte) ([]telegraf.Metric, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Cast to string-to-interface
-	codecSchema, ok := native.(map[string]interface{})
-	if !ok {
+
+	// Handle single records and arrays at root level
+	switch v := native.(type) {
+	case map[string]any:
+		m, err := p.createMetric(v, schema)
+		if err != nil {
+			return nil, err
+		}
+		return []telegraf.Metric{m}, nil
+	case []any:
+		metrics := make([]telegraf.Metric, 0, len(v))
+		for idx, item := range v {
+			record, ok := item.(map[string]any)
+			if !ok {
+				p.Log.Warnf("Skipping non-record array element at index %d (type %T)", idx, item)
+				continue
+			}
+			m, err := p.createMetric(record, schema)
+			if err != nil {
+				p.Log.Warnf("Skipping array element at index %d due to error during metric creation: %v", idx, err)
+				continue
+			}
+			metrics = append(metrics, m)
+		}
+		return metrics, nil
+
+	default:
 		return nil, fmt.Errorf("native is of unsupported type %T", native)
 	}
-	m, err := p.createMetric(codecSchema, schema)
-	if err != nil {
-		return nil, err
-	}
-
-	return []telegraf.Metric{m}, nil
 }
 
 func (p *Parser) ParseLine(line string) (telegraf.Metric, error) {
@@ -161,10 +192,10 @@ func (p *Parser) SetDefaultTags(tags map[string]string) {
 	p.DefaultTags = tags
 }
 
-func (p *Parser) flattenField(fldName string, fldVal map[string]interface{}) map[string]interface{} {
+func (p *Parser) flattenField(fldName string, fldVal map[string]any) map[string]any {
 	// Helper function for the "nullable" and "any" p.UnionModes
 	// fldVal is a one-item map of string-to-something
-	ret := make(map[string]interface{})
+	ret := make(map[string]any)
 	if p.UnionMode == "nullable" {
 		_, ok := fldVal["null"]
 		if ok {
@@ -180,25 +211,64 @@ func (p *Parser) flattenField(fldName string, fldVal map[string]interface{}) map
 	return ret
 }
 
-func (p *Parser) createMetric(data map[string]interface{}, schema string) (telegraf.Metric, error) {
+func (p *Parser) flattenItem(fld string, fldVal any) (map[string]any, error) {
+	sep := flatten.SeparatorStyle{
+		Before: "",
+		Middle: p.FieldSeparator,
+		After:  "",
+	}
+	candidate := make(map[string]any)
+	candidate[fld] = fldVal
+
+	var flat map[string]any
+	var err error
+	// Exactly how we flatten is decided by p.UnionMode
+	if p.UnionMode == "flatten" {
+		flat, err = flatten.Flatten(candidate, "", sep)
+		if err != nil {
+			return nil, fmt.Errorf("flatten candidate %q failed: %w", candidate, err)
+		}
+	} else {
+		// "nullable" or "any"
+		typedVal, ok := candidate[fld].(map[string]any)
+		if !ok {
+			// the "key" is not a string, so ...
+			// most likely an array?  Do the default thing
+			// and flatten the candidate.
+			flat, err = flatten.Flatten(candidate, "", sep)
+			if err != nil {
+				return nil, fmt.Errorf("flatten candidate %q failed: %w", candidate, err)
+			}
+		} else {
+			flat = p.flattenField(fld, typedVal)
+		}
+	}
+	return flat, nil
+}
+
+func (p *Parser) createMetric(data map[string]any, schema string) (telegraf.Metric, error) {
 	// Tags differ from fields, in that tags are inherently strings.
 	// fields can be of any type.
-	fields := make(map[string]interface{})
-	tags := make(map[string]string)
+	fields := make(map[string]any)
+	tags := make(map[string]string, len(p.DefaultTags)+len(p.Tags))
 
 	// Set default tag values
-	for k, v := range p.DefaultTags {
-		tags[k] = v
-	}
+	maps.Copy(tags, p.DefaultTags)
 	// Avro doesn't have a Tag/Field distinction, so we have to tell
 	// Telegraf which items are our tags.
 	for _, tag := range p.Tags {
-		sTag, err := internal.ToString(data[tag])
-		if err != nil {
-			p.Log.Warnf("Could not convert %v to string for tag %q: %v", data[tag], tag, err)
-			continue
+		flat, flattenErr := p.flattenItem(tag, data[tag])
+		if flattenErr != nil {
+			return nil, fmt.Errorf("flatten tag %q failed: %w", tag, flattenErr)
 		}
-		tags[tag] = sTag
+		for k, v := range flat {
+			sTag, stringErr := internal.ToString(v)
+			if stringErr != nil {
+				p.Log.Warnf("Could not convert %v to string for tag %q: %v", data[tag], tag, stringErr)
+				continue
+			}
+			tags[k] = sTag
+		}
 	}
 	var fieldList []string
 	if len(p.Fields) != 0 {
@@ -215,47 +285,16 @@ func (p *Parser) createMetric(data map[string]interface{}, schema string) (teleg
 	}
 	// We need to flatten out our fields.  The default (the separator
 	// string is empty) is equivalent to what streamreactor does.
-	sep := flatten.SeparatorStyle{
-		Before: "",
-		Middle: p.FieldSeparator,
-		After:  "",
-	}
 	for _, fld := range fieldList {
-		candidate := make(map[string]interface{})
-		candidate[fld] = data[fld] // 1-item map
-		var flat map[string]interface{}
-		var err error
-		// Exactly how we flatten is decided by p.UnionMode
-		if p.UnionMode == "flatten" {
-			flat, err = flatten.Flatten(candidate, "", sep)
-			if err != nil {
-				return nil, fmt.Errorf("flatten candidate %q failed: %w", candidate, err)
-			}
-		} else {
-			// "nullable" or "any"
-			typedVal, ok := candidate[fld].(map[string]interface{})
-			if !ok {
-				// the "key" is not a string, so ...
-				// most likely an array?  Do the default thing
-				// and flatten the candidate.
-				flat, err = flatten.Flatten(candidate, "", sep)
-				if err != nil {
-					return nil, fmt.Errorf("flatten candidate %q failed: %w", candidate, err)
-				}
-			} else {
-				flat = p.flattenField(fld, typedVal)
-			}
-		}
+		flat, err := p.flattenItem(fld, data[fld])
 		if err != nil {
 			return nil, fmt.Errorf("flatten field %q failed: %w", fld, err)
 		}
-		for k, v := range flat {
-			fields[k] = v
-		}
+		maps.Copy(fields, flat)
 	}
-	var schemaObj map[string]interface{}
+	var schemaObj map[string]any
 	if err := json.Unmarshal([]byte(schema), &schemaObj); err != nil {
-		return nil, fmt.Errorf("unmarshaling schema failed: %w", err)
+		return nil, fmt.Errorf("unmarshalling schema failed: %w", err)
 	}
 	if len(fields) == 0 {
 		// A telegraf metric needs at least one field.
@@ -283,15 +322,24 @@ func (p *Parser) createMetric(data map[string]interface{}, schema string) (teleg
 	}
 	separator := "."
 	if name == "" {
+		// If the root of the schema is an array and it doesn't have a non-standard
+		// name attribute, take the name from the record describing its elements.
+		nameObj := schemaObj
+		if _, hasName := schemaObj["name"]; !hasName && schemaObj["type"] == "array" {
+			if items, ok := schemaObj["items"].(map[string]any); ok {
+				nameObj = items
+			}
+		}
+
 		// Try using the namespace defined in the schema. In case there
 		// is none, just use the schema's name definition.
-		nsStr, ok := schemaObj["namespace"].(string)
+		nsStr, ok := nameObj["namespace"].(string)
 		// namespace is optional
 		if !ok {
 			separator = ""
 		}
 
-		nStr, ok := schemaObj["name"].(string)
+		nStr, ok := nameObj["name"].(string)
 		if !ok {
 			return nil, fmt.Errorf("could not determine name from schema %s", schema)
 		}
@@ -315,8 +363,9 @@ func (p *Parser) createMetric(data map[string]interface{}, schema string) (teleg
 			return nil, fmt.Errorf("could not parse '%s' to '%s'", rawTime, p.TimestampFormat)
 		}
 	} else {
-		timestamp = time.Now()
+		timestamp = p.timeFunc()
 	}
+
 	return metric.New(name, tags, fields, timestamp), nil
 }
 

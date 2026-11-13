@@ -1,6 +1,7 @@
 package rename
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -8,14 +9,15 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/testutil"
 )
 
-func newMetric(name string, tags map[string]string, fields map[string]interface{}) telegraf.Metric {
+func newMetric(name string, tags map[string]string, fields map[string]any) telegraf.Metric {
 	if tags == nil {
 		tags = map[string]string{}
 	}
 	if fields == nil {
-		fields = map[string]interface{}{}
+		fields = map[string]any{}
 	}
 	m := metric.New(name, tags, fields, time.Now())
 	return m
@@ -23,7 +25,7 @@ func newMetric(name string, tags map[string]string, fields map[string]interface{
 
 func TestMeasurementRename(t *testing.T) {
 	r := Rename{
-		Replaces: []Replace{
+		Replaces: []replace{
 			{Measurement: "foo", Dest: "bar"},
 			{Measurement: "baz", Dest: "quux"},
 		},
@@ -39,7 +41,7 @@ func TestMeasurementRename(t *testing.T) {
 
 func TestTagRename(t *testing.T) {
 	r := Rename{
-		Replaces: []Replace{
+		Replaces: []replace{
 			{Tag: "hostname", Dest: "host"},
 		},
 	}
@@ -51,12 +53,77 @@ func TestTagRename(t *testing.T) {
 
 func TestFieldRename(t *testing.T) {
 	r := Rename{
-		Replaces: []Replace{
+		Replaces: []replace{
 			{Field: "time_msec", Dest: "time"},
 		},
 	}
-	m := newMetric("foo", nil, map[string]interface{}{"time_msec": int64(1250), "snakes": true})
+	m := newMetric("foo", nil, map[string]any{"time_msec": int64(1250), "snakes": true})
 	results := r.Apply(m)
 
-	require.Equal(t, map[string]interface{}{"time": int64(1250), "snakes": true}, results[0].Fields(), "should change field 'time_msec' to 'time'")
+	require.Equal(t, map[string]any{"time": int64(1250), "snakes": true}, results[0].Fields(), "should change field 'time_msec' to 'time'")
+}
+
+func TestTracking(t *testing.T) {
+	inputRaw := []telegraf.Metric{
+		metric.New("foo", map[string]string{}, map[string]any{"value": 42}, time.Unix(0, 0)),
+		metric.New("bar", map[string]string{}, map[string]any{"value": 99}, time.Unix(0, 0)),
+		metric.New("baz", map[string]string{}, map[string]any{"value": 11}, time.Unix(0, 0)),
+	}
+
+	var mu sync.Mutex
+	delivered := make([]telegraf.DeliveryInfo, 0, len(inputRaw))
+	notify := func(di telegraf.DeliveryInfo) {
+		mu.Lock()
+		defer mu.Unlock()
+		delivered = append(delivered, di)
+	}
+
+	input := make([]telegraf.Metric, 0, len(inputRaw))
+	for _, m := range inputRaw {
+		tm, _ := metric.WithTracking(m, notify)
+		input = append(input, tm)
+	}
+
+	expected := []telegraf.Metric{
+		metric.New(
+			"foo",
+			map[string]string{},
+			map[string]any{"new_value": 42},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"bar",
+			map[string]string{},
+			map[string]any{"new_value": 99},
+			time.Unix(0, 0),
+		),
+		metric.New(
+			"baz",
+			map[string]string{},
+			map[string]any{"new_value": 11},
+			time.Unix(0, 0),
+		),
+	}
+
+	plugin := &Rename{
+		Replaces: []replace{
+			{Field: "value", Dest: "new_value"},
+		},
+	}
+
+	// Process expected metrics and compare with resulting metrics
+	actual := plugin.Apply(input...)
+	testutil.RequireMetricsEqual(t, expected, actual)
+
+	// Simulate output acknowledging delivery
+	for _, m := range actual {
+		m.Accept()
+	}
+
+	// Check delivery
+	require.Eventuallyf(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(input) == len(delivered)
+	}, time.Second, 100*time.Millisecond, "%d delivered but %d expected", len(delivered), len(expected))
 }

@@ -1,14 +1,18 @@
-# MinMax Aggregator Plugin
+# Minimum-Maximum Aggregator Plugin
 
-The minmax aggregator plugin aggregates min & max values of each field it sees,
-emitting the aggrate every `period` seconds.
+This plugin aggregates the minimum and maximum values of each field it sees,
+emitting the aggregate every `period` seconds with field names suffixed by `_min`
+and `_max` respectively.
+
+⭐ Telegraf v1.1.0
+🏷️ statistics
+💻 all
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -19,10 +23,11 @@ See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
 [[aggregators.minmax]]
   ## General Aggregator Arguments:
   ## The period on which to flush & clear the aggregator.
-  period = "30s"
+  # period = "30s"
+
   ## If true, the original metric will be dropped by the
   ## aggregator and will not get sent to the output plugins.
-  drop_original = false
+  # drop_original = false
 ```
 
 ## Measurements & Fields

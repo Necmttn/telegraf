@@ -23,14 +23,14 @@ const (
 
 var uncommenter = strings.NewReplacer("\\n", "\n")
 
-func (s *Statsd) parseEventMessage(now time.Time, message string, defaultHostname string) error {
+func (s *Statsd) parseEventMessage(now time.Time, message, defaultHostname string) error {
 	// _e{title.length,text.length}:title|text
 	//  [
 	//   |d:date_happened
 	//   |p:priority
 	//   |h:hostname
 	//   |t:alert_type
-	//   |s:source_type_nam
+	//   |s:source_type_name
 	//   |#tag1,tag2
 	//  ]
 	//
@@ -38,14 +38,14 @@ func (s *Statsd) parseEventMessage(now time.Time, message string, defaultHostnam
 	// tag is key:value
 	messageRaw := strings.SplitN(message, ":", 2)
 	if len(messageRaw) < 2 || len(messageRaw[0]) < 7 || len(messageRaw[1]) < 3 {
-		return fmt.Errorf("invalid message format")
+		return errors.New("invalid message format")
 	}
 	header := messageRaw[0]
 	message = messageRaw[1]
 
 	rawLen := strings.SplitN(header[3:], ",", 2)
 	if len(rawLen) != 2 {
-		return fmt.Errorf("invalid message format")
+		return errors.New("invalid message format")
 	}
 
 	titleLen, err := strconv.ParseInt(rawLen[0], 10, 64)
@@ -59,8 +59,11 @@ func (s *Statsd) parseEventMessage(now time.Time, message string, defaultHostnam
 	if err != nil {
 		return fmt.Errorf("invalid message format, could not parse text.length: %q", rawLen[0])
 	}
+	if titleLen < 0 || textLen < 0 {
+		return errors.New("invalid message format, title.length and text.length must be positive integer")
+	}
 	if titleLen+textLen+1 > int64(len(message)) {
-		return fmt.Errorf("invalid message format, title.length and text.length exceed total message length")
+		return errors.New("invalid message format, title.length and text.length exceed total message length")
 	}
 
 	rawTitle := message[:titleLen]
@@ -68,12 +71,12 @@ func (s *Statsd) parseEventMessage(now time.Time, message string, defaultHostnam
 	message = message[titleLen+1+textLen:]
 
 	if len(rawTitle) == 0 || len(rawText) == 0 {
-		return fmt.Errorf("invalid event message format: empty 'title' or 'text' field")
+		return errors.New("invalid event message format: empty 'title' or 'text' field")
 	}
 
 	name := rawTitle
 	tags := make(map[string]string, strings.Count(message, ",")+2) // allocate for the approximate number of tags
-	fields := make(map[string]interface{}, 9)
+	fields := make(map[string]any, 9)
 	fields["alert_type"] = eventInfo // default event type
 	fields["text"] = uncommenter.Replace(rawText)
 	if defaultHostname != "" {
@@ -176,4 +179,95 @@ func parseDataDogTags(tags map[string]string, message string) {
 		}
 		tags[k] = "true"
 	}
+}
+
+// parseServiceCheckMessage parses a Datadog service check message in the format:
+// _sc|<name>|<status>|d:<timestamp>|h:<hostname>|#<tag_key_1>:<tag_value_1>|m:<message>
+//
+// - <name> - service check name (required)
+// - <status> - 0=OK, 1=Warning, 2=Critical, 3=Unknown (required)
+// - d:<timestamp> - optional Unix timestamp
+// - h:<hostname> - optional hostname override
+// - #<tags> - optional tags (same format as metrics)
+// - m:<message> - optional message
+func (s *Statsd) parseServiceCheckMessage(now time.Time, message, defaultHostname string) error {
+	// Split on | delimiter
+	parts := strings.Split(message, "|")
+	if len(parts) < 3 {
+		return fmt.Errorf("invalid service check format for %q; expected at least 3 parts (_sc|name|status)", message)
+	}
+
+	// Validate the prefix
+	if parts[0] != "_sc" {
+		return fmt.Errorf("invalid service check format for %q; must start with _sc", message)
+	}
+
+	// Extract the service check name
+	checkName := parts[1]
+	if checkName == "" {
+		return fmt.Errorf("invalid service check format for %q; empty check name", message)
+	}
+
+	// Parse the status
+	statuses := []string{"ok", "warning", "critical", "unknown"}
+
+	idx, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid service check format: could not parse status %q", parts[2])
+	}
+	if idx < 0 || idx >= int64(len(statuses)) {
+		return fmt.Errorf("invalid service check format: status %d out of range (0-%d)", idx, len(statuses)-1)
+	}
+	statusText := statuses[idx]
+
+	tags := map[string]string{
+		"check_name": checkName,
+	}
+	if defaultHostname != "" {
+		tags["source"] = defaultHostname
+	}
+
+	fields := map[string]any{
+		"status":      idx,
+		"status_text": statusText,
+	}
+
+	ts := now
+
+	// Process optional metadata fields
+	for i := 3; i < len(parts); i++ {
+		part := parts[i]
+		if len(part) < 2 {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(part, "d:"):
+			// Timestamp
+			timestamp, err := strconv.ParseInt(part[2:], 10, 64)
+			if err != nil {
+				continue
+			}
+			ts = time.Unix(timestamp, 0)
+		case strings.HasPrefix(part, "h:"):
+			// Hostname
+			tags["source"] = part[2:]
+		case strings.HasPrefix(part, "m:"):
+			// Message
+			fields["message"] = uncommenter.Replace(part[2:])
+		case strings.HasPrefix(part, "#"):
+			// Tags
+			parseDataDogTags(tags, part[1:])
+		}
+	}
+
+	// Use source tag because host is reserved tag key in Telegraf.
+	// In datadog the host tag and `h:` are interchangeable.
+	if host, ok := tags["host"]; ok {
+		delete(tags, "host")
+		tags["source"] = host
+	}
+
+	s.acc.AddFields("statsd_service_check", fields, tags, ts)
+	return nil
 }

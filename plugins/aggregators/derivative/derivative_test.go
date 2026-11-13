@@ -12,7 +12,7 @@ import (
 
 var start = metric.New("TestMetric",
 	map[string]string{"state": "full"},
-	map[string]interface{}{
+	map[string]any{
 		"increasing": int64(0),
 		"decreasing": int64(100),
 		"unchanged":  int64(42),
@@ -24,7 +24,7 @@ var start = metric.New("TestMetric",
 
 var finish = metric.New("TestMetric",
 	map[string]string{"state": "full"},
-	map[string]interface{}{
+	map[string]any{
 		"increasing": int64(1000),
 		"decreasing": int64(0),
 		"unchanged":  int64(42),
@@ -49,7 +49,7 @@ func TestTwoFullEventsWithParameter(t *testing.T) {
 	derivative.Add(finish)
 	derivative.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"increasing_by_parameter": 100.0,
 		"decreasing_by_parameter": -10.0,
 		"unchanged_by_parameter":  0.0,
@@ -76,7 +76,7 @@ func TestTwoFullEventsWithParameterReverseSequence(t *testing.T) {
 	derivative.Add(start)
 	derivative.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"increasing_by_parameter": 100.0,
 		"decreasing_by_parameter": -10.0,
 		"unchanged_by_parameter":  0.0,
@@ -90,25 +90,26 @@ func TestTwoFullEventsWithParameterReverseSequence(t *testing.T) {
 
 func TestTwoFullEventsWithoutParameter(t *testing.T) {
 	acc := testutil.Accumulator{}
-	derivative := NewDerivative()
+	derivative := newDerivative()
 	derivative.Log = testutil.Logger{}
 	err := derivative.Init()
 	require.NoError(t, err)
 
 	startTime := time.Now()
-	duration, _ := time.ParseDuration("2s")
+	duration, err := time.ParseDuration("2s")
+	require.NoError(t, err)
 	endTime := startTime.Add(duration)
 
 	first := metric.New("One Field",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(10),
 		},
 		startTime,
 	)
 	last := metric.New("One Field",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(20),
 		},
 		endTime,
@@ -120,13 +121,13 @@ func TestTwoFullEventsWithoutParameter(t *testing.T) {
 
 	acc.AssertContainsFields(t,
 		"One Field",
-		map[string]interface{}{
+		map[string]any{
 			"value_rate": float64(5),
 		},
 	)
 }
 
-func TestTwoFullEventsInSeperatePushes(t *testing.T) {
+func TestTwoFullEventsInSeparatePushes(t *testing.T) {
 	acc := testutil.Accumulator{}
 	derivative := &Derivative{
 		Variable:    " parameter",
@@ -148,7 +149,7 @@ func TestTwoFullEventsInSeperatePushes(t *testing.T) {
 	derivative.Add(finish)
 	derivative.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"increasing_wrt_parameter": 100.0,
 		"decreasing_wrt_parameter": -10.0,
 		"unchanged_wrt_parameter":  0.0,
@@ -160,7 +161,7 @@ func TestTwoFullEventsInSeperatePushes(t *testing.T) {
 	acc.AssertContainsTaggedFields(t, "TestMetric", expectedFields, expectedTags)
 }
 
-func TestTwoFullEventsInSeperatePushesWithSeveralRollOvers(t *testing.T) {
+func TestTwoFullEventsInSeparatePushesWithSeveralRollOvers(t *testing.T) {
 	acc := testutil.Accumulator{}
 	derivative := &Derivative{
 		Variable:    "parameter",
@@ -184,7 +185,7 @@ func TestTwoFullEventsInSeperatePushesWithSeveralRollOvers(t *testing.T) {
 	derivative.Add(finish)
 	derivative.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"increasing_wrt_parameter": 100.0,
 		"decreasing_wrt_parameter": -10.0,
 		"unchanged_wrt_parameter":  0.0,
@@ -193,7 +194,7 @@ func TestTwoFullEventsInSeperatePushesWithSeveralRollOvers(t *testing.T) {
 	acc.AssertContainsFields(t, "TestMetric", expectedFields)
 }
 
-func TestTwoFullEventsInSeperatePushesWithOutRollOver(t *testing.T) {
+func TestTwoFullEventsInSeparatePushesWithOutRollOver(t *testing.T) {
 	acc := testutil.Accumulator{}
 	derivative := &Derivative{
 		Variable:    "parameter",
@@ -233,7 +234,7 @@ func TestIgnoresMissingVariable(t *testing.T) {
 
 	noParameter := metric.New("TestMetric",
 		map[string]string{"state": "no_parameter"},
-		map[string]interface{}{
+		map[string]any{
 			"increasing": int64(100),
 			"decreasing": int64(0),
 			"unchanged":  int64(42),
@@ -253,7 +254,7 @@ func TestIgnoresMissingVariable(t *testing.T) {
 	derivative.Add(finish)
 	derivative.Add(noParameter)
 	derivative.Push(&acc)
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"increasing_by_parameter": 100.0,
 		"decreasing_by_parameter": -10.0,
 		"unchanged_by_parameter":  0.0,
@@ -265,29 +266,30 @@ func TestIgnoresMissingVariable(t *testing.T) {
 	acc.AssertContainsTaggedFields(t, "TestMetric", expectedFields, expectedTags)
 }
 
-func TestMergesDifferenMetricsWithSameHash(t *testing.T) {
+func TestMergesDifferentMetricsWithSameHash(t *testing.T) {
 	acc := testutil.Accumulator{}
-	derivative := NewDerivative()
+	derivative := newDerivative()
 	derivative.Log = testutil.Logger{}
 	err := derivative.Init()
 	require.NoError(t, err)
 
 	startTime := time.Now()
-	duration, _ := time.ParseDuration("2s")
+	duration, err := time.ParseDuration("2s")
+	require.NoError(t, err)
 	endTime := startTime.Add(duration)
 	part1 := metric.New("TestMetric",
 		map[string]string{"state": "full"},
-		map[string]interface{}{"field1": int64(10)},
+		map[string]any{"field1": int64(10)},
 		startTime,
 	)
 	part2 := metric.New("TestMetric",
 		map[string]string{"state": "full"},
-		map[string]interface{}{"field2": int64(20)},
+		map[string]any{"field2": int64(20)},
 		startTime,
 	)
 	final := metric.New("TestMetric",
 		map[string]string{"state": "full"},
-		map[string]interface{}{
+		map[string]any{
 			"field1": int64(30),
 			"field2": int64(30),
 		},
@@ -301,7 +303,7 @@ func TestMergesDifferenMetricsWithSameHash(t *testing.T) {
 	derivative.Add(final)
 	derivative.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"field1_rate": 10.0,
 		"field2_rate": 5.0,
 	}
@@ -354,7 +356,7 @@ func TestAddMetricsResetsRollOver(t *testing.T) {
 	derivative.Add(finish)
 	derivative.Push(&acc)
 
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"increasing_by_parameter": 100.0,
 		"decreasing_by_parameter": -10.0,
 		"unchanged_by_parameter":  0.0,
@@ -365,16 +367,16 @@ func TestAddMetricsResetsRollOver(t *testing.T) {
 
 func TestCalculatesCorrectDerivativeOnTwoConsecutivePeriods(t *testing.T) {
 	acc := testutil.Accumulator{}
-	period, _ := time.ParseDuration("10s")
-	derivative := NewDerivative()
-	derivative.Log = testutil.Logger{}
-	err := derivative.Init()
+	period, err := time.ParseDuration("10s")
 	require.NoError(t, err)
+	derivative := newDerivative()
+	derivative.Log = testutil.Logger{}
+	require.NoError(t, derivative.Init())
 
 	startTime := time.Now()
 	first := metric.New("One Field",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(10),
 		},
 		startTime,
@@ -385,7 +387,7 @@ func TestCalculatesCorrectDerivativeOnTwoConsecutivePeriods(t *testing.T) {
 
 	second := metric.New("One Field",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(20),
 		},
 		startTime.Add(period),
@@ -394,14 +396,14 @@ func TestCalculatesCorrectDerivativeOnTwoConsecutivePeriods(t *testing.T) {
 	derivative.Push(&acc)
 	derivative.Reset()
 
-	acc.AssertContainsFields(t, "One Field", map[string]interface{}{
+	acc.AssertContainsFields(t, "One Field", map[string]any{
 		"value_rate": 1.0,
 	})
 
 	acc.ClearMetrics()
 	third := metric.New("One Field",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(40),
 		},
 		startTime.Add(period).Add(period),
@@ -410,7 +412,7 @@ func TestCalculatesCorrectDerivativeOnTwoConsecutivePeriods(t *testing.T) {
 	derivative.Push(&acc)
 	derivative.Reset()
 
-	acc.AssertContainsFields(t, "One Field", map[string]interface{}{
+	acc.AssertContainsFields(t, "One Field", map[string]any{
 		"value_rate": 2.0,
 	})
 }

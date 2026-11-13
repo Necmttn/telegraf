@@ -10,14 +10,16 @@ import (
 	"time"
 
 	"github.com/coocood/freecache"
-	"github.com/jackc/pgconn"
-	"github.com/jackc/pgtype"
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/tracelog"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
-	"github.com/influxdata/telegraf/models"
+	"github.com/influxdata/telegraf/internal"
+	"github.com/influxdata/telegraf/logger"
 	"github.com/influxdata/telegraf/plugins/outputs"
 	"github.com/influxdata/telegraf/plugins/outputs/postgresql/sqltemplate"
 	"github.com/influxdata/telegraf/plugins/outputs/postgresql/utils"
@@ -26,15 +28,15 @@ import (
 type dbh interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 	CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error)
-	Exec(ctx context.Context, sql string, arguments ...interface{}) (commandTag pgconn.CommandTag, err error)
-	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, arguments ...any) (commandTag pgconn.CommandTag, err error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 //go:embed sample.conf
 var sampleConfig string
 
 type Postgresql struct {
-	Connection                 string                  `toml:"connection"`
+	Connection                 config.Secret           `toml:"connection"`
 	Schema                     string                  `toml:"schema"`
 	TagsAsForeignKeys          bool                    `toml:"tags_as_foreign_keys"`
 	TagTableSuffix             string                  `toml:"tag_table_suffix"`
@@ -50,6 +52,7 @@ type Postgresql struct {
 	Uint64Type                 string                  `toml:"uint64_type"`
 	RetryMaxBackoff            config.Duration         `toml:"retry_max_backoff"`
 	TagCacheSize               int                     `toml:"tag_cache_size"`
+	ColumnNameLenLimit         int                     `toml:"column_name_length_limit"`
 	LogLevel                   string                  `toml:"log_level"`
 	Logger                     telegraf.Logger         `toml:"-"`
 
@@ -60,7 +63,7 @@ type Postgresql struct {
 	tableManager    *TableManager
 	tagsCache       *freecache.Cache
 
-	pguint8 *pgtype.DataType
+	pguint8 *pgtype.Type
 
 	writeChan      chan *TableSource
 	writeWaitGroup *utils.WaitGroup
@@ -72,38 +75,13 @@ type Postgresql struct {
 	tagsJSONColumn   utils.Column
 }
 
-func init() {
-	outputs.Add("postgresql", func() telegraf.Output { return newPostgresql() })
-}
-
-func newPostgresql() *Postgresql {
-	p := &Postgresql{
-		Schema:                     "public",
-		TagTableSuffix:             "_tag",
-		TagCacheSize:               100000,
-		Uint64Type:                 PgNumeric,
-		CreateTemplates:            []*sqltemplate.Template{{}},
-		AddColumnTemplates:         []*sqltemplate.Template{{}},
-		TagTableCreateTemplates:    []*sqltemplate.Template{{}},
-		TagTableAddColumnTemplates: []*sqltemplate.Template{{}},
-		RetryMaxBackoff:            config.Duration(time.Second * 15),
-		Logger:                     models.NewLogger("outputs", "postgresql", ""),
-		LogLevel:                   "warn",
-	}
-
-	_ = p.CreateTemplates[0].UnmarshalText([]byte(`CREATE TABLE {{ .table }} ({{ .columns }})`))
-	_ = p.AddColumnTemplates[0].UnmarshalText([]byte(`ALTER TABLE {{ .table }} ADD COLUMN IF NOT EXISTS {{ .columns|join ", ADD COLUMN IF NOT EXISTS " }}`))
-	_ = p.TagTableCreateTemplates[0].UnmarshalText([]byte(`CREATE TABLE {{ .table }} ({{ .columns }}, PRIMARY KEY (tag_id))`))
-	_ = p.TagTableAddColumnTemplates[0].UnmarshalText(
-		[]byte(`ALTER TABLE {{ .table }} ADD COLUMN IF NOT EXISTS {{ .columns|join ", ADD COLUMN IF NOT EXISTS " }}`),
-	)
-
-	return p
+func (*Postgresql) SampleConfig() string {
+	return sampleConfig
 }
 
 func (p *Postgresql) Init() error {
 	if p.TagCacheSize < 0 {
-		return fmt.Errorf("invalid tag_cache_size")
+		return errors.New("invalid tag_cache_size")
 	}
 
 	// Set the time-column name
@@ -130,11 +108,20 @@ func (p *Postgresql) Init() error {
 	p.fieldsJSONColumn = utils.Column{Name: "fields", Type: PgJSONb, Role: utils.FieldColType}
 	p.tagsJSONColumn = utils.Column{Name: "tags", Type: PgJSONb, Role: utils.TagColType}
 
-	var err error
-	if p.dbConfig, err = pgxpool.ParseConfig(p.Connection); err != nil {
+	connectionSecret, err := p.Connection.Get()
+	if err != nil {
+		return fmt.Errorf("getting address failed: %w", err)
+	}
+	connection := connectionSecret.String()
+	defer connectionSecret.Destroy()
+
+	if p.dbConfig, err = pgxpool.ParseConfig(connection); err != nil {
 		return err
 	}
-	parsedConfig, _ := pgx.ParseConfig(p.Connection)
+	parsedConfig, err := pgx.ParseConfig(connection)
+	if err != nil {
+		return err
+	}
 	if _, ok := parsedConfig.Config.RuntimeParams["pool_max_conns"]; !ok {
 		// The pgx default for pool_max_conns is 4. However we want to default to 1.
 		p.dbConfig.MaxConns = 1
@@ -145,10 +132,13 @@ func (p *Postgresql) Init() error {
 	}
 
 	if p.LogLevel != "" {
-		p.dbConfig.ConnConfig.Logger = utils.PGXLogger{Logger: p.Logger}
-		p.dbConfig.ConnConfig.LogLevel, err = pgx.LogLevelFromString(p.LogLevel)
+		level, err := tracelog.LogLevelFromString(p.LogLevel)
 		if err != nil {
-			return fmt.Errorf("invalid log level")
+			return errors.New("invalid log level")
+		}
+		p.dbConfig.ConnConfig.Tracer = &tracelog.TraceLog{
+			Logger:   utils.PGXLogger{Logger: p.Logger},
+			LogLevel: level,
 		}
 	}
 
@@ -157,24 +147,37 @@ func (p *Postgresql) Init() error {
 	case PgUint8:
 		p.dbConfig.AfterConnect = p.registerUint8
 	default:
-		return fmt.Errorf("invalid uint64_type")
+		return errors.New("invalid uint64_type")
 	}
 
 	return nil
 }
 
-func (p *Postgresql) SampleConfig() string { return sampleConfig }
-
 // Connect establishes a connection to the target database and prepares the cache
 func (p *Postgresql) Connect() error {
 	// Yes, we're not supposed to store the context. However since we don't receive a context, we have to.
 	p.dbContext, p.dbContextCancel = context.WithCancel(context.Background())
-	var err error
-	p.db, err = pgxpool.ConnectConfig(p.dbContext, p.dbConfig)
+
+	db, err := pgxpool.NewWithConfig(p.dbContext, p.dbConfig)
 	if err != nil {
-		p.Logger.Errorf("Couldn't connect to server\n%v", err)
-		return err
+		p.dbContextCancel()
+		return &internal.StartupError{
+			Err:   err,
+			Retry: true,
+		}
 	}
+
+	// Make sure we are connected
+	if err := db.Ping(p.dbContext); err != nil {
+		db.Close()
+		p.dbContextCancel()
+		return &internal.StartupError{
+			Err:   err,
+			Retry: true,
+		}
+	}
+
+	p.db = db
 	p.tableManager = NewTableManager(p)
 
 	if p.TagsAsForeignKeys {
@@ -185,7 +188,7 @@ func (p *Postgresql) Connect() error {
 	if maxConns > 1 {
 		p.writeChan = make(chan *TableSource)
 		p.writeWaitGroup = utils.NewWaitGroup()
-		for i := 0; i < maxConns; i++ {
+		for range maxConns {
 			p.writeWaitGroup.Add(1)
 			go p.writeWorker(p.dbContext)
 		}
@@ -196,21 +199,21 @@ func (p *Postgresql) Connect() error {
 
 func (p *Postgresql) registerUint8(_ context.Context, conn *pgx.Conn) error {
 	if p.pguint8 == nil {
-		dt := pgtype.DataType{
+		dt := &pgtype.Type{
 			// Use 'numeric' type for encoding/decoding across the wire
 			// It might be more efficient to create a native pgtype.Type, but would involve a lot of code. So this is
 			// probably good enough.
-			Value: &Uint8{},
+			Codec: &Uint8Codec{},
 			Name:  "uint8",
 		}
 		row := conn.QueryRow(p.dbContext, "SELECT oid FROM pg_type WHERE typname=$1", dt.Name)
 		if err := row.Scan(&dt.OID); err != nil {
 			return fmt.Errorf("retrieving OID for uint8 data type: %w", err)
 		}
-		p.pguint8 = &dt
+		p.pguint8 = dt
 	}
 
-	conn.ConnInfo().RegisterDataType(*p.pguint8)
+	conn.TypeMap().RegisterType(p.pguint8)
 	return nil
 }
 
@@ -228,7 +231,9 @@ func (p *Postgresql) Close() error {
 
 	// Die!
 	p.dbContextCancel()
-	p.db.Close()
+	if p.db != nil {
+		p.db.Close()
+	}
 	p.tableManager = nil
 	return nil
 }
@@ -254,8 +259,7 @@ func (p *Postgresql) Write(metrics []telegraf.Metric) error {
 		err = p.writeSequential(tableSources)
 	}
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 			// PgError doesn't include .Detail in Error(), so we concat it onto .Message.
 			if pgErr.Detail != "" {
 				pgErr.Message += "; " + pgErr.Detail
@@ -273,6 +277,19 @@ func (p *Postgresql) writeSequential(tableSources map[string]*TableSource) error
 	}
 	defer tx.Rollback(p.dbContext) //nolint:errcheck // In case of failure during commit, "err" from commit will be returned
 
+	// Schema changes and tag inserts run inside this transaction, so when it or a savepoint is rolled back, the cache
+	// entries of the rolled back tables no longer match the database and have to be reloaded. Only the sources written
+	// so far can have touched the cache.
+	written := make([]*TableSource, 0, len(tableSources))
+	committed := false
+	defer func() {
+		if !committed {
+			for _, tableSource := range written {
+				p.tableManager.ClearTableSourceCache(tableSource)
+			}
+		}
+	}()
+
 	for _, tableSource := range tableSources {
 		sp := tx
 		if len(tableSources) > 1 {
@@ -283,6 +300,7 @@ func (p *Postgresql) writeSequential(tableSources map[string]*TableSource) error
 			}
 		}
 
+		written = append(written, tableSource)
 		err := p.writeMetricsFromMeasure(p.dbContext, sp, tableSource)
 		if err != nil {
 			if isTempError(err) {
@@ -297,6 +315,7 @@ func (p *Postgresql) writeSequential(tableSources map[string]*TableSource) error
 			if err := sp.Rollback(p.dbContext); err != nil {
 				return err
 			}
+			p.tableManager.ClearTableSourceCache(tableSource)
 		}
 		// savepoints do not need to be committed (released), so save the round trip and skip it
 	}
@@ -304,6 +323,7 @@ func (p *Postgresql) writeSequential(tableSources map[string]*TableSource) error
 	if err := tx.Commit(p.dbContext); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
+	committed = true
 	return nil
 }
 
@@ -348,7 +368,7 @@ func isTempError(err error) bool {
 		errClass := pgErr.Code[:2]
 		switch errClass {
 		case "23": // Integrity Constraint Violation
-			//23505 - unique_violation
+			// 23505 - unique_violation
 			if pgErr.Code == "23505" && strings.Contains(err.Error(), "pg_type_typname_nsp_index") {
 				// Happens when you try to create 2 tables simultaneously.
 				return true
@@ -424,13 +444,16 @@ func (p *Postgresql) writeRetry(ctx context.Context, tableSource *TableSource) e
 
 // Writes the metrics from a specified measure. All the provided metrics must belong to the same measurement.
 func (p *Postgresql) writeMetricsFromMeasure(ctx context.Context, db dbh, tableSource *TableSource) error {
+	if tableSource.Name() == "" {
+		return errors.New("empty measurement name")
+	}
 	err := p.tableManager.MatchSource(ctx, db, tableSource)
 	if err != nil {
 		return err
 	}
 
 	if p.TagsAsForeignKeys {
-		if err = p.writeTagTable(ctx, db, tableSource); err != nil {
+		if err = writeTagTable(ctx, db, tableSource); err != nil {
 			if p.ForeignTagConstraint {
 				return fmt.Errorf("writing to tag table %q: %w", tableSource.Name()+p.TagTableSuffix, err)
 			}
@@ -448,7 +471,7 @@ func (p *Postgresql) writeMetricsFromMeasure(ctx context.Context, db dbh, tableS
 	return nil
 }
 
-func (p *Postgresql) writeTagTable(ctx context.Context, db dbh, tableSource *TableSource) error {
+func writeTagTable(ctx context.Context, db dbh, tableSource *TableSource) error {
 	ttsrc := NewTagTableSource(tableSource)
 
 	// Check whether we have any tags to insert
@@ -486,4 +509,33 @@ func (p *Postgresql) writeTagTable(ctx context.Context, db dbh, tableSource *Tab
 
 	ttsrc.UpdateCache()
 	return nil
+}
+
+func newPostgresql() *Postgresql {
+	p := &Postgresql{
+		Schema:                     "public",
+		TagTableSuffix:             "_tag",
+		TagCacheSize:               100000,
+		Uint64Type:                 PgNumeric,
+		CreateTemplates:            []*sqltemplate.Template{{}},
+		AddColumnTemplates:         []*sqltemplate.Template{{}},
+		TagTableCreateTemplates:    []*sqltemplate.Template{{}},
+		TagTableAddColumnTemplates: []*sqltemplate.Template{{}},
+		RetryMaxBackoff:            config.Duration(time.Second * 15),
+		Logger:                     logger.New("outputs", "postgresql", ""),
+		LogLevel:                   "warn",
+	}
+
+	p.CreateTemplates[0].UnmarshalText([]byte(`CREATE TABLE {{ .table }} ({{ .columns }})`))
+	p.AddColumnTemplates[0].UnmarshalText([]byte(`ALTER TABLE {{ .table }} ADD COLUMN IF NOT EXISTS {{ .columns|join ", ADD COLUMN IF NOT EXISTS " }}`))
+	p.TagTableCreateTemplates[0].UnmarshalText([]byte(`CREATE TABLE {{ .table }} ({{ .columns }}, PRIMARY KEY (tag_id))`))
+	p.TagTableAddColumnTemplates[0].UnmarshalText(
+		[]byte(`ALTER TABLE {{ .table }} ADD COLUMN IF NOT EXISTS {{ .columns|join ", ADD COLUMN IF NOT EXISTS " }}`),
+	)
+
+	return p
+}
+
+func init() {
+	outputs.Add("postgresql", func() telegraf.Output { return newPostgresql() })
 }

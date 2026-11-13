@@ -1,23 +1,24 @@
 # Docker Log Input Plugin
 
-The docker log plugin uses the Docker Engine API to get logs on running
-docker containers.
+This plugin uses the [Docker Engine API][api] to gather logs from running
+Docker containers.
 
-The docker plugin uses the [Official Docker Client][] to gather logs from the
-[Engine API][].
+> [!NOTE]
+> This plugin works only for containers with the `local` or `json-file` or
+> `journald` logging driver. Make sure Telegraf has sufficient permissions to
+> access the configured endpoint.
 
-**Note:** This plugin works only for containers with the `local` or
-`json-file` or `journald` logging driver.
+⭐ Telegraf v1.12.0
+🏷️ containers, logging
+💻 all
 
-[Official Docker Client]: https://github.com/moby/moby/tree/master/client
-[Engine API]: https://docs.docker.com/engine/api/v1.24/
+[api]: https://docs.docker.com/engine/api
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

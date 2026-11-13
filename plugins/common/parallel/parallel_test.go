@@ -1,15 +1,15 @@
 package parallel_test
 
 import (
-	"fmt"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/common/parallel"
 	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestOrderedJobsStayOrdered(t *testing.T) {
@@ -17,10 +17,10 @@ func TestOrderedJobsStayOrdered(t *testing.T) {
 
 	p := parallel.NewOrdered(acc, jobFunc, 10000, 10)
 	now := time.Now()
-	for i := 0; i < 20000; i++ {
+	for i := range 20000 {
 		m := metric.New("test",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"val": i,
 			},
 			now,
@@ -31,7 +31,7 @@ func TestOrderedJobsStayOrdered(t *testing.T) {
 	p.Stop()
 
 	i := 0
-	require.Len(t, acc.Metrics, 20000, fmt.Sprintf("expected 20k metrics but got %d", len(acc.GetTelegrafMetrics())))
+	require.Len(t, acc.Metrics, 20000)
 	for _, m := range acc.GetTelegrafMetrics() {
 		v, ok := m.GetField("val")
 		require.True(t, ok)
@@ -48,11 +48,11 @@ func TestUnorderedJobsDontDropAnyJobs(t *testing.T) {
 	now := time.Now()
 
 	expectedTotal := 0
-	for i := 0; i < 20000; i++ {
+	for i := range 20000 {
 		expectedTotal += i
 		m := metric.New("test",
 			map[string]string{},
-			map[string]interface{}{
+			map[string]any{
 				"val": i,
 			},
 			now,
@@ -63,7 +63,7 @@ func TestUnorderedJobsDontDropAnyJobs(t *testing.T) {
 	p.Stop()
 
 	actualTotal := int64(0)
-	require.Len(t, acc.Metrics, 20000, fmt.Sprintf("expected 20k metrics but got %d", len(acc.GetTelegrafMetrics())))
+	require.Len(t, acc.Metrics, 20000)
 	for _, m := range acc.GetTelegrafMetrics() {
 		v, ok := m.GetField("val")
 		require.True(t, ok)
@@ -79,7 +79,7 @@ func BenchmarkOrdered(b *testing.B) {
 
 	m := metric.New("test",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"val": 1,
 		},
 		time.Now(),
@@ -99,7 +99,7 @@ func BenchmarkUnordered(b *testing.B) {
 
 	m := metric.New("test",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"val": 1,
 		},
 		time.Now(),

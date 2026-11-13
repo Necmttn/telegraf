@@ -1,9 +1,15 @@
 # Elasticsearch Output Plugin
 
-This plugin writes to [Elasticsearch](https://www.elastic.co) via HTTP using
-Elastic (<http://olivere.github.io/elastic/).>
+This plugin writes metrics to [Elasticsearch][elasticsearch] via HTTP using the
+[Elastic client library][client_lib]. The plugin supports Elasticsearch
+releases from v5.x up to v7.x.
 
-It supports Elasticsearch releases from 5.x up to 7.x.
+⭐ Telegraf v0.1.5
+🏷️ datastore, logging
+💻 all
+
+[elasticsearch]: https://www.elastic.co
+[client_lib]: http://olivere.github.io/elastic/
 
 ## Elasticsearch indexes and templates
 
@@ -197,10 +203,9 @@ clients to properly work when the version needs to be checked. To enable
 compatibility mode users need to set the `override_main_response_version` to
 `true`.
 
-On existing clusters run:
+On existing clusters run `PUT /_cluster/settings` with
 
 ```json
-PUT /_cluster/settings
 {
   "persistent" : {
     "compatibility.override_main_response_version" : true
@@ -208,10 +213,11 @@ PUT /_cluster/settings
 }
 ```
 
-And on new clusters set the option to true under advanced options:
+And on new clusters execute
+`POST https://es.us-east-1.amazonaws.com/2021-01-01/opensearch/upgradeDomain`and
+set the option to `true` under advanced options
 
 ```json
-POST https://es.us-east-1.amazonaws.com/2021-01-01/opensearch/upgradeDomain
 {
   "DomainName": "domain-name",
   "TargetVersion": "OpenSearch_1.0",
@@ -225,18 +231,17 @@ POST https://es.us-east-1.amazonaws.com/2021-01-01/opensearch/upgradeDomain
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
-## Secret-store support
+## Secret store support
 
-This plugin supports secrets from secret-stores for the `username`,
+This plugin supports secrets from secret stores for the `username`,
 `password` and `auth_bearer_token` option.
-See the [secret-store documentation][SECRETSTORE] for more details on how
+See the [secret store documentation][SECRETSTORE] for more details on how
 to use them.
 
 [SECRETSTORE]: ../../../docs/CONFIGURATION.md#secret-store-secrets
@@ -250,6 +255,9 @@ to use them.
   ## Multiple urls can be specified as part of the same cluster,
   ## this means that only ONE of the urls will be written to each interval
   urls = [ "http://node1.es.example.com:9200" ] # required.
+  ## Local address to bind when connecting to the server
+  ## If empty or not set, the local address is automatically chosen.
+  # local_address = ""
   ## Elasticsearch client timeout, defaults to "5s" if not set.
   timeout = "5s"
   ## Set to true to ask Elasticsearch a list of all cluster nodes,
@@ -285,6 +293,10 @@ to use them.
   # index_name = "telegraf-{{host}}-%Y.%m.%d"
   # default_tag_value = "none"
   index_name = "telegraf-%Y.%m.%d" # required.
+
+  ## Optional Index Config
+  ## Set to true if Telegraf should use the "create" OpType while indexing
+  # use_optype_create = false
 
   ## Optional TLS Config
   # tls_ca = "/etc/telegraf/ca.pem"
@@ -323,6 +335,21 @@ to use them.
   ## no pipeline is used for the metric.
   # use_pipeline = "{{es_pipeline}}"
   # default_pipeline = "my_pipeline"
+  #
+  ## Custom HTTP Headers
+  ## To pass custom HTTP headers please define it in a given below section
+  # [outputs.elasticsearch.headers]
+  #    "X-Custom-Header" = ["custom-value1", "custom-value2"]
+
+  ## Template Index Settings
+  ## Overrides the template settings.index section with any provided options.
+  ## Defaults provided here in the config
+  # template_index_settings = {
+  #   refresh_interval = "10s",
+  #   mapping.total_fields.limit = 5000,
+  #   auto_expand_replicas = "0-1",
+  #   codec = "best_compression"
+  # }
 ```
 
 ### Permissions
@@ -382,6 +409,9 @@ the `default_tag_value` will be used instead.
   `inf`s if `float_handling` is set to `replace`. Negative `inf` will be
   replaced by the negative value in this number to respect the sign of the
   field's original value.
+* `use_optype_create`: If set, the "create" operation type will be used when
+   indexing into Elasticsearch, which is needed when using the Elasticsearch
+   data streams feature.
 * `use_pipeline`: If set, the set value will be used as the pipeline to call
   when sending events to elasticsearch. Additionally, you can specify dynamic
   pipeline names by using tags with the notation ```{{tag_name}}```.  If the tag
@@ -389,6 +419,8 @@ the `default_tag_value` will be used instead.
   instead.
 * `default_pipeline`: If dynamic pipeline names the tag does not exist in a
   particular metric, this value will be used instead.
+* `headers`: Custom HTTP headers, which are passed to Elasticsearch header
+  before each request.
 
 ## Known issues
 

@@ -15,10 +15,13 @@ import (
 func TestMailChimpGatherReports(t *testing.T) {
 	ts := httptest.NewServer(
 		http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
+			func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprintln(w, sampleReports)
-				require.NoError(t, err)
+				if _, err := fmt.Fprintln(w, sampleReports); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			},
 		))
 	defer ts.Close()
@@ -26,7 +29,7 @@ func TestMailChimpGatherReports(t *testing.T) {
 	u, err := url.ParseRequestURI(ts.URL)
 	require.NoError(t, err)
 
-	api := &ChimpAPI{
+	api := &chimpAPI{
 		url:   u,
 		debug: true,
 		log:   testutil.Logger{},
@@ -43,7 +46,7 @@ func TestMailChimpGatherReports(t *testing.T) {
 	tags["id"] = "42694e9e57"
 	tags["campaign_title"] = "Freddie's Jokes Vol. 1"
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"emails_sent":              200,
 		"abuse_reports":            0,
 		"unsubscribed":             2,
@@ -80,10 +83,13 @@ func TestMailChimpGatherReports(t *testing.T) {
 func TestMailChimpGatherReport(t *testing.T) {
 	ts := httptest.NewServer(
 		http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
+			func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprintln(w, sampleReport)
-				require.NoError(t, err)
+				if _, err := fmt.Fprintln(w, sampleReport); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			},
 		))
 	defer ts.Close()
@@ -91,7 +97,7 @@ func TestMailChimpGatherReport(t *testing.T) {
 	u, err := url.ParseRequestURI(ts.URL)
 	require.NoError(t, err)
 
-	api := &ChimpAPI{
+	api := &chimpAPI{
 		url:   u,
 		debug: true,
 		log:   testutil.Logger{},
@@ -109,7 +115,7 @@ func TestMailChimpGatherReport(t *testing.T) {
 	tags["id"] = "42694e9e57"
 	tags["campaign_title"] = "Freddie's Jokes Vol. 1"
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"emails_sent":              int(200),
 		"abuse_reports":            int(0),
 		"unsubscribed":             int(2),
@@ -146,10 +152,13 @@ func TestMailChimpGatherReport(t *testing.T) {
 func TestMailChimpGatherError(t *testing.T) {
 	ts := httptest.NewServer(
 		http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
+			func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				_, err := fmt.Fprintln(w, sampleError)
-				require.NoError(t, err)
+				if _, err := fmt.Fprintln(w, sampleError); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			},
 		))
 	defer ts.Close()
@@ -157,7 +166,7 @@ func TestMailChimpGatherError(t *testing.T) {
 	u, err := url.ParseRequestURI(ts.URL)
 	require.NoError(t, err)
 
-	api := &ChimpAPI{
+	api := &chimpAPI{
 		url:   u,
 		debug: true,
 		log:   testutil.Logger{},

@@ -1,53 +1,25 @@
-# Intel® Dynamic Load Balancer (Intel® DLB)  Input Plugin
+# Intel® Dynamic Load Balancer Input Plugin
 
-The `Intel DLB` plugin collects metrics exposed by applications built with
-[Data Plane Development Kit](https://www.dpdk.org/) which is an extensive
-set of open source libraries designed for accelerating packet processing
-workloads, plugin is also using bifurcated driver. More specifically it's
-targeted for applications that use Intel DLB as eventdev devices accessed
-via bifurcated driver (allowing access from kernel and user-space).
+This plugin collects metrics exposed by applications built with the
+[Data Plane Development Kit][dpdk], an extensive set of open source libraries
+designed for accelerating packet processing workloads, plugin is also using
+bifurcated driver. More specifically it's targeted for applications using
+Intel DLB as eventdev devices accessed via bifurcated driver
+(allowing access from kernel and user-space).
 
-## Metrics
+⭐ Telegraf v1.25.0
+🏷️ applications
+💻 linux
 
-There are two sources of metrics:
+[dpdk]: https://www.dpdk.org/
 
-- DPDK-based app for detailed eventdev metrics per device, per port and per queue
-- Sysfs entries from kernel driver for RAS metrics
+## Requirements
 
-## About Intel® Dynamic Load Balancer (Intel® DLB)
-
-The Intel® Dynamic Load Balancer (Intel® DLB) is a PCIe device that provides
-load-balanced, prioritized scheduling of events (that is, packets) across
-CPU cores enabling efficient core-to-core communication. It is a hardware
-accelerator located inside the latest Intel® Xeon® devices offered by Intel.
-It supports the event-driven programming model of DPDK's Event Device Library.
-This library is used in packet processing pipelines for multi-core scalability,
-dynamic load-balancing, and variety of packet distribution and synchronization
-schemes.
-
-## About DPDK Event Device Library
-
-The DPDK Event device library is an abstraction that provides the application
-with features to schedule events. The eventdev framework introduces the event
-driven programming model. In a polling model, lcores poll ethdev ports and
-associated Rx queues directly to look for a packet. By contrast in an event
-driven model, lcores call the scheduler that selects packets for them based on
-programmer-specified criteria. The Eventdev library adds support for an event
-driven programming model, which offers applications automatic multicore scaling,
-dynamic load balancing, pipelining, packet ingress order maintenance and
-synchronization services to simplify application packet processing.
-By introducing an event driven programming model, DPDK can support
-both polling and event driven programming models for packet processing,
-and applications are free to choose whatever model (or combination of the two)
-best suits their needs.
-
-## Prerequisites
-
+- Linux kernel 5.12+
 - [DLB >= v7.4](https://www.intel.com/content/www/us/en/download/686372/intel-dynamic-load-balancer.html)
 - [DPDK >= 20.11.3](http://core.dpdk.org/download/)
-- Linux kernel >= 5.12
 
-> **NOTE:** It may happen that sysfs entries or the socket telemetry interface
+> [!NOTE] It may happen that sysfs entries or the socket telemetry interface
 > exposed by DPDK-based app will require root access. This means that either
 > access permissions have to be adjusted for sysfs / socket telemetry
 > interface to allow Telegraf to access it, or Telegraf should run with root
@@ -55,10 +27,9 @@ best suits their needs.
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 
@@ -96,6 +67,13 @@ reported via `/eventdev/` command:
 - `/eventdev/port_xstats`
 - `/eventdev/queue_xstats`
 - `/eventdev/queue_links`
+
+## Metrics
+
+There are two sources of metrics:
+
+- DPDK-based app for detailed eventdev metrics per device, per port and per queue
+- Sysfs entries from kernel driver for RAS metrics
 
 ## Example Output
 

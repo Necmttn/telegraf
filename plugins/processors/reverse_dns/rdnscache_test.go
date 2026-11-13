@@ -3,27 +3,29 @@ package reverse_dns
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSimpleReverseDNSLookup(t *testing.T) {
-	d := NewReverseDNSCache(60*time.Second, 1*time.Second, -1)
-	defer d.Stop()
+	d := newReverseDNSCache(60*time.Second, 1*time.Second, -1)
+	defer d.stop()
 
-	d.Resolver = &localResolver{}
-	answer, err := d.Lookup("127.0.0.1")
+	d.resolver = &localResolver{}
+	answer, err := d.lookup("127.0.0.1")
 	require.NoError(t, err)
 	require.Equal(t, []string{"localhost"}, answer)
-	err = blockAllWorkers(d)
+	err = blockAllWorkers(t.Context(), d)
 	require.NoError(t, err)
 
 	// do another request with no workers available.
 	// it should read from cache instantly.
-	answer, err = d.Lookup("127.0.0.1")
+	answer, err = d.lookup("127.0.0.1")
 	require.NoError(t, err)
 	require.Equal(t, []string{"localhost"}, answer)
 
@@ -32,38 +34,37 @@ func TestSimpleReverseDNSLookup(t *testing.T) {
 	d.cleanup()
 	require.Len(t, d.expireList, 1) // ttl hasn't hit yet.
 
-	stats := d.Stats()
+	stats := d.getStats()
 
-	require.EqualValues(t, 0, stats.CacheExpire)
-	require.EqualValues(t, 1, stats.CacheMiss)
-	require.EqualValues(t, 1, stats.CacheHit)
-	require.EqualValues(t, 1, stats.RequestsFilled)
-	require.EqualValues(t, 0, stats.RequestsAbandoned)
+	require.EqualValues(t, 0, stats.cacheExpire)
+	require.EqualValues(t, 1, stats.cacheMiss)
+	require.EqualValues(t, 1, stats.cacheHit)
+	require.EqualValues(t, 1, stats.requestsFilled)
+	require.EqualValues(t, 0, stats.requestsAbandoned)
 }
 
 func TestParallelReverseDNSLookup(t *testing.T) {
-	d := NewReverseDNSCache(1*time.Second, 1*time.Second, -1)
-	defer d.Stop()
+	d := newReverseDNSCache(1*time.Second, 1*time.Second, -1)
+	defer d.stop()
 
-	d.Resolver = &localResolver{}
-	var answer1 []string
-	var answer2 []string
+	d.resolver = &localResolver{}
+	var answer1, answer2 []string
+	var err1, err2 error
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 	go func() {
-		answer, err := d.Lookup("127.0.0.1")
-		require.NoError(t, err)
-		answer1 = answer
+		answer1, err1 = d.lookup("127.0.0.1")
 		wg.Done()
 	}()
 	go func() {
-		answer, err := d.Lookup("127.0.0.1")
-		require.NoError(t, err)
-		answer2 = answer
+		answer2, err2 = d.lookup("127.0.0.1")
 		wg.Done()
 	}()
 
 	wg.Wait()
+
+	require.NoError(t, err1)
+	require.NoError(t, err2)
 
 	t.Log(answer1)
 	t.Log(answer2)
@@ -73,32 +74,32 @@ func TestParallelReverseDNSLookup(t *testing.T) {
 
 	require.Len(t, d.cache, 1)
 
-	stats := d.Stats()
+	stats := d.getStats()
 
-	require.EqualValues(t, 1, stats.CacheMiss)
-	require.EqualValues(t, 1, stats.CacheHit)
+	require.EqualValues(t, 1, stats.cacheMiss)
+	require.EqualValues(t, 1, stats.cacheHit)
 }
 
 func TestUnavailableDNSServerRespectsTimeout(t *testing.T) {
-	d := NewReverseDNSCache(0, 1, -1)
-	defer d.Stop()
+	d := newReverseDNSCache(0, 1, -1)
+	defer d.stop()
 
-	d.Resolver = &timeoutResolver{}
+	d.resolver = &timeoutResolver{}
 
-	result, err := d.Lookup("192.153.33.3")
+	result, err := d.lookup("192.153.33.3")
 	require.Error(t, err)
-	require.Equal(t, ErrTimeout, err)
+	require.Equal(t, errTimeout, err)
 
 	require.Nil(t, result)
 }
 
 func TestCleanupHappens(t *testing.T) {
 	ttl := 100 * time.Millisecond
-	d := NewReverseDNSCache(ttl, 1*time.Second, -1)
-	defer d.Stop()
+	d := newReverseDNSCache(ttl, 1*time.Second, -1)
+	defer d.stop()
 
-	d.Resolver = &localResolver{}
-	_, err := d.Lookup("127.0.0.1")
+	d.resolver = &localResolver{}
+	_, err := d.lookup("127.0.0.1")
 	require.NoError(t, err)
 
 	require.Len(t, d.cache, 1)
@@ -107,37 +108,150 @@ func TestCleanupHappens(t *testing.T) {
 	d.cleanup()
 	require.Empty(t, d.expireList)
 
-	stats := d.Stats()
+	stats := d.getStats()
 
-	require.EqualValues(t, 1, stats.CacheExpire)
-	require.EqualValues(t, 1, stats.CacheMiss)
-	require.EqualValues(t, 0, stats.CacheHit)
+	require.EqualValues(t, 1, stats.cacheExpire)
+	require.EqualValues(t, 1, stats.cacheMiss)
+	require.EqualValues(t, 0, stats.cacheHit)
 }
 
 func TestLookupTimeout(t *testing.T) {
-	d := NewReverseDNSCache(10*time.Second, 10*time.Second, -1)
-	defer d.Stop()
+	d := newReverseDNSCache(10*time.Second, 10*time.Second, -1)
+	defer d.stop()
 
-	d.Resolver = &timeoutResolver{}
-	_, err := d.Lookup("127.0.0.1")
+	d.resolver = &timeoutResolver{}
+	_, err := d.lookup("127.0.0.1")
 	require.Error(t, err)
-	require.EqualValues(t, 1, d.Stats().RequestsAbandoned)
+	require.EqualValues(t, 1, d.getStats().requestsAbandoned)
+}
+
+func TestLookupNotFoundIsCached(t *testing.T) {
+	d := newReverseDNSCache(60*time.Second, 1*time.Second, -1)
+	defer d.stop()
+
+	d.resolver = &errorResolver{err: &net.DNSError{Err: "no such host", IsNotFound: true}}
+	names, err := d.lookup("192.0.2.1")
+	require.NoError(t, err)
+	require.Empty(t, names)
+	require.Len(t, d.cache, 1)
+
+	// The negative result must be served from the cache without a worker
+	require.NoError(t, blockAllWorkers(t.Context(), d))
+	names, err = d.lookup("192.0.2.1")
+	require.NoError(t, err)
+	require.Empty(t, names)
+
+	stats := d.getStats()
+	require.EqualValues(t, 1, stats.cacheHit)
+	require.EqualValues(t, 1, stats.requestsFilled)
+	require.EqualValues(t, 0, stats.requestsAbandoned)
+}
+
+func TestLookupTemporaryFailureIsNotCached(t *testing.T) {
+	d := newReverseDNSCache(60*time.Second, 1*time.Second, -1)
+	defer d.stop()
+
+	d.resolver = &errorResolver{err: &net.DNSError{Err: "server misbehaving", IsTemporary: true}}
+	_, err := d.lookup("192.0.2.1")
+	require.Error(t, err)
+	require.Empty(t, d.cache)
+	require.EqualValues(t, 1, d.getStats().requestsAbandoned)
+}
+
+func TestLookupInvalidNamesAreCached(t *testing.T) {
+	tests := []struct {
+		name     string
+		ptrs     []string
+		expected []string
+	}{
+		{name: "valid and wildcard name", ptrs: []string{"*.apps.example.com.", "host.example.com."}, expected: []string{"host.example.com."}},
+		{name: "only wildcard name", ptrs: []string{"*.apps.example.com."}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+			require.NoError(t, err)
+			defer conn.Close()
+
+			started := make(chan struct{})
+			server := &dns.Server{
+				PacketConn:        conn,
+				NotifyStartedFunc: func() { close(started) },
+				Handler: dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+					msg := new(dns.Msg)
+					msg.SetReply(req)
+					for _, ptr := range tt.ptrs {
+						msg.Answer = append(msg.Answer, &dns.PTR{
+							Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: 60},
+							Ptr: ptr,
+						})
+					}
+					if err := w.WriteMsg(msg); err != nil {
+						t.Error(err)
+					}
+				}),
+			}
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				if err := server.ActivateAndServe(); err != nil {
+					t.Error(err)
+				}
+			})
+			defer wg.Wait()
+			<-started
+			defer func() { require.NoError(t, server.Shutdown()) }()
+
+			d := newReverseDNSCache(60*time.Second, 1*time.Second, -1)
+			defer d.stop()
+
+			d.resolver = &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					var dialer net.Dialer
+					return dialer.DialContext(ctx, "udp", conn.LocalAddr().String())
+				},
+			}
+			names, err := d.lookup("192.0.2.1")
+			require.NoError(t, err)
+			require.ElementsMatch(t, tt.expected, names)
+
+			// The answer must be served from the cache without a worker
+			require.NoError(t, blockAllWorkers(t.Context(), d))
+			names, err = d.lookup("192.0.2.1")
+			require.NoError(t, err)
+			require.ElementsMatch(t, tt.expected, names)
+
+			stats := d.getStats()
+			require.EqualValues(t, 1, stats.cacheHit)
+			require.EqualValues(t, 1, stats.requestsFilled)
+			require.EqualValues(t, 0, stats.requestsAbandoned)
+		})
+	}
+}
+
+type errorResolver struct {
+	err error
+}
+
+func (r *errorResolver) LookupAddr(context.Context, string) (names []string, err error) {
+	return nil, r.err
 }
 
 type timeoutResolver struct{}
 
-func (r *timeoutResolver) LookupAddr(_ context.Context, _ string) (names []string, err error) {
+func (*timeoutResolver) LookupAddr(context.Context, string) (names []string, err error) {
 	return nil, errors.New("timeout")
 }
 
 type localResolver struct{}
 
-func (r *localResolver) LookupAddr(_ context.Context, _ string) (names []string, err error) {
+func (*localResolver) LookupAddr(context.Context, string) (names []string, err error) {
 	return []string{"localhost"}, nil
 }
 
 // blockAllWorkers is a test function that eats up all the worker pool space to
 // make sure workers are done running and there's no room to acquire a new worker.
-func blockAllWorkers(d *ReverseDNSCache) error {
-	return d.sem.Acquire(context.Background(), int64(d.maxWorkers))
+func blockAllWorkers(testContext context.Context, d *reverseDNSCache) error {
+	return d.sem.Acquire(testContext, int64(d.maxWorkers))
 }

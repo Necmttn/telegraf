@@ -66,7 +66,10 @@ func mockTwemproxyServer() (net.Listener, error) {
 		return nil, err
 	}
 	go func(l net.Listener) {
-		conn, _ := l.Accept()
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
 		if _, err := conn.Write([]byte(sampleStats)); err != nil {
 			return
 		}
@@ -95,12 +98,12 @@ func TestGather(t *testing.T) {
 	err = twemproxy.Gather(&acc)
 	require.NoError(t, err)
 
-	var sourceData map[string]interface{}
+	var sourceData map[string]any
 	if err := json.Unmarshal([]byte(sampleStats), &sourceData); err != nil {
 		panic(err)
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"total_connections": float64(276448),
 		"curr_connections":  float64(1322),
 		"timestamp":         float64(1.447312436e+09),
@@ -112,7 +115,7 @@ func TestGather(t *testing.T) {
 	acc.AssertContainsTaggedFields(t, "twemproxy", fields, tags)
 
 	poolName := "demo"
-	poolFields := map[string]interface{}{
+	poolFields := map[string]any{
 		"client_connections": float64(1305),
 		"client_eof":         float64(126813),
 		"client_err":         float64(147942),
@@ -129,7 +132,7 @@ func TestGather(t *testing.T) {
 		"source":    "server1.website.com",
 		"twemproxy": "127.0.0.1:22222",
 	}
-	poolServerFields1 := map[string]interface{}{
+	poolServerFields1 := map[string]any{
 		"in_queue":           float64(0),
 		"in_queue_bytes":     float64(0),
 		"out_queue":          float64(0),
@@ -153,7 +156,7 @@ func TestGather(t *testing.T) {
 		"source":    "server1.website.com",
 		"twemproxy": "127.0.0.1:22222",
 	}
-	poolServerFields2 := map[string]interface{}{
+	poolServerFields2 := map[string]any{
 		"in_queue":           float64(0),
 		"in_queue_bytes":     float64(0),
 		"out_queue":          float64(0),

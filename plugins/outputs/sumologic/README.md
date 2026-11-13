@@ -1,25 +1,23 @@
 # Sumo Logic Output Plugin
 
-This plugin sends metrics to [Sumo Logic HTTP Source][http-source] in HTTP
-messages, encoded using one of the output data formats.
+This plugin writes metrics to a [Sumo Logic HTTP Source][sumologic] using one
+of the following data formats:
 
-Telegraf minimum version: Telegraf 1.16.0
+- `graphite` for Content-Type of `application/vnd.sumologic.graphite`
+- `carbon2` for Content-Type of `application/vnd.sumologic.carbon2`
+- `prometheus` for Content-Type of `application/vnd.sumologic.prometheus`
 
-Currently metrics can be sent using one of the following data formats, supported
-by Sumologic HTTP Source:
+⭐ Telegraf v1.16.0
+🏷️ logging
+💻 all
 
-* `graphite` - for Content-Type of `application/vnd.sumologic.graphite`
-* `carbon2` - for Content-Type of `application/vnd.sumologic.carbon2`
-* `prometheus` - for Content-Type of `application/vnd.sumologic.prometheus`
-
-[http-source]: https://help.sumologic.com/03Send-Data/Sources/02Sources-for-Hosted-Collectors/HTTP-Source/Upload-Metrics-to-an-HTTP-Source
+[sumologic]: https://help.sumologic.com/03Send-Data/Sources/02Sources-for-Hosted-Collectors/HTTP-Source/Upload-Metrics-to-an-HTTP-Source
 
 ## Global configuration options <!-- @/docs/includes/plugin_config.md -->
 
-In addition to the plugin-specific configuration settings, plugins support
-additional global and plugin configuration settings. These settings are used to
-modify metrics, tags, and field or create aliases and configure ordering, etc.
-See the [CONFIGURATION.md][CONFIGURATION.md] for more details.
+Plugins support additional global and plugin configuration settings for tasks
+such as modifying metrics, tags, and fields, creating aliases, and configuring
+plugin ordering. See [CONFIGURATION.md][CONFIGURATION.md] for more details.
 
 [CONFIGURATION.md]: ../../../docs/CONFIGURATION.md#plugins
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -15,67 +16,34 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/internal"
+	"github.com/influxdata/telegraf/plugins/common/sudo"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
 //go:embed sample.conf
 var sampleConfig string
 
-type runner func(cmdName string, timeout config.Duration, useSudo bool, Server string, ConfigFile string) (*bytes.Buffer, error)
+var (
+	defaultBinary  = "/usr/sbin/nsd-control"
+	defaultTimeout = config.Duration(time.Second)
+)
 
-// NSD is used to store configuration values
 type NSD struct {
-	Binary     string
-	Timeout    config.Duration
-	UseSudo    bool
-	Server     string
-	ConfigFile string
+	Binary     string          `toml:"binary"`
+	Timeout    config.Duration `toml:"timeout"`
+	UseSudo    bool            `toml:"use_sudo"`
+	Server     string          `toml:"server"`
+	ConfigFile string          `toml:"config_file"`
 
 	run runner
 }
 
-var defaultBinary = "/usr/sbin/nsd-control"
-var defaultTimeout = config.Duration(time.Second)
-
-// Shell out to nsd_stat and return the output
-func nsdRunner(cmdName string, timeout config.Duration, useSudo bool, server string, configFile string) (*bytes.Buffer, error) {
-	cmdArgs := []string{"stats_noreset"}
-
-	if server != "" {
-		host, port, err := net.SplitHostPort(server)
-		if err == nil {
-			server = host + "@" + port
-		}
-
-		cmdArgs = append([]string{"-s", server}, cmdArgs...)
-	}
-
-	if configFile != "" {
-		cmdArgs = append([]string{"-c", configFile}, cmdArgs...)
-	}
-
-	cmd := exec.Command(cmdName, cmdArgs...)
-
-	if useSudo {
-		cmdArgs = append([]string{cmdName}, cmdArgs...)
-		cmd = exec.Command("sudo", cmdArgs...)
-	}
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err := internal.RunTimeout(cmd, time.Duration(timeout))
-	if err != nil {
-		return &out, fmt.Errorf("error running nsd-control: %w (%s %v)", err, cmdName, cmdArgs)
-	}
-
-	return &out, nil
-}
+type runner func(cmdName string, timeout config.Duration, useSudo bool, Server string, ConfigFile string) (*bytes.Buffer, error)
 
 func (*NSD) SampleConfig() string {
 	return sampleConfig
 }
 
-// Gather collects stats from nsd-control and adds them to the Accumulator
 func (s *NSD) Gather(acc telegraf.Accumulator) error {
 	out, err := s.run(s.Binary, s.Timeout, s.UseSudo, s.Server, s.ConfigFile)
 	if err != nil {
@@ -83,8 +51,8 @@ func (s *NSD) Gather(acc telegraf.Accumulator) error {
 	}
 
 	// Process values
-	fields := make(map[string]interface{})
-	fieldsServers := make(map[string]map[string]interface{})
+	fields := make(map[string]any)
+	fieldsServers := make(map[string]map[string]any)
 
 	scanner := bufio.NewScanner(out)
 	for scanner.Scan() {
@@ -113,7 +81,7 @@ func (s *NSD) Gather(acc telegraf.Accumulator) error {
 					serverTokens := statTokens[1:]
 					field := strings.Join(serverTokens[:], "_")
 					if fieldsServers[serverID] == nil {
-						fieldsServers[serverID] = make(map[string]interface{})
+						fieldsServers[serverID] = make(map[string]any)
 					}
 					fieldsServers[serverID][field] = fieldValue
 				}
@@ -131,6 +99,44 @@ func (s *NSD) Gather(acc telegraf.Accumulator) error {
 	}
 
 	return nil
+}
+
+// Shell out to nsd_stat and return the output
+func nsdRunner(cmdName string, timeout config.Duration, useSudo bool, server, configFile string) (*bytes.Buffer, error) {
+	cmdArgs := []string{"stats_noreset"}
+
+	if server != "" {
+		host, port, err := net.SplitHostPort(server)
+		if err == nil {
+			server = host + "@" + port
+		}
+
+		cmdArgs = append([]string{"-s", server}, cmdArgs...)
+	}
+
+	if configFile != "" {
+		cmdArgs = append([]string{"-c", configFile}, cmdArgs...)
+	}
+
+	cmd := exec.Command(cmdName, cmdArgs...)
+
+	if useSudo {
+		cmdArgs = append([]string{cmdName}, cmdArgs...)
+		// OpenBSD doas rules run nsd-control as _nsd. doas targets root unless -u is set.
+		if runtime.GOOS == "openbsd" {
+			cmdArgs = append([]string{"-u", "_nsd"}, cmdArgs...)
+		}
+		cmd = exec.Command(sudo.Binary(), cmdArgs...)
+	}
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := internal.RunTimeout(cmd, time.Duration(timeout))
+	if err != nil {
+		return &out, fmt.Errorf("error running nsd-control: %w (%s %v)", err, cmdName, cmdArgs)
+	}
+
+	return &out, nil
 }
 
 func init() {

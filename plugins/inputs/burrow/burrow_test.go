@@ -27,7 +27,10 @@ func getResponseJSON(requestURI string) ([]byte, int) {
 	}
 
 	// respond with file
-	b, _ := os.ReadFile(jsonFile)
+	b, err := os.ReadFile(jsonFile)
+	if err != nil {
+		panic(err)
+	}
 	return b, code
 }
 
@@ -48,12 +51,12 @@ func getHTTPServerBasicAuth() *httptest.Server {
 
 		username, password, authOK := r.BasicAuth()
 		if !authOK {
-			http.Error(w, "Not authorized", 401)
+			http.Error(w, "Not authorized", http.StatusUnauthorized)
 			return
 		}
 
 		if username != "test" && password != "test" {
-			http.Error(w, "Not authorized", 401)
+			http.Error(w, "Not authorized", http.StatusUnauthorized)
 			return
 		}
 
@@ -70,11 +73,11 @@ func TestBurrowTopic(t *testing.T) {
 	s := getHTTPServer()
 	defer s.Close()
 
-	plugin := &burrow{Servers: []string{s.URL}}
+	plugin := &Burrow{Servers: []string{s.URL}}
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		// topicA
 		{"offset": int64(459178195)},
 		{"offset": int64(459178022)},
@@ -89,7 +92,7 @@ func TestBurrowTopic(t *testing.T) {
 
 	require.Empty(t, acc.Errors)
 	require.True(t, acc.HasMeasurement("burrow_topic"))
-	for i := 0; i < len(fields); i++ {
+	for i := range fields {
 		acc.AssertContainsTaggedFields(t, "burrow_topic", fields[i], tags[i])
 	}
 }
@@ -99,13 +102,13 @@ func TestBurrowPartition(t *testing.T) {
 	s := getHTTPServer()
 	defer s.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers: []string{s.URL},
 	}
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{
 			"status":      "OK",
 			"status_code": 1,
@@ -137,7 +140,7 @@ func TestBurrowPartition(t *testing.T) {
 	require.Empty(t, acc.Errors)
 	require.True(t, acc.HasMeasurement("burrow_partition"))
 
-	for i := 0; i < len(fields); i++ {
+	for i := range fields {
 		acc.AssertContainsTaggedFields(t, "burrow_partition", fields[i], tags[i])
 	}
 }
@@ -147,13 +150,13 @@ func TestBurrowGroup(t *testing.T) {
 	s := getHTTPServer()
 	defer s.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers: []string{s.URL},
 	}
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 
-	fields := []map[string]interface{}{
+	fields := []map[string]any{
 		{
 			"status":          "OK",
 			"status_code":     1,
@@ -172,7 +175,7 @@ func TestBurrowGroup(t *testing.T) {
 	require.Empty(t, acc.Errors)
 	require.True(t, acc.HasMeasurement("burrow_group"))
 
-	for i := 0; i < len(fields); i++ {
+	for i := range fields {
 		acc.AssertContainsTaggedFields(t, "burrow_group", fields[i], tags[i])
 	}
 }
@@ -185,13 +188,13 @@ func TestMultipleServers(t *testing.T) {
 	s2 := getHTTPServer()
 	defer s2.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers: []string{s1.URL, s2.URL},
 	}
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 
-	require.Exactly(t, 14, len(acc.Metrics))
+	require.Len(t, acc.Metrics, 14)
 	require.Empty(t, acc.Errors)
 }
 
@@ -200,14 +203,14 @@ func TestMultipleRuns(t *testing.T) {
 	s := getHTTPServer()
 	defer s.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers: []string{s.URL},
 	}
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		acc := &testutil.Accumulator{}
 		require.NoError(t, plugin.Gather(acc))
 
-		require.Exactly(t, 7, len(acc.Metrics))
+		require.Len(t, acc.Metrics, 7)
 		require.Empty(t, acc.Errors)
 	}
 }
@@ -217,7 +220,7 @@ func TestBasicAuthConfig(t *testing.T) {
 	s := getHTTPServerBasicAuth()
 	defer s.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers:  []string{s.URL},
 		Username: "test",
 		Password: "test",
@@ -226,7 +229,7 @@ func TestBasicAuthConfig(t *testing.T) {
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 
-	require.Exactly(t, 7, len(acc.Metrics))
+	require.Len(t, acc.Metrics, 7)
 	require.Empty(t, acc.Errors)
 }
 
@@ -235,7 +238,7 @@ func TestFilterClusters(t *testing.T) {
 	s := getHTTPServer()
 	defer s.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers:         []string{s.URL},
 		ClustersInclude: []string{"wrongname*"}, // clustername1 -> no match
 	}
@@ -244,7 +247,7 @@ func TestFilterClusters(t *testing.T) {
 	require.NoError(t, plugin.Gather(acc))
 
 	// no match by cluster
-	require.Exactly(t, 0, len(acc.Metrics))
+	require.Empty(t, acc.Metrics)
 	require.Empty(t, acc.Errors)
 }
 
@@ -253,7 +256,7 @@ func TestFilterGroups(t *testing.T) {
 	s := getHTTPServer()
 	defer s.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers:       []string{s.URL},
 		GroupsInclude: []string{"group?"}, // group1 -> match
 		TopicsExclude: []string{"*"},      // exclude all
@@ -262,7 +265,7 @@ func TestFilterGroups(t *testing.T) {
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 
-	require.Exactly(t, 1, len(acc.Metrics))
+	require.Len(t, acc.Metrics, 1)
 	require.Empty(t, acc.Errors)
 }
 
@@ -271,7 +274,7 @@ func TestFilterTopics(t *testing.T) {
 	s := getHTTPServer()
 	defer s.Close()
 
-	plugin := &burrow{
+	plugin := &Burrow{
 		Servers:       []string{s.URL},
 		TopicsInclude: []string{"topic?"}, // topicA -> match
 		GroupsExclude: []string{"*"},      // exclude all
@@ -280,6 +283,6 @@ func TestFilterTopics(t *testing.T) {
 	acc := &testutil.Accumulator{}
 	require.NoError(t, plugin.Gather(acc))
 
-	require.Exactly(t, 3, len(acc.Metrics))
+	require.Len(t, acc.Metrics, 3)
 	require.Empty(t, acc.Errors)
 }

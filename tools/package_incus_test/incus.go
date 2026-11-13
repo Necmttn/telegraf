@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	incus "github.com/lxc/incus/client"
-	"github.com/lxc/incus/shared/api"
+	incus "github.com/lxc/incus/v7/client"
+	"github.com/lxc/incus/v7/shared/api"
 )
 
 var (
@@ -21,7 +21,7 @@ type BytesBuffer struct {
 	*bytes.Buffer
 }
 
-func (b *BytesBuffer) Close() error {
+func (*BytesBuffer) Close() error {
 	return nil
 }
 
@@ -41,7 +41,7 @@ func (c *IncusClient) Connect() error {
 }
 
 // Create a container using a specific remote and alias.
-func (c *IncusClient) Create(name string, remote string, alias string) error {
+func (c *IncusClient) Create(name, remote, alias string) error {
 	fmt.Printf("creating %s with %s:%s\n", name, remote, alias)
 
 	if c.Client == nil {
@@ -100,12 +100,13 @@ func (c *IncusClient) Delete(name string) error {
 	return op.Wait()
 }
 
-// Run a command returning result struct. Will kill commands that take longer
+// Exec runs a command returning result struct. Will kill commands that take longer
 // than 120 seconds.
 func (c *IncusClient) Exec(name string, command ...string) error {
 	fmt.Printf("$ %s\n", strings.Join(command, " "))
 
-	cmd := []string{"/usr/bin/timeout", "-k", strconv.Itoa(killTimeout), strconv.Itoa(timeout)}
+	cmd := make([]string, 0, len(command)+4)
+	cmd = append(cmd, "/usr/bin/timeout", "-k", strconv.Itoa(killTimeout), strconv.Itoa(timeout))
 	cmd = append(cmd, command...)
 	req := api.InstanceExecPost{
 		Command:   cmd,
@@ -147,7 +148,7 @@ func (c *IncusClient) Exec(name string, command ...string) error {
 }
 
 // Push file to container.
-func (c *IncusClient) Push(name string, src string, dst string) error {
+func (c *IncusClient) Push(name, src, dst string) error {
 	fmt.Printf("cp %s %s%s\n", src, name, dst)
 	f, err := os.Open(src)
 	if err != nil {

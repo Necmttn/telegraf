@@ -1,11 +1,11 @@
 package socket_listener
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -25,6 +25,7 @@ import (
 	"github.com/influxdata/telegraf/plugins/inputs"
 	_ "github.com/influxdata/telegraf/plugins/parsers/all"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
+	"github.com/influxdata/telegraf/plugins/parsers/value"
 	"github.com/influxdata/telegraf/testutil"
 )
 
@@ -39,19 +40,19 @@ func TestSocketListener(t *testing.T) {
 		metric.New(
 			"test",
 			map[string]string{"foo": "bar"},
-			map[string]interface{}{"v": int64(1)},
+			map[string]any{"v": int64(1)},
 			time.Unix(0, 123456789),
 		),
 		metric.New(
 			"test",
 			map[string]string{"foo": "baz"},
-			map[string]interface{}{"v": int64(2)},
+			map[string]any{"v": int64(2)},
 			time.Unix(0, 123456790),
 		),
 		metric.New(
 			"test",
 			map[string]string{"foo": "zab"},
-			map[string]interface{}{"v": int64(3)},
+			map[string]any{"v": int64(3)},
 			time.Unix(0, 123456791),
 		),
 	}
@@ -128,19 +129,23 @@ func TestSocketListener(t *testing.T) {
 				}
 
 				// Create a socket
+				// The Maximum length of the socket path is 104/108 characters, path created with t.TempDir() is too long for some cases
+				// (it combines test name with subtest name and some random numbers in the path).
+				// Therefore, in this case, it is safer to stick with `os.MkdirTemp()`.
+				//nolint:usetesting // Ignore "os.CreateTemp("", ...) could be replaced by os.CreateTemp(t.TempDir(), ...) in TestSocketListener" finding.
 				sock, err := os.CreateTemp("", "sock-")
 				require.NoError(t, err)
-				defer sock.Close()
 				defer os.Remove(sock.Name())
+				defer sock.Close()
 				serverAddr = sock.Name()
 			}
 
 			// Setup plugin according to test specification
 			plugin := &SocketListener{
-				Log:             &testutil.Logger{},
 				ServiceAddress:  proto + "://" + serverAddr,
 				ContentEncoding: tt.encoding,
 				ReadBufferSize:  tt.buffersize,
+				Log:             &testutil.Logger{},
 			}
 			if strings.HasSuffix(tt.schema, "tls") {
 				plugin.ServerConfig = *serverTLS
@@ -158,7 +163,7 @@ func TestSocketListener(t *testing.T) {
 			require.NoError(t, plugin.Start(&acc))
 			defer plugin.Stop()
 
-			addr := plugin.listener.addr()
+			addr := plugin.socket.Address()
 
 			// Create a noop client
 			// Server is async, so verify no errors at the end.
@@ -193,17 +198,35 @@ func TestSocketListener(t *testing.T) {
 	}
 }
 
-func TestSocketListenerStream(t *testing.T) {
-	logger := &testutil.CaptureLogger{}
+func TestLargeReadBufferTCP(t *testing.T) {
+	// Construct a buffer-size setting of 1000KiB
+	var bufsize config.Size
+	require.NoError(t, bufsize.UnmarshalText([]byte("1000KiB")))
 
+	// Setup plugin with a sufficient read buffer
 	plugin := &SocketListener{
-		Log:            logger,
-		ServiceAddress: "tcp://127.0.0.1:0",
-		ReadBufferSize: 1024,
+		ServiceAddress:    "tcp://127.0.0.1:0",
+		ReadBufferSize:    bufsize,
+		SplittingStrategy: "newline",
+		Log:               &testutil.Logger{},
 	}
-	parser := &influx.Parser{}
+	parser := &value.Parser{
+		MetricName: "test",
+		DataType:   "string",
+	}
 	require.NoError(t, parser.Init())
 	plugin.SetParser(parser)
+
+	// Create a large message with the readbuffer size
+	message := bytes.Repeat([]byte{'a'}, int(bufsize)-2)
+	expected := []telegraf.Metric{
+		metric.New(
+			"test",
+			map[string]string{},
+			map[string]any{"value": string(message)},
+			time.Unix(0, 0),
+		),
+	}
 
 	// Start the plugin
 	var acc testutil.Accumulator
@@ -211,39 +234,113 @@ func TestSocketListenerStream(t *testing.T) {
 	require.NoError(t, plugin.Start(&acc))
 	defer plugin.Stop()
 
-	addr := plugin.listener.addr()
+	addr := plugin.socket.Address()
 
-	// Create a noop client
+	// Setup the client for submitting data
 	client, err := createClient(plugin.ServiceAddress, addr, nil)
 	require.NoError(t, err)
+	defer client.Close()
 
-	_, err = client.Write([]byte("test value=42i\n"))
+	_, err = client.Write(append(message, '\n'))
 	require.NoError(t, err)
+	client.Close()
 
-	require.Eventually(t, func() bool {
+	getError := func() error {
 		acc.Lock()
 		defer acc.Unlock()
-		return acc.NMetrics() >= 1
-	}, time.Second, 100*time.Millisecond, "did not receive metric")
+		return acc.FirstError()
+	}
 
-	// This has to be a stream-listener...
-	listener, ok := plugin.listener.(*streamListener)
-	require.True(t, ok)
-	listener.Lock()
-	conns := len(listener.connections)
-	listener.Unlock()
-	require.NotZero(t, conns)
+	// Test the resulting metrics and compare against expected results
+	require.Eventuallyf(t, func() bool {
+		return acc.NMetrics() >= uint64(len(expected))
+	}, time.Second, 100*time.Millisecond, "did not receive metrics (%d): %v", acc.NMetrics(), getError())
+	actual := acc.GetTelegrafMetrics()
+	testutil.RequireMetricsEqual(t, expected, actual, testutil.IgnoreTime())
+}
 
-	plugin.Stop()
+func TestLargeReadBufferUnixgram(t *testing.T) {
+	// Construct a buffer-size setting of 100KiB
+	// Assuming that the testing environment has net.core.wmem_max set to a value greater than 100KiB
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows, as unixgram sockets are not supported")
+	}
 
-	// Verify that plugin.Stop() closed the client's connection
-	_ = client.SetReadDeadline(time.Now().Add(time.Second))
-	buf := []byte{1}
-	_, err = client.Read(buf)
-	require.Equal(t, err, io.EOF)
+	if runtime.GOOS == "darwin" {
+		t.Skip("Skipping on macOS (darwin), as unixgram write buffer size cannot be changed (default 2048 bytes)")
+	}
 
-	require.Empty(t, logger.Errors())
-	require.Empty(t, logger.Warnings())
+	var bufsize config.Size
+	require.NoError(t, bufsize.UnmarshalText([]byte("100KiB")))
+
+	// Create a socket
+	sock, err := os.CreateTemp(t.TempDir(), "sock-")
+	require.NoError(t, err)
+	defer sock.Close()
+
+	var serverAddr = sock.Name()
+
+	// Setup plugin with a sufficient read buffer
+	plugin := &SocketListener{
+		ServiceAddress: "unixgram" + "://" + serverAddr,
+		ReadBufferSize: bufsize,
+		Log:            &testutil.Logger{},
+	}
+	parser := &value.Parser{
+		MetricName: "test",
+		DataType:   "string",
+	}
+	require.NoError(t, parser.Init())
+	plugin.SetParser(parser)
+
+	// Create a large message with the readbuffer size
+	message := bytes.Repeat([]byte{'a'}, int(bufsize))
+	expected := []telegraf.Metric{
+		metric.New(
+			"test",
+			map[string]string{},
+			map[string]any{"value": string(message)},
+			time.Unix(0, 0),
+		),
+	}
+
+	// Start the plugin
+	var acc testutil.Accumulator
+	require.NoError(t, plugin.Init())
+	require.NoError(t, plugin.Start(&acc))
+	defer plugin.Stop()
+
+	addr := plugin.socket.Address()
+
+	// Setup the client for submitting data
+	client, err := createClient(plugin.ServiceAddress, addr, nil)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Check the socket write buffer size
+	unixConn, ok := client.(*net.UnixConn)
+	require.True(t, ok, "client is not a *net.UnixConn")
+	if err := unixConn.SetWriteBuffer(len(message)); err != nil {
+		t.Skipf("Failed to set write buffer size: %v. Skipping test.", err)
+	}
+
+	// Write the message
+	_, err = client.Write(message)
+	require.NoError(t, err)
+	client.Close()
+
+	getError := func() error {
+		acc.Lock()
+		defer acc.Unlock()
+		return acc.FirstError()
+	}
+
+	// Test the resulting metrics and compare against expected results
+	require.Eventuallyf(t, func() bool {
+		return acc.NMetrics() >= uint64(len(expected))
+	}, time.Second, 100*time.Millisecond, "did not receive metrics (%d): %v", acc.NMetrics(), getError())
+	actual := acc.GetTelegrafMetrics()
+	testutil.RequireMetricsEqual(t, expected, actual, testutil.IgnoreTime())
 }
 
 func TestCases(t *testing.T) {
@@ -314,7 +411,7 @@ func TestCases(t *testing.T) {
 			defer plugin.Stop()
 
 			// Create a client without TLS
-			addr := plugin.listener.addr()
+			addr := plugin.socket.Address()
 			client, err := createClient(plugin.ServiceAddress, addr, nil)
 			require.NoError(t, err)
 

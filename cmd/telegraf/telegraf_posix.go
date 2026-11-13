@@ -4,23 +4,33 @@ package main
 
 import (
 	"log"
+	"runtime"
 	"syscall"
-
-	"github.com/urfave/cli/v2"
 )
 
 func (t *Telegraf) Run() error {
 	stop = make(chan struct{})
+	defer close(stop)
+
+	cfg, err := t.loadConfiguration()
+	if err != nil {
+		return err
+	}
+	t.cfg = cfg
 	return t.reloadLoop()
 }
 
-func cliFlags() []cli.Flag {
-	return []cli.Flag{}
-}
-
 func getLockedMemoryLimit() uint64 {
-	// From https://elixir.bootlin.com/linux/latest/source/include/uapi/asm-generic/resource.h#L35
-	const rLimitMemlock = 8
+	var rLimitMemlock int
+
+	switch runtime.GOOS {
+	case "dragonfly", "freebsd", "netbsd", "openbsd":
+		// From https://cgit.freebsd.org/src/tree/sys/sys/resource.h#n107
+		rLimitMemlock = 6
+	default:
+		// From https://elixir.bootlin.com/linux/latest/source/include/uapi/asm-generic/resource.h#L35
+		rLimitMemlock = 8
+	}
 
 	var limit syscall.Rlimit
 	if err := syscall.Getrlimit(rLimitMemlock, &limit); err != nil {

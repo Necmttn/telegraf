@@ -7,11 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/testutil"
 )
 
-func TestAdd(t *testing.T) {
-	a := &TestAggregator{}
+func TestRunningAggregatorAdd(t *testing.T) {
+	a := &mockAggregator{}
 	ra := NewRunningAggregator(a, &AggregatorConfig{
 		Name: "TestRunningAggregator",
 		Filter: Filter{
@@ -25,9 +26,9 @@ func TestAdd(t *testing.T) {
 	now := time.Now()
 	ra.UpdateWindow(now, now.Add(ra.Config.Period))
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		time.Now().Add(time.Millisecond*150),
@@ -39,8 +40,8 @@ func TestAdd(t *testing.T) {
 	require.Equal(t, int64(101), acc.Metrics[0].Fields["sum"])
 }
 
-func TestAddMetricsOutsideCurrentPeriod(t *testing.T) {
-	a := &TestAggregator{}
+func TestRunningAggregatorAddMetricsOutsideCurrentPeriod(t *testing.T) {
+	a := &mockAggregator{}
 	ra := NewRunningAggregator(a, &AggregatorConfig{
 		Name: "TestRunningAggregator",
 		Filter: Filter{
@@ -53,9 +54,9 @@ func TestAddMetricsOutsideCurrentPeriod(t *testing.T) {
 	now := time.Now()
 	ra.UpdateWindow(now, now.Add(ra.Config.Period))
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now.Add(-time.Hour),
@@ -64,9 +65,9 @@ func TestAddMetricsOutsideCurrentPeriod(t *testing.T) {
 	require.False(t, ra.Add(m))
 
 	// metric after current period
-	m = testutil.MustMetric("RITest",
+	m = metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now.Add(time.Hour),
@@ -75,9 +76,9 @@ func TestAddMetricsOutsideCurrentPeriod(t *testing.T) {
 	require.False(t, ra.Add(m))
 
 	// "now" metric
-	m = testutil.MustMetric("RITest",
+	m = metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		time.Now().Add(time.Millisecond*50),
@@ -89,8 +90,8 @@ func TestAddMetricsOutsideCurrentPeriod(t *testing.T) {
 	require.Equal(t, int64(101), acc.Metrics[0].Fields["sum"])
 }
 
-func TestAddMetricsOutsideCurrentPeriodWithGrace(t *testing.T) {
-	a := &TestAggregator{}
+func TestRunningAggregatorAddMetricsOutsideCurrentPeriodWithGrace(t *testing.T) {
+	a := &mockAggregator{}
 	ra := NewRunningAggregator(a, &AggregatorConfig{
 		Name: "TestRunningAggregator",
 		Filter: Filter{
@@ -104,9 +105,9 @@ func TestAddMetricsOutsideCurrentPeriodWithGrace(t *testing.T) {
 	now := time.Now()
 	ra.UpdateWindow(now, now.Add(ra.Config.Period))
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now.Add(-time.Hour),
@@ -115,9 +116,9 @@ func TestAddMetricsOutsideCurrentPeriodWithGrace(t *testing.T) {
 	require.False(t, ra.Add(m))
 
 	// metric before current period (late)
-	m = testutil.MustMetric("RITest",
+	m = metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(100),
 		},
 		now.Add(-time.Millisecond*1000),
@@ -126,9 +127,9 @@ func TestAddMetricsOutsideCurrentPeriodWithGrace(t *testing.T) {
 	require.False(t, ra.Add(m))
 
 	// metric before current period, but within grace period (late)
-	m = testutil.MustMetric("RITest",
+	m = metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(102),
 		},
 		now.Add(-time.Millisecond*200),
@@ -137,9 +138,9 @@ func TestAddMetricsOutsideCurrentPeriodWithGrace(t *testing.T) {
 	require.False(t, ra.Add(m))
 
 	// "now" metric
-	m = testutil.MustMetric("RITest",
+	m = metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		time.Now().Add(time.Millisecond*50),
@@ -151,8 +152,8 @@ func TestAddMetricsOutsideCurrentPeriodWithGrace(t *testing.T) {
 	require.Equal(t, int64(203), acc.Metrics[0].Fields["sum"])
 }
 
-func TestAddAndPushOnePeriod(t *testing.T) {
-	a := &TestAggregator{}
+func TestRunningAggregatorAddAndPushOnePeriod(t *testing.T) {
+	a := &mockAggregator{}
 	ra := NewRunningAggregator(a, &AggregatorConfig{
 		Name: "TestRunningAggregator",
 		Filter: Filter{
@@ -166,9 +167,9 @@ func TestAddAndPushOnePeriod(t *testing.T) {
 	now := time.Now()
 	ra.UpdateWindow(now, now.Add(ra.Config.Period))
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		time.Now().Add(time.Millisecond*100),
@@ -177,11 +178,11 @@ func TestAddAndPushOnePeriod(t *testing.T) {
 
 	ra.Push(&acc)
 
-	acc.AssertContainsFields(t, "TestMetric", map[string]interface{}{"sum": int64(101)})
+	acc.AssertContainsFields(t, "TestMetric", map[string]any{"sum": int64(101)})
 }
 
-func TestAddDropOriginal(t *testing.T) {
-	ra := NewRunningAggregator(&TestAggregator{}, &AggregatorConfig{
+func TestRunningAggregatorAddDropOriginal(t *testing.T) {
+	ra := NewRunningAggregator(&mockAggregator{}, &AggregatorConfig{
 		Name: "TestRunningAggregator",
 		Filter: Filter{
 			NamePass: []string{"RI*"},
@@ -193,9 +194,9 @@ func TestAddDropOriginal(t *testing.T) {
 	now := time.Now()
 	ra.UpdateWindow(now, now.Add(ra.Config.Period))
 
-	m := testutil.MustMetric("RITest",
+	m := metric.New("RITest",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -203,9 +204,9 @@ func TestAddDropOriginal(t *testing.T) {
 	require.True(t, ra.Add(m))
 
 	// this metric name doesn't match the filter, so Add will return false
-	m2 := testutil.MustMetric("foobar",
+	m2 := metric.New("foobar",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"value": int64(101),
 		},
 		now,
@@ -213,8 +214,8 @@ func TestAddDropOriginal(t *testing.T) {
 	require.False(t, ra.Add(m2))
 }
 
-func TestAddDoesNotModifyMetric(t *testing.T) {
-	ra := NewRunningAggregator(&TestAggregator{}, &AggregatorConfig{
+func TestRunningAggregatorAddDoesNotModifyMetric(t *testing.T) {
+	ra := NewRunningAggregator(&mockAggregator{}, &AggregatorConfig{
 		Name: "TestRunningAggregator",
 		Filter: Filter{
 			FieldInclude: []string{"a"},
@@ -225,10 +226,10 @@ func TestAddDoesNotModifyMetric(t *testing.T) {
 
 	now := time.Now()
 
-	m := testutil.MustMetric(
+	m := metric.New(
 		"cpu",
 		map[string]string{},
-		map[string]interface{}{
+		map[string]any{
 			"a": int64(42),
 			"b": int64(42),
 		},
@@ -239,24 +240,47 @@ func TestAddDoesNotModifyMetric(t *testing.T) {
 	testutil.RequireMetricEqual(t, expected, m)
 }
 
-type TestAggregator struct {
+func TestRunningAggregatorPushResetsWindowOnLargeForwardJump(t *testing.T) {
+	// Regression guard for PR #16375: the drift safeguard must reset the
+	// window when the wall clock is beyond the expected window, such as
+	// after hibernation.
+	ra := NewRunningAggregator(&mockAggregator{}, &AggregatorConfig{
+		Name:   "TestRunningAggregator",
+		Filter: Filter{NamePass: []string{"*"}},
+		Period: 10 * time.Second,
+	})
+	require.NoError(t, ra.Config.Filter.Compile())
+	acc := testutil.Accumulator{}
+
+	staleEnd := time.Now().Add(-2 * time.Minute)
+	ra.UpdateWindow(staleEnd.Add(-ra.Config.Period), staleEnd)
+
+	ra.Push(&acc)
+
+	// After a reset the new window end lands in (now, now+period].
+	require.WithinDuration(t, time.Now(), ra.EndPeriod(), ra.Config.Period)
+}
+
+type mockAggregator struct {
 	sum int64
 }
 
-func (t *TestAggregator) Description() string  { return "" }
-func (t *TestAggregator) SampleConfig() string { return "" }
-func (t *TestAggregator) Reset() {
+func (*mockAggregator) SampleConfig() string {
+	return ""
+}
+
+func (t *mockAggregator) Reset() {
 	t.sum = 0
 }
 
-func (t *TestAggregator) Push(acc telegraf.Accumulator) {
+func (t *mockAggregator) Push(acc telegraf.Accumulator) {
 	acc.AddFields("TestMetric",
-		map[string]interface{}{"sum": t.sum},
+		map[string]any{"sum": t.sum},
 		map[string]string{},
 	)
 }
 
-func (t *TestAggregator) Add(in telegraf.Metric) {
+func (t *mockAggregator) Add(in telegraf.Metric) {
 	for _, v := range in.Fields() {
 		if vi, ok := v.(int64); ok {
 			t.sum += vi

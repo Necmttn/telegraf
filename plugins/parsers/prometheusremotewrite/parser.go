@@ -1,20 +1,37 @@
 package prometheusremotewrite
 
 import (
+	"errors"
 	"fmt"
-	"math"
 	"time"
 
-	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 
 	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/parsers"
 )
 
 type Parser struct {
-	DefaultTags map[string]string
+	MetricVersion int `toml:"prometheus_metric_version"`
+	DefaultTags   map[string]string
+
+	timeFunc func() time.Time
+}
+
+func (p *Parser) SetDefaultTags(tags map[string]string) {
+	p.DefaultTags = tags
+}
+
+func (p *Parser) SetTimeFunc(f func() time.Time) {
+	p.timeFunc = f
+}
+
+func (p *Parser) Init() error {
+	if p.timeFunc == nil {
+		p.timeFunc = time.Now
+	}
+
+	return nil
 }
 
 func (p *Parser) Parse(buf []byte) ([]telegraf.Metric, error) {
@@ -26,40 +43,22 @@ func (p *Parser) Parse(buf []byte) ([]telegraf.Metric, error) {
 		return nil, fmt.Errorf("unable to unmarshal request body: %w", err)
 	}
 
-	now := time.Now()
-
 	for _, ts := range req.Timeseries {
-		tags := map[string]string{}
-		for key, value := range p.DefaultTags {
-			tags[key] = value
+		var metricsFromTS []telegraf.Metric
+		switch p.MetricVersion {
+		case 0, 2:
+			metricsFromTS, err = p.extractMetricsV2(&ts)
+		case 1:
+			metricsFromTS, err = p.extractMetricsV1(&ts)
+		default:
+			return nil, fmt.Errorf("unknown prometheus metric version %d", p.MetricVersion)
 		}
-
-		for _, l := range ts.Labels {
-			tags[l.Name] = l.Value
+		if err != nil {
+			return nil, err
 		}
-
-		metricName := tags[model.MetricNameLabel]
-		if metricName == "" {
-			return nil, fmt.Errorf("metric name %q not found in tag-set or empty", model.MetricNameLabel)
-		}
-		delete(tags, model.MetricNameLabel)
-
-		for _, s := range ts.Samples {
-			fields := make(map[string]interface{})
-			if !math.IsNaN(s.Value) {
-				fields[metricName] = s.Value
-			}
-			// converting to telegraf metric
-			if len(fields) > 0 {
-				t := now
-				if s.Timestamp > 0 {
-					t = time.Unix(0, s.Timestamp*1000000)
-				}
-				m := metric.New("prometheus_remote_write", tags, fields, t)
-				metrics = append(metrics, m)
-			}
-		}
+		metrics = append(metrics, metricsFromTS...)
 	}
+
 	return metrics, err
 }
 
@@ -70,23 +69,19 @@ func (p *Parser) ParseLine(line string) (telegraf.Metric, error) {
 	}
 
 	if len(metrics) < 1 {
-		return nil, fmt.Errorf("no metrics in line")
+		return nil, errors.New("no metrics in line")
 	}
 
 	if len(metrics) > 1 {
-		return nil, fmt.Errorf("more than one metric in line")
+		return nil, errors.New("more than one metric in line")
 	}
 
 	return metrics[0], nil
 }
 
-func (p *Parser) SetDefaultTags(tags map[string]string) {
-	p.DefaultTags = tags
-}
-
 func init() {
 	parsers.Add("prometheusremotewrite",
-		func(defaultMetricName string) telegraf.Parser {
+		func(string) telegraf.Parser {
 			return &Parser{}
 		})
 }

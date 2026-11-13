@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -128,7 +129,7 @@ func TestIdentityEncodeDecode(t *testing.T) {
 
 func TestStreamIdentityDecode(t *testing.T) {
 	var r bytes.Buffer
-	n, err := r.Write([]byte("howdy"))
+	n, err := r.WriteString("howdy")
 	require.NoError(t, err)
 	require.Equal(t, 5, n)
 
@@ -202,16 +203,10 @@ func TestCompressionLevel(t *testing.T) {
 		})
 
 		// Check known levels 0..9
-		for level := 0; level < 10; level++ {
+		for level := range 10 {
 			name := fmt.Sprintf("%s level %d", tt.algorithm, level)
 			t.Run(name, func(t *testing.T) {
-				var valid bool
-				for _, l := range tt.validLevels {
-					if l == level {
-						valid = true
-						break
-					}
-				}
+				valid := slices.Contains(tt.validLevels, level)
 
 				enc, err := NewContentEncoder(tt.algorithm, WithCompressionLevel(level))
 				if valid {

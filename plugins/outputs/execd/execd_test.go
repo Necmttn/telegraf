@@ -19,14 +19,14 @@ import (
 	"github.com/influxdata/telegraf/config"
 	"github.com/influxdata/telegraf/metric"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
-	influxSerializer "github.com/influxdata/telegraf/plugins/serializers/influx"
+	serializers_influx "github.com/influxdata/telegraf/plugins/serializers/influx"
 	"github.com/influxdata/telegraf/testutil"
 )
 
 var now = time.Date(2020, 6, 30, 16, 16, 0, 0, time.UTC)
 
 func TestExternalOutputWorks(t *testing.T) {
-	serializer := &influxSerializer.Serializer{}
+	serializer := &serializers_influx.Serializer{}
 	require.NoError(t, serializer.Init())
 
 	exe, err := os.Executable()
@@ -62,7 +62,7 @@ func TestExternalOutputWorks(t *testing.T) {
 	m := metric.New(
 		"cpu",
 		map[string]string{"name": "cpu1"},
-		map[string]interface{}{"idle": 50, "sys": 30},
+		map[string]any{"idle": 50, "sys": 30},
 		now,
 	)
 
@@ -73,7 +73,7 @@ func TestExternalOutputWorks(t *testing.T) {
 }
 
 func TestBatchOutputWorks(t *testing.T) {
-	serializer := &influxSerializer.Serializer{}
+	serializer := &serializers_influx.Serializer{}
 	require.NoError(t, serializer.Init())
 
 	exe, err := os.Executable()
@@ -110,14 +110,14 @@ func TestBatchOutputWorks(t *testing.T) {
 	m := metric.New(
 		"cpu",
 		map[string]string{"name": "cpu1"},
-		map[string]interface{}{"idle": 50, "sys": 30},
+		map[string]any{"idle": 50, "sys": 30},
 		now,
 	)
 
 	m2 := metric.New(
 		"cpu",
 		map[string]string{"name": "cpu1"},
-		map[string]interface{}{"idle": 50, "sys": 30},
+		map[string]any{"idle": 50, "sys": 30},
 		now,
 	)
 
@@ -128,7 +128,7 @@ func TestBatchOutputWorks(t *testing.T) {
 }
 
 func TestPartiallyUnserializableThrowError(t *testing.T) {
-	serializer := &influxSerializer.Serializer{}
+	serializer := &serializers_influx.Serializer{}
 	require.NoError(t, serializer.Init())
 
 	exe, err := os.Executable()
@@ -148,14 +148,14 @@ func TestPartiallyUnserializableThrowError(t *testing.T) {
 	m1 := metric.New(
 		"cpu",
 		map[string]string{"name": "cpu1"},
-		map[string]interface{}{"idle": 50, "sys": 30},
+		map[string]any{"idle": 50, "sys": 30},
 		now,
 	)
 
 	m2 := metric.New(
 		"cpu",
 		map[string]string{"name": "cpu2"},
-		map[string]interface{}{},
+		map[string]any{},
 		now,
 	)
 
@@ -165,7 +165,7 @@ func TestPartiallyUnserializableThrowError(t *testing.T) {
 }
 
 func TestPartiallyUnserializableCanBeSkipped(t *testing.T) {
-	serializer := &influxSerializer.Serializer{}
+	serializer := &serializers_influx.Serializer{}
 	require.NoError(t, serializer.Init())
 
 	exe, err := os.Executable()
@@ -185,14 +185,14 @@ func TestPartiallyUnserializableCanBeSkipped(t *testing.T) {
 	m1 := metric.New(
 		"cpu",
 		map[string]string{"name": "cpu1"},
-		map[string]interface{}{"idle": 50, "sys": 30},
+		map[string]any{"idle": 50, "sys": 30},
 		now,
 	)
 
 	m2 := metric.New(
 		"cpu",
 		map[string]string{"name": "cpu2"},
-		map[string]interface{}{},
+		map[string]any{},
 		now,
 	)
 
@@ -232,8 +232,7 @@ func runOutputConsumerProgram() {
 			if errors.Is(err, influx.EOF) {
 				break // stream ended
 			}
-			var parseErr *influx.ParseError
-			if errors.As(err, &parseErr) {
+			if parseErr, ok := errors.AsType[*influx.ParseError](err); ok {
 				fmt.Fprintf(os.Stderr, "parse ERR %v\n", parseErr)
 				//nolint:revive // error code is important for this "test"
 				os.Exit(1)
@@ -244,9 +243,9 @@ func runOutputConsumerProgram() {
 		}
 		numMetrics++
 
-		expected := testutil.MustMetric(metricName,
+		expected := metric.New(metricName,
 			map[string]string{"name": "cpu1"},
-			map[string]interface{}{"idle": 50, "sys": 30},
+			map[string]any{"idle": 50, "sys": 30},
 			now,
 		)
 

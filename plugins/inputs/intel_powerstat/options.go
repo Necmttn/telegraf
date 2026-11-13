@@ -33,7 +33,7 @@ type optGenerator struct{}
 
 // generate takes plugin configuration options and generates options needed
 // to gather requested metrics.
-func (g *optGenerator) generate(cfg optConfig) []ptel.Option {
+func (*optGenerator) generate(cfg optConfig) []ptel.Option {
 	opts := make([]ptel.Option, 0)
 	if len(cfg.includedCPUs) != 0 {
 		opts = append(opts, ptel.WithIncludedCPUs(cfg.includedCPUs))
@@ -85,7 +85,6 @@ func needsMsrCPU(metrics []cpuMetricType) bool {
 		case cpuC3StateResidency:
 		case cpuC6StateResidency:
 		case cpuC7StateResidency:
-		case cpuBusyCycles:
 		case cpuBusyFrequency:
 		default:
 			continue
@@ -124,7 +123,6 @@ func needsTimeRelatedMsr(metrics []cpuMetricType) bool {
 		case cpuC3StateResidency:
 		case cpuC6StateResidency:
 		case cpuC7StateResidency:
-		case cpuBusyCycles:
 		case cpuBusyFrequency:
 		default:
 			continue

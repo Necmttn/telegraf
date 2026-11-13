@@ -83,7 +83,6 @@ func TestAgent_LoadOutput(t *testing.T) {
 	require.Len(t, a.Config.Outputs, 1)
 
 	c = config.NewConfig()
-	c.OutputFilters = []string{}
 	err = c.LoadConfig("../config/testdata/telegraf-agent.toml")
 	require.NoError(t, err)
 	a = NewAgent(c)
@@ -214,7 +213,7 @@ func TestCases(t *testing.T) {
 
 			// Setup the agent and run the agent in "once" mode
 			agent := NewAgent(cfg)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			actual, err := collect(ctx, agent, 0)
 			require.NoError(t, err)
@@ -222,11 +221,47 @@ func TestCases(t *testing.T) {
 			// Process expected metrics and compare with resulting metrics
 			options := []cmp.Option{
 				testutil.IgnoreTags("host"),
-			}
-			if expected[0].Time().IsZero() {
-				options = append(options, testutil.IgnoreTime())
+				testutil.IgnoreTime(),
 			}
 			testutil.RequireMetricsEqual(t, expected, actual, options...)
+		})
+	}
+}
+
+func TestSkipProcessorsAfterAggregatorsDefault(t *testing.T) {
+	tests := []struct {
+		name              string
+		skipBefore        bool
+		skipAfter         *bool
+		expectedSkipAfter bool
+	}{
+		{
+			name:              "skip after aggregators by default",
+			skipBefore:        false,
+			expectedSkipAfter: true,
+		},
+		{
+			name:              "run after aggregators when skipping before",
+			skipBefore:        true,
+			expectedSkipAfter: false,
+		},
+		{
+			name:              "explicit setting is kept",
+			skipBefore:        true,
+			skipAfter:         new(true),
+			expectedSkipAfter: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := config.NewConfig()
+			c.Agent.SkipProcessorsBeforeAggregators = tt.skipBefore
+			c.Agent.SkipProcessorsAfterAggregators = tt.skipAfter
+
+			NewAgent(c)
+			require.NotNil(t, c.Agent.SkipProcessorsAfterAggregators)
+			require.Equal(t, tt.expectedSkipAfter, *c.Agent.SkipProcessorsAfterAggregators)
 		})
 	}
 }
@@ -239,16 +274,14 @@ func collect(ctx context.Context, a *Agent, wait time.Duration) ([]telegraf.Metr
 	src := make(chan telegraf.Metric, 100)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for m := range src {
 			mu.Lock()
 			received = append(received, m)
 			mu.Unlock()
 			m.Reject()
 		}
-	}()
+	})
 
 	if err := a.runTest(ctx, wait, src); err != nil {
 		return nil, err
@@ -259,4 +292,73 @@ func collect(ctx context.Context, a *Agent, wait time.Duration) ([]telegraf.Metr
 		return received, fmt.Errorf("input plugins recorded %d errors", models.GlobalGatherErrors.Get())
 	}
 	return received, nil
+}
+
+// pushRecorder reports the wall-clock time of the first Push.
+type pushRecorder struct {
+	pushed chan time.Time
+}
+
+func (*pushRecorder) SampleConfig() string { return "" }
+func (*pushRecorder) Add(telegraf.Metric)  {}
+func (*pushRecorder) Reset()               {}
+func (r *pushRecorder) Push(telegraf.Accumulator) {
+	select {
+	case r.pushed <- time.Now():
+	default:
+	}
+}
+
+// pushAfterWindowShift runs the aggregator push loop against a window that
+// ends 500ms out, then moves the window end forward by shift while the loop
+// is asleep on its timer. From the loop's point of view that is the same as
+// the wall clock stepping back by shift while it waited. It returns the time
+// of the first Push and the shifted window end.
+func pushAfterWindowShift(t *testing.T, shift time.Duration) (pushed, windowEnd time.Time) {
+	rec := &pushRecorder{pushed: make(chan time.Time, 1)}
+	ra := models.NewRunningAggregator(rec, &models.AggregatorConfig{
+		Name:   "test",
+		Filter: models.Filter{NamePass: []string{"*"}},
+		Period: time.Second,
+	})
+	require.NoError(t, ra.Config.Filter.Compile())
+
+	// Strip the monotonic reading, as AlignTime does under round_interval.
+	end := time.Now().Add(500 * time.Millisecond).Truncate(-1)
+	ra.UpdateWindow(end.Add(-ra.Period()), end)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var acc testutil.Accumulator
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		(&Agent{}).push(ctx, ra, &acc)
+	}()
+
+	// Give the loop time to arm its timer before moving the deadline under
+	// it; the shift has to land while the timer is pending.
+	time.Sleep(50 * time.Millisecond)
+	windowEnd = end.Add(shift)
+	ra.Lock()
+	ra.UpdateWindow(windowEnd.Add(-ra.Period()), windowEnd)
+	ra.Unlock()
+
+	select {
+	case pushed = <-rec.pushed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no push within 5s")
+	}
+	cancel()
+	<-done
+	return pushed, windowEnd
+}
+
+func TestAggregatorPushWaitsForWindowEndOnEarlyTimer(t *testing.T) {
+	pushed, windowEnd := pushAfterWindowShift(t, 500*time.Millisecond)
+	require.False(t, pushed.Before(windowEnd), "pushed at %v, before the window end %v", pushed, windowEnd)
+}
+
+func TestAggregatorPushDoesNotWaitOutClockAdjustment(t *testing.T) {
+	pushed, windowEnd := pushAfterWindowShift(t, 2*time.Second)
+	require.True(t, pushed.Before(windowEnd), "pushed at %v, waited for the window end %v", pushed, windowEnd)
 }

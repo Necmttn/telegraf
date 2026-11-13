@@ -19,23 +19,34 @@ import (
 //go:embed sample.conf
 var sampleConfig string
 
-type TomcatStatus struct {
-	TomcatJvm        TomcatJvm         `xml:"jvm"`
-	TomcatConnectors []TomcatConnector `xml:"connector"`
+type Tomcat struct {
+	URL      string          `toml:"url"`
+	Username string          `toml:"username"`
+	Password string          `toml:"password"`
+	Timeout  config.Duration `toml:"timeout"`
+	tls.ClientConfig
+
+	client  *http.Client
+	request *http.Request
 }
 
-type TomcatJvm struct {
-	JvmMemory      JvmMemoryStat       `xml:"memory"`
-	JvmMemoryPools []JvmMemoryPoolStat `xml:"memorypool"`
+type tomcatStatus struct {
+	TomcatJvm        tomcatJvm         `xml:"jvm"`
+	TomcatConnectors []tomcatConnector `xml:"connector"`
 }
 
-type JvmMemoryStat struct {
+type tomcatJvm struct {
+	JvmMemory      jvmMemoryStat       `xml:"memory"`
+	JvmMemoryPools []jvmMemoryPoolStat `xml:"memorypool"`
+}
+
+type jvmMemoryStat struct {
 	Free  int64 `xml:"free,attr"`
 	Total int64 `xml:"total,attr"`
 	Max   int64 `xml:"max,attr"`
 }
 
-type JvmMemoryPoolStat struct {
+type jvmMemoryPoolStat struct {
 	Name           string `xml:"name,attr"`
 	Type           string `xml:"type,attr"`
 	UsageInit      int64  `xml:"usageInit,attr"`
@@ -44,35 +55,25 @@ type JvmMemoryPoolStat struct {
 	UsageUsed      int64  `xml:"usageUsed,attr"`
 }
 
-type TomcatConnector struct {
+type tomcatConnector struct {
 	Name        string      `xml:"name,attr"`
-	ThreadInfo  ThreadInfo  `xml:"threadInfo"`
-	RequestInfo RequestInfo `xml:"requestInfo"`
+	ThreadInfo  threadInfo  `xml:"threadInfo"`
+	RequestInfo requestInfo `xml:"requestInfo"`
 }
 
-type ThreadInfo struct {
+type threadInfo struct {
 	MaxThreads         int64 `xml:"maxThreads,attr"`
 	CurrentThreadCount int64 `xml:"currentThreadCount,attr"`
 	CurrentThreadsBusy int64 `xml:"currentThreadsBusy,attr"`
 }
-type RequestInfo struct {
+
+type requestInfo struct {
 	MaxTime        int   `xml:"maxTime,attr"`
 	ProcessingTime int   `xml:"processingTime,attr"`
 	RequestCount   int   `xml:"requestCount,attr"`
 	ErrorCount     int   `xml:"errorCount,attr"`
 	BytesReceived  int64 `xml:"bytesReceived,attr"`
 	BytesSent      int64 `xml:"bytesSent,attr"`
-}
-
-type Tomcat struct {
-	URL      string
-	Username string
-	Password string
-	Timeout  config.Duration
-	tls.ClientConfig
-
-	client  *http.Client
-	request *http.Request
 }
 
 func (*Tomcat) SampleConfig() string {
@@ -112,7 +113,7 @@ func (s *Tomcat) Gather(acc telegraf.Accumulator) error {
 			resp.StatusCode, s.URL)
 	}
 
-	var status TomcatStatus
+	var status tomcatStatus
 	if err := xml.NewDecoder(resp.Body).Decode(&status); err != nil {
 		return err
 	}
@@ -122,7 +123,7 @@ func (s *Tomcat) Gather(acc telegraf.Accumulator) error {
 	}
 
 	// add tomcat_jvm_memory measurements
-	tcm := map[string]interface{}{
+	tcm := map[string]any{
 		"free":  status.TomcatJvm.JvmMemory.Free,
 		"total": status.TomcatJvm.JvmMemory.Total,
 		"max":   status.TomcatJvm.JvmMemory.Max,
@@ -137,7 +138,7 @@ func (s *Tomcat) Gather(acc telegraf.Accumulator) error {
 			"source": s.URL,
 		}
 
-		tcmpFields := map[string]interface{}{
+		tcmpFields := map[string]any{
 			"init":      mp.UsageInit,
 			"committed": mp.UsageCommitted,
 			"max":       mp.UsageMax,
@@ -159,7 +160,7 @@ func (s *Tomcat) Gather(acc telegraf.Accumulator) error {
 			"source": s.URL,
 		}
 
-		tccFields := map[string]interface{}{
+		tccFields := map[string]any{
 			"max_threads":          c.ThreadInfo.MaxThreads,
 			"current_thread_count": c.ThreadInfo.CurrentThreadCount,
 			"current_threads_busy": c.ThreadInfo.CurrentThreadsBusy,

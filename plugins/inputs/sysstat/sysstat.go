@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"strconv"
@@ -27,12 +28,14 @@ import (
 var sampleConfig string
 
 var (
-	firstTimestamp time.Time
 	execCommand    = exec.Command // execCommand is used to mock commands in tests.
 	dfltActivities = []string{"DISK"}
 )
 
-const parseInterval = 1 // parseInterval is the interval (in seconds) where the parsing of the binary file takes place.
+const (
+	parseInterval = 1 // parseInterval is the interval (in seconds) where the parsing of the binary file takes place.
+	cmd           = "sadf"
+)
 
 type Sysstat struct {
 	// Sadc represents the path to the sadc collector utility.
@@ -47,7 +50,7 @@ type Sysstat struct {
 	// Activities is a list of activities that are passed as argument to the
 	// collector utility (e.g: DISK, SNMP etc...)
 	// The more activities that are added, the more data is collected.
-	Activities []string
+	Activities []string `toml:"activities"`
 
 	// Options is a map of options.
 	//
@@ -63,19 +66,20 @@ type Sysstat struct {
 	// and represents itself a measurement.
 	//
 	// If Group is true, metrics are grouped to a single measurement with the corresponding description as name.
-	Options map[string]string
+	Options map[string]string `toml:"options"`
 
 	// Group determines if metrics are grouped or not.
-	Group bool
+	Group bool `toml:"group"`
 
 	// DeviceTags adds the possibility to add additional tags for devices.
 	DeviceTags map[string][]map[string]string `toml:"device_tags"`
-	interval   int
 
-	Log telegraf.Logger
+	Log telegraf.Logger `toml:"-"`
+
+	// Used to autodetect how long the sadc command should run for
+	interval       int
+	firstTimestamp time.Time
 }
-
-const cmd = "sadf"
 
 func (*Sysstat) SampleConfig() string {
 	return sampleConfig
@@ -105,10 +109,10 @@ func (s *Sysstat) Gather(acc telegraf.Accumulator) error {
 	}
 
 	if s.interval == 0 {
-		if firstTimestamp.IsZero() {
-			firstTimestamp = time.Now()
+		if s.firstTimestamp.IsZero() {
+			s.firstTimestamp = time.Now()
 		} else {
-			s.interval = int(time.Since(firstTimestamp).Seconds() + 0.5)
+			s.interval = int(time.Since(s.firstTimestamp).Seconds() + 0.5)
 		}
 	}
 
@@ -144,7 +148,7 @@ func (s *Sysstat) Gather(acc telegraf.Accumulator) error {
 // The above command collects system metrics during <collectInterval> and
 // saves it in binary form to tmpFile.
 func (s *Sysstat) collect(tempfile string) error {
-	options := []string{}
+	options := make([]string, 0, len(s.Activities))
 	for _, act := range s.Activities {
 		options = append(options, "-S", act)
 	}
@@ -196,8 +200,8 @@ func withCLocale(cmd *exec.Cmd) *exec.Cmd {
 //	Sadf -p -- -p <option> tmpFile
 //
 // and parses the output to add it to the telegraf.Accumulator acc.
-func (s *Sysstat) parse(acc telegraf.Accumulator, option string, tmpfile string, ts time.Time) error {
-	cmd := execCommand(s.Sadf, s.sadfOptions(option, tmpfile)...)
+func (s *Sysstat) parse(acc telegraf.Accumulator, option, tmpfile string, ts time.Time) error {
+	cmd := execCommand(s.Sadf, sadfOptions(option, tmpfile)...)
 	cmd = withCLocale(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -215,7 +219,7 @@ func (s *Sysstat) parse(acc telegraf.Accumulator, option string, tmpfile string,
 	// groupData to accumulate data when Group=true
 	type groupData struct {
 		tags   map[string]string
-		fields map[string]interface{}
+		fields map[string]any
 	}
 	m := make(map[string]groupData)
 	for {
@@ -233,14 +237,12 @@ func (s *Sysstat) parse(acc telegraf.Accumulator, option string, tmpfile string,
 			return err
 		}
 
-		tags := map[string]string{}
+		tags := make(map[string]string)
 		if device != "-" {
 			tags["device"] = device
 			if addTags, ok := s.DeviceTags[device]; ok {
 				for _, tag := range addTags {
-					for k, v := range tag {
-						tags[k] = v
-					}
+					maps.Copy(tags, tag)
 				}
 			}
 		}
@@ -249,20 +251,18 @@ func (s *Sysstat) parse(acc telegraf.Accumulator, option string, tmpfile string,
 			measurement = s.Options[option]
 			if _, ok := m[device]; !ok {
 				m[device] = groupData{
-					fields: make(map[string]interface{}),
+					fields: make(map[string]any),
 					tags:   make(map[string]string),
 				}
 			}
 			g := m[device]
 			if len(g.tags) == 0 {
-				for k, v := range tags {
-					g.tags[k] = v
-				}
+				maps.Copy(g.tags, tags)
 			}
 			g.fields[escape(record[4])] = value
 		} else {
 			measurement = s.Options[option] + "_" + escape(record[4])
-			fields := map[string]interface{}{
+			fields := map[string]any{
 				"value": value,
 			}
 			acc.AddFields(measurement, fields, tags, ts)
@@ -280,14 +280,11 @@ func (s *Sysstat) parse(acc telegraf.Accumulator, option string, tmpfile string,
 }
 
 // sadfOptions creates the correct options for the sadf utility.
-func (s *Sysstat) sadfOptions(activityOption string, tmpfile string) []string {
-	options := []string{
-		"-p",
-		"--",
-		"-p",
-	}
-
+func sadfOptions(activityOption, tmpfile string) []string {
 	opts := strings.Split(activityOption, " ")
+
+	options := make([]string, 0, len(opts)+4)
+	options = append(options, "-p", "--", "-p")
 	options = append(options, opts...)
 	options = append(options, tmpfile)
 

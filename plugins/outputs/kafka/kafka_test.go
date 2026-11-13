@@ -1,40 +1,37 @@
 package kafka
 
 import (
-	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/IBM/sarama"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
 	kafkacontainer "github.com/testcontainers/testcontainers-go/modules/kafka"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/metric"
+	"github.com/influxdata/telegraf/models"
+	"github.com/influxdata/telegraf/plugins/common/kafka"
 	"github.com/influxdata/telegraf/plugins/serializers/influx"
 	"github.com/influxdata/telegraf/testutil"
 )
-
-type topicSuffixTestpair struct {
-	topicSuffix   TopicSuffix
-	expectedTopic string
-}
 
 func TestConnectAndWriteIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	ctx := context.Background()
-	kafkaContainer, err := kafkacontainer.RunContainer(ctx,
-		kafkacontainer.WithClusterID("test-cluster"),
-		testcontainers.WithImage("confluentinc/confluent-local:7.5.0"),
-	)
+	kafkaContainer, err := kafkacontainer.Run(t.Context(), "confluentinc/confluent-local:7.5.0")
 	require.NoError(t, err)
-	defer kafkaContainer.Terminate(ctx) //nolint:errcheck // ignored
+	defer kafkaContainer.Terminate(t.Context()) //nolint:errcheck // ignored
 
-	brokers, err := kafkaContainer.Brokers(ctx)
+	brokers, err := kafkaContainer.Brokers(t.Context())
 	require.NoError(t, err)
 
 	// Setup the plugin
@@ -67,252 +64,758 @@ func TestTopicSuffixes(t *testing.T) {
 	metricTagValue := m.Tags()[metricTagName]
 	metricName := m.Name()
 
-	var testcases = []topicSuffixTestpair{
-		// This ensures empty separator is okay
-		{TopicSuffix{Method: "measurement"},
-			topic + metricName},
-		{TopicSuffix{Method: "measurement", Separator: "sep"},
-			topic + "sep" + metricName},
-		{TopicSuffix{Method: "tags", Keys: []string{metricTagName}, Separator: "_"},
-			topic + "_" + metricTagValue},
-		{TopicSuffix{Method: "tags", Keys: []string{metricTagName, metricTagName, metricTagName}, Separator: "___"},
-			topic + "___" + metricTagValue + "___" + metricTagValue + "___" + metricTagValue},
-		{TopicSuffix{Method: "tags", Keys: []string{metricTagName, metricTagName, metricTagName}},
-			topic + metricTagValue + metricTagValue + metricTagValue},
-		// This ensures non-existing tags are ignored
-		{TopicSuffix{Method: "tags", Keys: []string{"non_existing_tag", "non_existing_tag"}, Separator: "___"},
-			topic},
-		{TopicSuffix{Method: "tags", Keys: []string{metricTagName, "non_existing_tag"}, Separator: "___"},
-			topic + "___" + metricTagValue},
-		// This ensures backward compatibility
-		{TopicSuffix{},
-			topic},
-	}
-
-	for _, testcase := range testcases {
-		topicSuffix := testcase.topicSuffix
-		expectedTopic := testcase.expectedTopic
-		k := &Kafka{
-			Topic:       topic,
-			TopicSuffix: topicSuffix,
-			Log:         testutil.Logger{},
-		}
-
-		_, topic := k.GetTopicName(m)
-		require.Equal(t, expectedTopic, topic)
-	}
-}
-
-func TestValidateTopicSuffixMethod(t *testing.T) {
-	err := ValidateTopicSuffixMethod("invalid_topic_suffix_method")
-	require.Error(t, err, "Topic suffix method used should be invalid.")
-
-	for _, method := range ValidTopicSuffixMethods {
-		err := ValidateTopicSuffixMethod(method)
-		require.NoError(t, err, "Topic suffix method used should be valid.")
-	}
-}
-
-func TestRoutingKey(t *testing.T) {
-	tests := []struct {
-		name   string
-		kafka  *Kafka
-		metric telegraf.Metric
-		check  func(t *testing.T, routingKey string)
+	var tests = []struct {
+		suffix   TopicSuffix
+		expected string
 	}{
+		// This ensures empty separator is okay
 		{
-			name: "static routing key",
-			kafka: &Kafka{
-				RoutingKey: "static",
-			},
-			metric: func() telegraf.Metric {
-				m := metric.New(
-					"cpu",
-					map[string]string{},
-					map[string]interface{}{
-						"value": 42.0,
-					},
-					time.Unix(0, 0),
-				)
-				return m
-			}(),
-			check: func(t *testing.T, routingKey string) {
-				require.Equal(t, "static", routingKey)
-			},
+			TopicSuffix{Method: "measurement"},
+			topic + metricName,
 		},
 		{
-			name: "random routing key",
-			kafka: &Kafka{
-				RoutingKey: "random",
-			},
-			metric: func() telegraf.Metric {
-				m := metric.New(
-					"cpu",
-					map[string]string{},
-					map[string]interface{}{
-						"value": 42.0,
-					},
-					time.Unix(0, 0),
-				)
-				return m
-			}(),
-			check: func(t *testing.T, routingKey string) {
-				require.Len(t, routingKey, 36)
-			},
+			TopicSuffix{Method: "measurement", Separator: "sep"},
+			topic + "sep" + metricName,
+		},
+		{
+			TopicSuffix{Method: "tags", Keys: []string{metricTagName}, Separator: "_"},
+			topic + "_" + metricTagValue,
+		},
+		{
+			TopicSuffix{Method: "tags", Keys: []string{metricTagName, metricTagName, metricTagName}, Separator: "___"},
+			topic + "___" + metricTagValue + "___" + metricTagValue + "___" + metricTagValue,
+		},
+		{
+			TopicSuffix{Method: "tags", Keys: []string{metricTagName, metricTagName, metricTagName}},
+			topic + metricTagValue + metricTagValue + metricTagValue,
+		},
+		{
+			// Ensure non-existing tags are ignored
+			TopicSuffix{Method: "tags", Keys: []string{"non_existing_tag", "non_existing_tag"}, Separator: "___"},
+			topic,
+		},
+		{
+			TopicSuffix{Method: "tags", Keys: []string{metricTagName, "non_existing_tag"}, Separator: "___"},
+			topic + "___" + metricTagValue,
+		},
+		{
+			// Ensure backward compatibility
+			TopicSuffix{},
+			topic,
 		},
 	}
+
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.kafka.Log = testutil.Logger{}
-			key, err := tt.kafka.routingKey(tt.metric)
-			require.NoError(t, err)
-			tt.check(t, key)
+		t.Run(tt.expected, func(t *testing.T) {
+			topicSuffix := tt.suffix
+			expectedTopic := tt.expected
+			k := &Kafka{
+				Topic:       topic,
+				TopicSuffix: topicSuffix,
+				Log:         testutil.Logger{},
+			}
+
+			_, topic := k.getTopicName(m)
+			require.Equal(t, expectedTopic, topic)
 		})
 	}
 }
 
-type MockProducer struct {
-	sent []*sarama.ProducerMessage
-	sarama.SyncProducer
+func TestValidTopicSuffixMethod(t *testing.T) {
+	for _, method := range []string{"", "measurement", "tags"} {
+		name := method
+		if method == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			plugin := &Kafka{
+				TopicSuffix: TopicSuffix{
+					Method: method,
+				},
+				Log: testutil.Logger{},
+			}
+			require.NoError(t, plugin.Init())
+		})
+	}
 }
 
-func (p *MockProducer) SendMessage(msg *sarama.ProducerMessage) (partition int32, offset int64, err error) {
-	p.sent = append(p.sent, msg)
-	return 0, 0, nil
+func TestInvalidTopicSuffixMethod(t *testing.T) {
+	plugin := &Kafka{
+		TopicSuffix: TopicSuffix{
+			Method: "invalid_topic_suffix_method",
+		},
+		Log: testutil.Logger{},
+	}
+	require.ErrorContains(t, plugin.Init(), "unknown topic suffix method provided")
 }
 
-func (p *MockProducer) SendMessages(msgs []*sarama.ProducerMessage) error {
-	p.sent = append(p.sent, msgs...)
-	return nil
+func TestRoutingKeyStatic(t *testing.T) {
+	plugin := &Kafka{
+		RoutingKey: "static",
+		Log:        testutil.Logger{},
+	}
+
+	m := metric.New(
+		"cpu",
+		map[string]string{},
+		map[string]any{
+			"value": 42.0,
+		},
+		time.Unix(0, 0),
+	)
+
+	key, err := plugin.routingKey(m)
+	require.NoError(t, err)
+	require.Equal(t, "static", key)
 }
 
-func (p *MockProducer) Close() error {
-	return nil
-}
+func TestRoutingKeyRandom(t *testing.T) {
+	plugin := &Kafka{
+		RoutingKey: "random",
+		Log:        testutil.Logger{},
+	}
 
-func NewMockProducer(_ []string, _ *sarama.Config) (sarama.SyncProducer, error) {
-	return &MockProducer{}, nil
+	m := metric.New(
+		"cpu",
+		map[string]string{},
+		map[string]any{
+			"value": 42.0,
+		},
+		time.Unix(0, 0),
+	)
+
+	key, err := plugin.routingKey(m)
+	require.NoError(t, err)
+	require.Len(t, key, 36)
 }
 
 func TestTopicTag(t *testing.T) {
 	tests := []struct {
-		name   string
-		plugin *Kafka
-		input  []telegraf.Metric
-		topic  string
-		value  string
+		name            string
+		topicTag        string
+		excludeTopicTag bool
+		expectedTopic   string
+		expectedContent string
 	}{
 		{
-			name: "static topic",
-			plugin: &Kafka{
-				Brokers:      []string{"127.0.0.1"},
-				Topic:        "telegraf",
-				producerFunc: NewMockProducer,
-			},
-			input: []telegraf.Metric{
-				testutil.MustMetric(
-					"cpu",
-					map[string]string{},
-					map[string]interface{}{
-						"time_idle": 42.0,
-					},
-					time.Unix(0, 0),
-				),
-			},
-			topic: "telegraf",
-			value: "cpu time_idle=42 0\n",
+			name:            "static topic",
+			expectedTopic:   "telegraf",
+			expectedContent: "cpu,topic=xyzzy time_idle=42 0\n",
 		},
 		{
-			name: "topic tag overrides static topic",
-			plugin: &Kafka{
-				Brokers:      []string{"127.0.0.1"},
-				Topic:        "telegraf",
-				TopicTag:     "topic",
-				producerFunc: NewMockProducer,
-			},
-			input: []telegraf.Metric{
-				testutil.MustMetric(
-					"cpu",
-					map[string]string{
-						"topic": "xyzzy",
-					},
-					map[string]interface{}{
-						"time_idle": 42.0,
-					},
-					time.Unix(0, 0),
-				),
-			},
-			topic: "xyzzy",
-			value: "cpu,topic=xyzzy time_idle=42 0\n",
+			name:            "topic tag overrides static topic",
+			topicTag:        "topic",
+			expectedTopic:   "xyzzy",
+			expectedContent: "cpu,topic=xyzzy time_idle=42 0\n",
 		},
 		{
-			name: "missing topic tag falls back to  static topic",
-			plugin: &Kafka{
-				Brokers:      []string{"127.0.0.1"},
-				Topic:        "telegraf",
-				TopicTag:     "topic",
-				producerFunc: NewMockProducer,
-			},
-			input: []telegraf.Metric{
-				testutil.MustMetric(
-					"cpu",
-					map[string]string{},
-					map[string]interface{}{
-						"time_idle": 42.0,
-					},
-					time.Unix(0, 0),
-				),
-			},
-			topic: "telegraf",
-			value: "cpu time_idle=42 0\n",
+			name:            "missing topic tag falls back to  static topic",
+			topicTag:        "non-existant",
+			expectedTopic:   "telegraf",
+			expectedContent: "cpu,topic=xyzzy time_idle=42 0\n",
 		},
 		{
-			name: "exclude topic tag removes tag",
-			plugin: &Kafka{
+			name:            "exclude topic tag removes tag",
+			topicTag:        "topic",
+			excludeTopicTag: true,
+			expectedTopic:   "xyzzy",
+			expectedContent: "cpu time_idle=42 0\n",
+		},
+	}
+
+	// Define an input metric for writing
+	input := []telegraf.Metric{
+		metric.New(
+			"cpu",
+			map[string]string{
+				"topic": "xyzzy",
+			},
+			map[string]any{
+				"time_idle": 42.0,
+			},
+			time.Unix(0, 0),
+		),
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup the serializer
+			s := &influx.Serializer{}
+			require.NoError(t, s.Init())
+
+			// Setup the plugin under test
+			plugin := &Kafka{
 				Brokers:         []string{"127.0.0.1"},
 				Topic:           "telegraf",
-				TopicTag:        "topic",
-				ExcludeTopicTag: true,
-				producerFunc:    NewMockProducer,
+				TopicTag:        tt.topicTag,
+				ExcludeTopicTag: tt.excludeTopicTag,
+				Log:             testutil.Logger{},
+				producerFunc:    newMockProducer,
+			}
+			plugin.SetSerializer(s)
+			require.NoError(t, plugin.Init())
+
+			// Connect and write a metric
+			require.NoError(t, plugin.Connect())
+			require.NoError(t, plugin.Write(input))
+
+			// Check the content that would be sent by the producer
+			producer, ok := plugin.producer.(*mockProducer)
+			require.True(t, ok, "invalid producer type")
+
+			producer.Lock()
+			message := producer.sent[0]
+			producer.Unlock()
+
+			require.Equal(t, tt.expectedTopic, message.Topic)
+			encoded, err := message.Value.Encode()
+			require.NoError(t, err)
+			require.Equal(t, tt.expectedContent, string(encoded))
+		})
+	}
+}
+
+func TestHeaders(t *testing.T) {
+	tests := []struct {
+		name     string
+		headers  map[string]string
+		expected []sarama.RecordHeader
+	}{
+		{
+			name: "none",
+		},
+		{
+			name:    "static string",
+			headers: map[string]string{"agent": "telegraf"},
+			expected: []sarama.RecordHeader{
+				{
+					Key:   []byte("agent"),
+					Value: []byte("telegraf"),
+				},
 			},
-			input: []telegraf.Metric{
-				testutil.MustMetric(
-					"cpu",
-					map[string]string{
-						"topic": "xyzzy",
-					},
-					map[string]interface{}{
-						"time_idle": 42.0,
-					},
-					time.Unix(0, 0),
-				),
+		},
+		{
+			name:    "metric name header",
+			headers: map[string]string{"metric": "{{ .Name }}"},
+			expected: []sarama.RecordHeader{
+				{
+					Key:   []byte("metric"),
+					Value: []byte("cpu"),
+				},
 			},
-			topic: "xyzzy",
-			value: "cpu time_idle=42 0\n",
+		},
+		{
+			name: "complex",
+			headers: map[string]string{
+				"source": `{{ .Tag "source" }}:{{ .Tag "topic"}}`,
+				"device": `{{ .Name }}-{{ .Field "id" }}`,
+			},
+			expected: []sarama.RecordHeader{
+				{
+					Key:   []byte("source"),
+					Value: []byte("server:xyzzy"),
+				},
+				{
+					Key:   []byte("device"),
+					Value: []byte("cpu-3254345daab4"),
+				},
+			},
+		},
+	}
+
+	// Define an input metric for writing
+	input := []telegraf.Metric{
+		metric.New(
+			"cpu",
+			map[string]string{
+				"topic":  "xyzzy",
+				"source": "server",
+			},
+			map[string]any{
+				"id":    "3254345daab4",
+				"value": 42.0,
+				"hours": 255,
+			},
+			time.Unix(0, 0),
+		),
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup the serializer
+			s := &influx.Serializer{}
+			require.NoError(t, s.Init())
+
+			// Setup the plugin under test
+			plugin := &Kafka{
+				Brokers:      []string{"127.0.0.1"},
+				Topic:        "telegraf",
+				Headers:      tt.headers,
+				Log:          testutil.Logger{},
+				producerFunc: newMockProducer,
+			}
+			plugin.SetSerializer(s)
+			require.NoError(t, plugin.Init())
+
+			// Connect and write a metric
+			require.NoError(t, plugin.Connect())
+			require.NoError(t, plugin.Write(input))
+
+			// Check the content that would be sent by the producer
+			producer, ok := plugin.producer.(*mockProducer)
+			require.True(t, ok, "invalid producer type")
+
+			producer.Lock()
+			message := producer.sent[0]
+			producer.Unlock()
+
+			require.ElementsMatch(t, tt.expected, message.Headers)
+		})
+	}
+}
+
+func TestWritePartialFailure(t *testing.T) {
+	producer := &mockProducer{
+		sendError: func(msgs []*sarama.ProducerMessage) error {
+			return sarama.ProducerErrors{{Msg: msgs[1], Err: sarama.ErrUnknownTopicOrPartition}}
+		},
+	}
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
+	plugin := &Kafka{
+		TopicTag:   "topic",
+		Log:        testutil.Logger{},
+		producer:   producer,
+		serializer: serializer,
+	}
+	metrics := []telegraf.Metric{
+		metric.New("cpu", map[string]string{"topic": "existing"}, map[string]any{"value": 1}, time.Unix(1, 0)),
+		metric.New("cpu", map[string]string{"topic": "missing"}, map[string]any{"value": 2}, time.Unix(1, 0)),
+		metric.New("cpu", map[string]string{"topic": "existing"}, map[string]any{"value": 3}, time.Unix(1, 0)),
+	}
+	err := plugin.Write(metrics)
+	var partial *internal.PartialWriteError
+	require.ErrorAs(t, err, &partial)
+	require.Equal(t, []int{0, 2}, partial.MetricsAccept)
+	require.Empty(t, partial.MetricsReject)
+}
+
+func TestWriteDeliveryResults(t *testing.T) {
+	tests := []struct {
+		name           string
+		failures       map[int]error
+		batchError     error
+		invalidMetrics []int
+		wrap           bool
+		accept         []int
+		reject         []int
+	}{
+		{
+			name: "success",
+		},
+		{
+			name:     "unknown topic retry",
+			failures: map[int]error{1: sarama.ErrUnknownTopicOrPartition},
+			accept:   []int{0, 2},
+		},
+		{
+			name:     "wrapped errors",
+			failures: map[int]error{1: fmt.Errorf("wrapped: %w", sarama.ErrUnknownTopicOrPartition)},
+			wrap:     true,
+			accept:   []int{0, 2},
+		},
+		{
+			name:     "configuration then transient",
+			failures: map[int]error{0: sarama.ConfigurationError("oversized message"), 1: sarama.ErrNotEnoughReplicas},
+			accept:   []int{2},
+			reject:   []int{0},
+		},
+		{
+			name:     "transient then configuration",
+			failures: map[int]error{0: sarama.ErrNotEnoughReplicas, 1: sarama.ConfigurationError("unsupported headers")},
+			accept:   []int{2},
+			reject:   []int{1},
+		},
+		{
+			name:     "wrapped configuration error",
+			failures: map[int]error{1: fmt.Errorf("wrapped: %w", sarama.ConfigurationError("oversized message"))},
+			wrap:     true,
+			accept:   []int{0, 2},
+			reject:   []int{1},
+		},
+		{
+			name:       "unclassified batch configuration error",
+			batchError: sarama.ConfigurationError("batch delivery status unknown"),
+		},
+		{
+			name:           "serialization gap before configuration error",
+			invalidMetrics: []int{1},
+			failures:       map[int]error{1: sarama.ConfigurationError("oversized message")},
+			accept:         []int{0},
+			reject:         []int{1, 2},
+		},
+		{
+			name:     "size then transient",
+			failures: map[int]error{0: sarama.ErrMessageSizeTooLarge, 1: sarama.ErrNotEnoughReplicas},
+			accept:   []int{2},
+			reject:   []int{0},
+		},
+		{
+			name:     "transient then size",
+			failures: map[int]error{0: sarama.ErrNotEnoughReplicas, 1: sarama.ErrMessageSizeTooLarge},
+			accept:   []int{2},
+			reject:   []int{1},
+		},
+		{
+			name:     "timestamp then transient",
+			failures: map[int]error{0: sarama.ErrInvalidTimestamp, 1: sarama.ErrNotEnoughReplicas},
+			accept:   []int{2},
+			reject:   []int{0},
+		},
+		{
+			name:     "all transient",
+			failures: map[int]error{0: sarama.ErrNotEnoughReplicas, 1: sarama.ErrNotEnoughReplicas, 2: sarama.ErrNotEnoughReplicas},
+		},
+		{
+			name:       "unclassified error",
+			batchError: errors.New("connection lost"),
+		},
+		{
+			name:       "empty producer errors",
+			batchError: sarama.ProducerErrors{},
+		},
+		{
+			name:           "serialization then success",
+			invalidMetrics: []int{0},
+			accept:         []int{1, 2},
+			reject:         []int{0},
+		},
+		{
+			name:           "serialization then partial",
+			invalidMetrics: []int{0},
+			failures:       map[int]error{0: sarama.ErrUnknownTopicOrPartition},
+			accept:         []int{2},
+			reject:         []int{0},
+		},
+		{
+			name:           "serialization then unclassified",
+			invalidMetrics: []int{0},
+			batchError:     errors.New("connection lost"),
+			reject:         []int{0},
+		},
+		{
+			name:           "serialization gap before retry",
+			invalidMetrics: []int{1},
+			failures:       map[int]error{1: sarama.ErrUnknownTopicOrPartition},
+			accept:         []int{0},
+			reject:         []int{1},
+		},
+		{
+			name:           "serialization gap before rejection",
+			invalidMetrics: []int{1},
+			failures:       map[int]error{1: sarama.ErrMessageSizeTooLarge},
+			accept:         []int{0},
+			reject:         []int{1, 2},
+		},
+		{
+			name:           "serialization gaps around delivery",
+			invalidMetrics: []int{0, 2},
+			accept:         []int{1},
+			reject:         []int{0, 2},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.plugin.Log = testutil.Logger{}
+			producer := &mockProducer{sendError: func(msgs []*sarama.ProducerMessage) error {
+				if tt.batchError != nil {
+					return tt.batchError
+				}
+				var failures sarama.ProducerErrors
+				// Deliberately return failures out of message order.
+				for i, msg := range slices.Backward(msgs) {
+					if err, failed := tt.failures[i]; failed {
+						failures = append(failures, &sarama.ProducerError{Msg: msg, Err: err})
+					}
+				}
+				if len(failures) == 0 {
+					return nil
+				}
+				if tt.wrap {
+					return fmt.Errorf("send failed: %w", failures)
+				}
+				return failures
+			}}
+			serializer := &influx.Serializer{}
+			require.NoError(t, serializer.Init())
+			plugin := &Kafka{
+				Topic:      "test",
+				Log:        testutil.Logger{},
+				producer:   producer,
+				serializer: serializer,
+			}
+			require.NoError(t, plugin.Init())
+			metrics := []telegraf.Metric{testutil.TestMetric(1), testutil.TestMetric(2), testutil.TestMetric(3)}
+			for _, index := range tt.invalidMetrics {
+				metrics[index].SetName("")
+			}
+			err := plugin.Write(metrics)
+			if len(tt.failures) == 0 && tt.batchError == nil && len(tt.invalidMetrics) == 0 {
+				require.NoError(t, err)
+				return
+			}
+			var partial *internal.PartialWriteError
+			require.ErrorAs(t, err, &partial)
+			require.Equal(t, tt.accept, partial.MetricsAccept)
+			require.Equal(t, tt.reject, partial.MetricsReject)
+			require.Len(t, partial.MetricsRejectErrors, len(tt.reject))
+			require.NotEmpty(t, partial.Error())
+		})
+	}
+}
 
-			s := &influx.Serializer{}
-			require.NoError(t, s.Init())
-			tt.plugin.SetSerializer(s)
+func TestWriteNoMessages(t *testing.T) {
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
+	plugin := &Kafka{Log: testutil.Logger{}, serializer: serializer}
+	// No producer is needed when the batch has no serializable metrics.
+	require.NoError(t, plugin.Write(nil))
+	m := testutil.TestMetric(1)
+	m.SetName("")
+	err := plugin.Write([]telegraf.Metric{m})
+	var partial *internal.PartialWriteError
+	require.ErrorAs(t, err, &partial)
+	require.Equal(t, []int{0}, partial.MetricsReject)
+	require.Empty(t, partial.MetricsAccept)
+}
 
-			err := tt.plugin.Connect()
+func TestWriteUnknownTopicWithBroker(t *testing.T) {
+	broker := sarama.NewMockBroker(t, 0)
+	defer broker.Close()
+	broker.SetHandlerByMap(map[string]sarama.MockResponse{
+		"MetadataRequest": sarama.NewMockMetadataResponse(t).
+			SetBroker(broker.Addr(), broker.BrokerID()).
+			SetLeader("existing", 0, broker.BrokerID()),
+		"ProduceRequest": sarama.NewMockProduceResponse(t),
+	})
+	cfg := sarama.NewConfig()
+	cfg.Version = sarama.V0_11_0_0
+	cfg.ApiVersionsRequest = false
+	cfg.Producer.Return.Successes = true
+	cfg.Producer.Retry.Max = 0
+	cfg.Metadata.Retry.Max = 0
+	cfg.Net.DialTimeout = 2 * time.Second
+	cfg.Net.ReadTimeout = 2 * time.Second
+	cfg.Net.WriteTimeout = 2 * time.Second
+	producer, err := sarama.NewSyncProducer([]string{broker.Addr()}, cfg)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, producer.Close()) }()
+
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
+	plugin := &Kafka{
+		TopicTag:        "topic",
+		ExcludeTopicTag: true,
+		Log:             testutil.Logger{},
+		producer:        producer,
+		serializer:      serializer,
+	}
+	buffer, err := models.NewBuffer("kafka", t.Name(), "", 10, "memory", "", false)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, buffer.Close()) }()
+	var delivered []telegraf.DeliveryInfo
+	for _, topic := range []string{"missing", "existing", "existing"} {
+		m, _ := metric.WithTracking(
+			metric.New("cpu", map[string]string{"topic": topic}, map[string]any{"value": 1}, time.Unix(1, 0)),
+			func(info telegraf.DeliveryInfo) { delivered = append(delivered, info) },
+		)
+		require.Zero(t, buffer.Add(m))
+	}
+
+	// A mixed batch removes successful metrics without changing the
+	// buffered topic tags, even when serialization excludes that tag.
+	tx := buffer.BeginTransaction(2)
+	var partial *internal.PartialWriteError
+	require.ErrorAs(t, plugin.Write(tx.Batch), &partial)
+	require.Equal(t, []int{1}, partial.MetricsAccept, "delivery result: %v", partial)
+	for _, m := range tx.Batch {
+		require.True(t, m.HasTag("topic"))
+	}
+	tx.Accept, tx.Reject = partial.MetricsAccept, partial.MetricsReject
+	buffer.EndTransaction(tx)
+
+	// The following flush must reach the newer valid metric too.
+	tx = buffer.BeginTransaction(2)
+	err = plugin.Write(tx.Batch)
+	require.ErrorAs(t, err, &partial)
+	require.Equal(t, []int{1}, partial.MetricsAccept)
+	require.Empty(t, partial.MetricsReject)
+	tx.Accept, tx.Reject = partial.MetricsAccept, partial.MetricsReject
+	buffer.EndTransaction(tx)
+	require.Equal(t, 1, buffer.Len())
+	require.Len(t, delivered, 2)
+	for _, info := range delivered {
+		require.True(t, info.Delivered())
+	}
+
+	// A temporarily missing topic can recover without losing the
+	// retained metric or acknowledging it before delivery.
+	broker.SetHandlerByMap(map[string]sarama.MockResponse{
+		"MetadataRequest": sarama.NewMockMetadataResponse(t).
+			SetBroker(broker.Addr(), broker.BrokerID()).
+			SetLeader("existing", 0, broker.BrokerID()).
+			SetLeader("missing", 0, broker.BrokerID()),
+		"ProduceRequest": sarama.NewMockProduceResponse(t),
+	})
+	tx = buffer.BeginTransaction(2)
+	require.NoError(t, plugin.Write(tx.Batch))
+	tx.AcceptAll()
+	buffer.EndTransaction(tx)
+	require.Zero(t, buffer.Len())
+	require.Len(t, delivered, 3)
+	require.True(t, delivered[2].Delivered())
+}
+
+type mockProducer struct {
+	sent      []*sarama.ProducerMessage
+	sendError func([]*sarama.ProducerMessage) error
+	sarama.SyncProducer
+	sync.Mutex
+}
+
+func newMockProducer(_ []string, _ *sarama.Config) (sarama.SyncProducer, error) {
+	return &mockProducer{}, nil
+}
+
+func (p *mockProducer) SendMessage(msg *sarama.ProducerMessage) (partition int32, offset int64, err error) {
+	p.Lock()
+	defer p.Unlock()
+	p.sent = append(p.sent, msg)
+	return 0, 0, nil
+}
+
+func (p *mockProducer) SendMessages(msgs []*sarama.ProducerMessage) error {
+	p.Lock()
+	defer p.Unlock()
+	p.sent = append(p.sent, msgs...)
+	if p.sendError != nil {
+		return p.sendError(msgs)
+	}
+	return nil
+}
+
+func (*mockProducer) Close() error {
+	return nil
+}
+
+func TestWriteConfigurationErrorsWithBroker(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		values  []string
+		headers map[string]string
+		accept  []int
+		reject  []int
+	}{
+		{
+			name:    "oversized message in mixed batch",
+			version: "0.11.0.0",
+			values:  []string{strings.Repeat("x", 1024), "small", "later"},
+			accept:  []int{1},
+			reject:  []int{0},
+		},
+		{
+			name:    "oversized messages fill batch",
+			version: "0.11.0.0",
+			values:  []string{strings.Repeat("x", 1024), strings.Repeat("y", 1024), "later"},
+			reject:  []int{0, 1},
+		},
+		{
+			name:    "headers unsupported by broker version",
+			version: "0.10.2.0",
+			values:  []string{"first", "second"},
+			headers: map[string]string{"name": "{{ .Name }}"},
+			reject:  []int{0, 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serializer := &influx.Serializer{}
+			require.NoError(t, serializer.Init())
+			plugin := &Kafka{
+				WriteConfig: kafka.WriteConfig{
+					Config:          kafka.Config{Version: tt.version},
+					MaxMessageBytes: 256,
+					RequiredAcks:    1,
+				},
+				Topic:        "existing",
+				Headers:      tt.headers,
+				Log:          testutil.Logger{},
+				producerFunc: sarama.NewSyncProducer,
+				serializer:   serializer,
+			}
+			// Configure Sarama's global logger before the broker starts goroutines.
+			require.NoError(t, plugin.Init())
+			broker := sarama.NewMockBroker(t, 0)
+			defer broker.Close()
+			broker.SetHandlerByMap(map[string]sarama.MockResponse{
+				"MetadataRequest": sarama.NewMockMetadataResponse(t).
+					SetBroker(broker.Addr(), broker.BrokerID()).
+					SetLeader("existing", 0, broker.BrokerID()),
+				"ProduceRequest": sarama.NewMockProduceResponse(t),
+			})
+			plugin.Brokers = []string{broker.Addr()}
+			plugin.saramaConfig.ApiVersionsRequest = false
+			plugin.saramaConfig.Metadata.Retry.Max = 0
+			plugin.saramaConfig.Net.DialTimeout = 2 * time.Second
+			plugin.saramaConfig.Net.ReadTimeout = 2 * time.Second
+			plugin.saramaConfig.Net.WriteTimeout = 2 * time.Second
+			require.NoError(t, plugin.Connect())
+			defer func() { require.NoError(t, plugin.Close()) }()
+
+			buffer, err := models.NewBuffer("kafka", t.Name(), "", 10, "memory", "", false)
 			require.NoError(t, err)
+			defer func() { require.NoError(t, buffer.Close()) }()
+			delivered := make(map[int]bool)
+			for i, value := range tt.values {
+				m, _ := metric.WithTracking(
+					metric.New("cpu", nil, map[string]any{"value": value}, time.Unix(1, 0)),
+					func(info telegraf.DeliveryInfo) { delivered[i] = info.Delivered() },
+				)
+				require.Zero(t, buffer.Add(m))
+			}
 
-			producer := &MockProducer{}
-			tt.plugin.producer = producer
+			// Use Sarama's real client-side validation, not injected broker errors.
+			tx := buffer.BeginTransaction(2)
+			var partial *internal.PartialWriteError
+			require.ErrorAs(t, plugin.Write(tx.Batch), &partial)
+			require.Equal(t, tt.accept, partial.MetricsAccept)
+			require.Equal(t, tt.reject, partial.MetricsReject)
+			require.Len(t, partial.MetricsRejectErrors, len(tt.reject))
+			for _, err := range partial.MetricsRejectErrors {
+				var configErr sarama.ConfigurationError
+				require.ErrorAs(t, err, &configErr)
+			}
+			tx.Accept, tx.Reject = partial.MetricsAccept, partial.MetricsReject
+			buffer.EndTransaction(tx)
+			require.Len(t, delivered, 2)
+			for _, i := range tt.reject {
+				require.False(t, delivered[i])
+			}
+			for _, i := range tt.accept {
+				require.True(t, delivered[i])
+			}
 
-			err = tt.plugin.Write(tt.input)
-			require.NoError(t, err)
-
-			require.Equal(t, tt.topic, producer.sent[0].Topic)
-
-			encoded, err := producer.sent[0].Value.Encode()
-			require.NoError(t, err)
-			require.Equal(t, tt.value, string(encoded))
+			// Even a full batch of permanent failures must let later metrics drain.
+			if len(tt.values) > 2 {
+				require.Equal(t, 1, buffer.Len())
+				tx = buffer.BeginTransaction(2)
+				require.NoError(t, plugin.Write(tx.Batch))
+				tx.AcceptAll()
+				buffer.EndTransaction(tx)
+				require.Len(t, delivered, 3)
+				require.True(t, delivered[2])
+			}
+			require.Zero(t, buffer.Len())
 		})
 	}
 }

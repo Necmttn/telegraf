@@ -19,17 +19,17 @@ func collectSecrets(ctx context.Context, acc telegraf.Accumulator, ki *Kubernete
 		return
 	}
 	for _, i := range list.Items {
-		ki.gatherCertificates(i, acc)
+		gatherCertificates(i, acc)
 	}
 }
 
-func getFields(cert *x509.Certificate, now time.Time) map[string]interface{} {
+func getFields(cert *x509.Certificate, now time.Time) map[string]any {
 	age := int(now.Sub(cert.NotBefore).Seconds())
 	expiry := int(cert.NotAfter.Sub(now).Seconds())
 	startdate := cert.NotBefore.Unix()
 	enddate := cert.NotAfter.Unix()
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"age":       age,
 		"expiry":    expiry,
 		"startdate": startdate,
@@ -59,7 +59,7 @@ func getTags(cert *x509.Certificate) map[string]string {
 	return tags
 }
 
-func (ki *KubernetesInventory) gatherCertificates(r corev1.Secret, acc telegraf.Accumulator) {
+func gatherCertificates(r corev1.Secret, acc telegraf.Accumulator) {
 	now := time.Now()
 
 	for resourceName, val := range r.Data {

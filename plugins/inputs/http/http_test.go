@@ -18,8 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/influxdata/telegraf"
-	httpconfig "github.com/influxdata/telegraf/plugins/common/http"
-	"github.com/influxdata/telegraf/plugins/common/oauth"
+	"github.com/influxdata/telegraf/config"
+	"github.com/influxdata/telegraf/metric"
 	httpplugin "github.com/influxdata/telegraf/plugins/inputs/http"
 	"github.com/influxdata/telegraf/plugins/parsers/csv"
 	"github.com/influxdata/telegraf/plugins/parsers/influx"
@@ -31,7 +31,11 @@ import (
 func TestHTTPWithJSONFormat(t *testing.T) {
 	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
-			_, _ = w.Write([]byte(simpleJSON))
+			if _, err := w.Write([]byte(simpleJSON)); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -58,10 +62,10 @@ func TestHTTPWithJSONFormat(t *testing.T) {
 	require.Len(t, acc.Metrics, 1)
 
 	// basic check to see if we got the right field, value and tag
-	var metric = acc.Metrics[0]
-	require.Equal(t, metric.Measurement, metricName)
+	var m = acc.Metrics[0]
+	require.Equal(t, m.Measurement, metricName)
 	require.Len(t, acc.Metrics[0].Fields, 1)
-	require.Equal(t, 1.2, acc.Metrics[0].Fields["a"])
+	require.InDelta(t, 1.2, acc.Metrics[0].Fields["a"], testutil.DefaultDelta)
 	require.Equal(t, acc.Metrics[0].Tags["url"], address)
 }
 
@@ -71,7 +75,11 @@ func TestHTTPHeaders(t *testing.T) {
 	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
 			if r.Header.Get(header) == headerValue {
-				_, _ = w.Write([]byte(simpleJSON))
+				if _, err := w.Write([]byte(simpleJSON)); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			} else {
 				w.WriteHeader(http.StatusForbidden)
 			}
@@ -82,9 +90,10 @@ func TestHTTPHeaders(t *testing.T) {
 	defer fakeServer.Close()
 
 	address := fakeServer.URL + "/endpoint"
+	headerSecret := config.NewSecret([]byte(headerValue))
 	plugin := &httpplugin.HTTP{
 		URLs:    []string{address},
-		Headers: map[string]string{header: headerValue},
+		Headers: map[string]*config.Secret{header: &headerSecret},
 		Log:     testutil.Logger{},
 	}
 
@@ -103,7 +112,11 @@ func TestHTTPContentLengthHeader(t *testing.T) {
 	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
 			if r.Header.Get("Content-Length") != "" {
-				_, _ = w.Write([]byte(simpleJSON))
+				if _, err := w.Write([]byte(simpleJSON)); err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					t.Error(err)
+					return
+				}
 			} else {
 				w.WriteHeader(http.StatusForbidden)
 			}
@@ -116,7 +129,7 @@ func TestHTTPContentLengthHeader(t *testing.T) {
 	address := fakeServer.URL + "/endpoint"
 	plugin := &httpplugin.HTTP{
 		URLs:    []string{address},
-		Headers: map[string]string{},
+		Headers: map[string]*config.Secret{},
 		Body:    "{}",
 		Log:     testutil.Logger{},
 	}
@@ -133,7 +146,7 @@ func TestHTTPContentLengthHeader(t *testing.T) {
 }
 
 func TestInvalidStatusCode(t *testing.T) {
-	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer fakeServer.Close()
@@ -156,7 +169,7 @@ func TestInvalidStatusCode(t *testing.T) {
 }
 
 func TestSuccessStatusCodes(t *testing.T) {
-	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer fakeServer.Close()
@@ -221,7 +234,7 @@ func TestBodyAndContentEncoding(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	defer ts.Close()
 
-	address := fmt.Sprintf("http://%s", ts.Listener.Addr().String())
+	address := "http://" + ts.Listener.Addr().String()
 
 	tests := []struct {
 		name             string
@@ -312,7 +325,7 @@ func TestBodyAndContentEncoding(t *testing.T) {
 	}
 }
 
-type TestHandlerFunc func(t *testing.T, w http.ResponseWriter, r *http.Request)
+type testHandlerFunc func(t *testing.T, w http.ResponseWriter, r *http.Request)
 
 func TestOAuthClientCredentialsGrant(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
@@ -320,14 +333,14 @@ func TestOAuthClientCredentialsGrant(t *testing.T) {
 
 	var token = "2YotnFZFEjr1zCsicMWpAA"
 
-	u, err := url.Parse(fmt.Sprintf("http://%s", ts.Listener.Addr().String()))
+	u, err := url.Parse("http://" + ts.Listener.Addr().String())
 	require.NoError(t, err)
 
 	tests := []struct {
 		name         string
 		plugin       *httpplugin.HTTP
-		tokenHandler TestHandlerFunc
-		handler      TestHandlerFunc
+		tokenHandler testHandlerFunc
+		handler      testHandlerFunc
 	}{
 		{
 			name: "no credentials",
@@ -343,18 +356,14 @@ func TestOAuthClientCredentialsGrant(t *testing.T) {
 		{
 			name: "success",
 			plugin: &httpplugin.HTTP{
-				URLs: []string{u.String() + "/write"},
-				HTTPClientConfig: httpconfig.HTTPClientConfig{
-					OAuth2Config: oauth.OAuth2Config{
-						ClientID:     "howdy",
-						ClientSecret: "secret",
-						TokenURL:     u.String() + "/token",
-						Scopes:       []string{"urn:opc:idm:__myscopes__"},
-					},
-				},
-				Log: testutil.Logger{},
+				URLs:         []string{u.String() + "/write"},
+				ClientID:     "howdy",
+				ClientSecret: "secret",
+				TokenURL:     u.String() + "/token",
+				Scopes:       []string{"urn:opc:idm:__myscopes__"},
+				Log:          testutil.Logger{},
 			},
-			tokenHandler: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
+			tokenHandler: func(t *testing.T, w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				values := url.Values{}
 				values.Add("access_token", token)
@@ -403,7 +412,11 @@ func TestOAuthClientCredentialsGrant(t *testing.T) {
 func TestHTTPWithCSVFormat(t *testing.T) {
 	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/endpoint" {
-			_, _ = w.Write([]byte(simpleCSVWithHeader))
+			if _, err := w.Write([]byte(simpleCSVWithHeader)); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -428,12 +441,12 @@ func TestHTTPWithCSVFormat(t *testing.T) {
 	})
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric("metricName",
+		metric.New("metricName",
 			map[string]string{
 				"url": address,
 				"c":   "ok",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"a": 1.2,
 				"b": 3.1415,
 			},
@@ -460,12 +473,19 @@ func TestConnectionOverUnixSocket(t *testing.T) {
 	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/data" {
 			w.Header().Set("Content-Type", "text/csv")
-			_, _ = w.Write([]byte(simpleCSVWithHeader))
+			if _, err := w.Write([]byte(simpleCSVWithHeader)); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				t.Error(err)
+				return
+			}
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 
+	// The Maximum length of the socket path is 104/108 characters, path created with t.TempDir() is too long for some cases
+	// (it combines test name with subtest name and some random numbers in the path). Therefore, in this case, it is safer to stick with `os.MkdirTemp()`.
+	//nolint:usetesting // Ignore "os.TempDir() could be replaced by t.TempDir() in TestConnectionOverUnixSocket" finding.
 	unixListenAddr := filepath.Join(os.TempDir(), fmt.Sprintf("httptestserver.%d.sock", rand.Intn(1_000_000)))
 	t.Cleanup(func() { os.Remove(unixListenAddr) })
 
@@ -499,12 +519,12 @@ func TestConnectionOverUnixSocket(t *testing.T) {
 	})
 
 	expected := []telegraf.Metric{
-		testutil.MustMetric("metricName",
+		metric.New("metricName",
 			map[string]string{
 				"url": address,
 				"c":   "ok",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"a": 1.2,
 				"b": 3.1415,
 			},

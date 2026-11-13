@@ -1,8 +1,9 @@
 package cloud_pubsub
 
 import (
-	"cloud.google.com/go/pubsub"
 	"context"
+
+	"cloud.google.com/go/pubsub/v2"
 )
 
 type (
@@ -19,7 +20,7 @@ type (
 	}
 
 	topicWrapper struct {
-		topic *pubsub.Topic
+		topic *pubsub.Publisher
 	}
 )
 
